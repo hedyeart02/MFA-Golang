@@ -1,0 +1,11 @@
+{
+  "ProviderName": "Microsoft Entra ID",
+  "DetectedProvider": "entra",
+  "DetectionConfidence": "HIGH",
+  "EntityID": "https://sts.windows.net/dummy-tenant-id/",
+  "ActiveSSOEndpoint": {
+    "Binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect",
+    "Location": "https://login.microsoftonline.com/dummy-tenant-id/saml2",
+    "Response": ""
+  }
+}

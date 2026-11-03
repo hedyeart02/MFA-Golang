@@ -1,0 +1,5 @@
+{
+  "ID": "entra",
+  "Name": "Microsoft Entra ID",
+  "Description": "Adapter for Microsoft Azure AD / Entra ID"
+}

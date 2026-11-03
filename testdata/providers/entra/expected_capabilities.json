@@ -1,0 +1,7 @@
+{
+  "SupportsArtifact": false,
+  "SupportsLogout": true,
+  "RequiresSignedAuthn": false,
+  "RequiresSignedLogout": false,
+  "SupportedNameIDFormat": []
+}

@@ -1,0 +1,45 @@
+server:
+  port: 8080
+  read_timeout: 15s
+  write_timeout: 15s
+
+tls:
+  enabled: false
+  cert_file: ""
+  key_file: ""
+
+saml:
+  entity_id: "urn:samlguard:idp"
+  issuer: "samlguard"
+  sso_url: "http://localhost:8080/saml/sso"
+
+database:
+  driver: "sqlite"
+  connection_string: "file:data/samlguard.db?cache=shared&mode=rwc"
+
+jwt:
+  secret: "change-me-in-production"
+  expiration: 24h
+
+mfa:
+  default_provider: "totp"
+  timeout: 5m
+
+audit:
+  enabled: true
+  async: true
+
+logging:
+  level: "info"
+  format: "json"
+
+metrics:
+  enabled: true
+  path: "/metrics"
+
+plugins:
+  directory: "./plugins"
+
+security:
+  cors_allowed_origins: ["*"]
+  rate_limit: 100

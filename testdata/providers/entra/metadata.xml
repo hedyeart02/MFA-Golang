@@ -1,0 +1,14 @@
+<EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata" entityID="https://sts.windows.net/dummy-tenant-id/">
+  <IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+    <KeyDescriptor use="signing">
+      <KeyInfo xmlns="http://www.w3.org/2000/09/xmldsig#">
+        <X509Data>
+          <X509Certificate>MIIDXDCCAkSgAwIBAgIRAIpW32w8iqAmcNEa8CSRPjgwDQYJKoZIhvcNAQELBQAwPTELMAkGA1UEBhMCVVMxEjAQBgNVBAoTCVNBTUxHdWFyZDEaMBgGA1UEAxMRU0FNTEd1YXJkIFNpZ25pbmcwHhcNMjYwNzEyMDk0ODMxWhcNMjcwNzEyMDk0ODMxWjA9MQswCQYDVQQGEwJVUzESMBAGA1UEChMJU0FNTEd1YXJkMRowGAYDVQQDExFTQU1MR3VhcmQgU2lnbmluZzCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBANeKdrNvXAFcP+x3ium+CXBDkz5jGAXvAXaIVLFulUtYCh50uieJRRhTt/ugtb1WP3JKW5hX2r8yQAPkijop3z0RxVL+QTenTZ0EadUlculfBhtkGWnObGOdX7B6O9XWu82BYlrxXVhMXwS2/cHtrRcjGDbkWcZ63vQ7W2yZ4VtYe3IsLaKByMjYVw89wRWZTTaUFAJhJjpxqV8XmyeC1NJg7xTeBcQoWu+9VmT/AjVjPnHNafxEHaN9YSCZrFuyp4dVG4Ukay9tKbT49mSoHbefBKAB/BJNTbCgr+Pn9L/d8XvVEoWp+6VJ579iLh1lWEF02sfFlkC3m24C0Gijg1ECAwEAAaNXMFUwDgYDVR0PAQH/BAQDAgWgMBMGA1UdJQQMMAoGCCsGAQUFBwMBMAwGA1UdEwEB/wQCMAAwIAYDVR0RBBkwF4IVc2FtbGd1YXJkLmV4YW1wbGUuY29tMA0GCSqGSIb3DQEBCwUAA4IBAQBnoqlsQhCt6mVrzgTBfWzCGsOjy/cfJnhhiBeusFoSlRWhIoytGW/F8lDQxvi0U96hFAh6+iTkRZnFSE/tBtkPBg4Ad2AvIwSx8VtnSr0BFDzB9y71pm/REGcmztzuiywgk+UjCqYew3YgqNLXgwrNnyAjSDKi7a2V6YqccGyq0ErFawBGCnHS/24NlD1DuEooJJXtptbf3aSnL67nKDB3fsavz6CSWdZ76G3Yyu0HJUOSHGoiI69reDWjSzcWz8ARNydu6DLJrc2t1FgMUG+Tos/iDW63recRC/XSOr+blAFB2mX1grtuBUDpVcsL7u027lnC5Ob+ajcJQv4i1eqv</X509Certificate>
+        </X509Data>
+      </KeyInfo>
+    </KeyDescriptor>
+    <SingleLogoutService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://login.microsoftonline.com/dummy-tenant-id/saml2" />
+    <SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://login.microsoftonline.com/dummy-tenant-id/saml2" />
+    <SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="https://login.microsoftonline.com/dummy-tenant-id/saml2" />
+  </IDPSSODescriptor>
+</EntityDescriptor>

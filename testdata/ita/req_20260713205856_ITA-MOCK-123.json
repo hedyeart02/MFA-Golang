@@ -1,0 +1,13 @@
+{
+  "binding": "",
+  "original_ip": "",
+  "raw_xml": "\u003csamlp:AuthnRequest/\u003e",
+  "received_at": "0001-01-01T00:00:00Z",
+  "relay_state": "",
+  "request_id": "ITA-MOCK-123",
+  "validation_state": {
+    "IsValid": false,
+    "ErrorMessage": "",
+    "FailedPolicy": ""
+  }
+}

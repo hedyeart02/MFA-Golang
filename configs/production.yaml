@@ -1,0 +1,10 @@
+server:
+  port: 443
+
+database:
+  driver: postgres
+  connection_string: "host=db port=5432 user=samlguard dbname=samlguard sslmode=require"
+
+logging:
+  level: warn
+  format: json

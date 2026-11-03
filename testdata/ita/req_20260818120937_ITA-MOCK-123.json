@@ -1,0 +1,23 @@
+{
+  "binding": "",
+  "original_ip": "",
+  "pipeline_metrics": {
+    "DecodeDuration": 0,
+    "InflateDuration": 0,
+    "ParseDuration": 0,
+    "NormalizeDuration": 0,
+    "ValidateDuration": 0,
+    "PeakMemoryBytes": 0,
+    "MaxInflateRatio": 0,
+    "MaxXMLSize": 0
+  },
+  "raw_xml": "\u003csamlp:AuthnRequest/\u003e",
+  "received_at": "0001-01-01T00:00:00Z",
+  "relay_state": "",
+  "request_id": "ITA-MOCK-123",
+  "validation_state": {
+    "IsValid": false,
+    "ErrorMessage": "",
+    "FailedPolicy": ""
+  }
+}
