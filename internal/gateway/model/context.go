@@ -72,6 +72,24 @@ type AuthenticationContext struct {
 	// Resolution
 	ProviderType string
 	Metadata     interface{}
+
+	// Upstream Validated SAML Assertion Identity
+	UpstreamEntityID    string
+	SubjectNameID       string
+	SubjectNameIDFormat string
+	ImmutableUserID     string
+	UserIdentityKey     string
+	UserEmail           string
+	UserDisplayName     string
+	UserGroups          []string
+	MappedGroups        []string
+	UserAttributes      map[string][]string
+
+	// SAML Correlation State
+	ITAAuthnRequestID string
+	ITARelayState     string
+	OutboundRequestID string
+	ITAACSURL         string
 }
 
 // PipelineMetrics tracks the precise duration of each architectural layer execution

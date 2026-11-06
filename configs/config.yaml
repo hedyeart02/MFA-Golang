@@ -32,6 +32,13 @@ saml:
   allowed_audiences:
     - "https://localhost"
     - "https://192.168.0.178:18080"
+  # AuthnContextClassRef: leave empty for dynamic MFA selection (TimeSyncToken for TOTP, unspecified for Email OTP)
+  authn_context_class_ref: ""
+  group_mapping:
+    "ita-admins": "Admin"
+    "ita-operators": "Operator"
+    "ita-viewers": "Viewer"
+  default_groups: []
 
 jwt:
   private_key_file: "./cert/jwt-private.pem"
@@ -51,6 +58,18 @@ mfa:
   trust_device_days: 30
   encryption_key: "ce41c3c23d1488f29c088138dda3b52527aaf3a6ec1e9254d35f6f095889461d"
   totp_skew: 1
+  allow_dummy_otp: true
+  resend_cooldown: 60s
+  server_pepper: "samlguard-email-otp-pepper-secret-key-32b"
+
+smtp:
+  host: "localhost"
+  port: 1025
+  username: ""
+  password: ""
+  from: "no-reply@samlguard.local"
+  from_name: "SAMLGuard MFA"
+  encryption: "none"
 
 session:
   idle_timeout: 30m

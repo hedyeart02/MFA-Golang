@@ -34,6 +34,23 @@ func NewRegistry(adapters ...ProviderAdapter) *Registry {
 	}
 }
 
+// GetAdapter looks up a registered adapter by its ID (case-insensitive)
+func (r *Registry) GetAdapter(id string) (ProviderAdapter, bool) {
+	for _, a := range r.adapters {
+		if strings.EqualFold(a.Info().ID, id) {
+			return a, true
+		}
+	}
+	return nil, false
+}
+
+// Adapters returns a slice copy of all registered adapters
+func (r *Registry) Adapters() []ProviderAdapter {
+	result := make([]ProviderAdapter, len(r.adapters))
+	copy(result, r.adapters)
+	return result
+}
+
 // DetectProvider iterates through registered adapters calling Supports() to auto-detect the IDP.
 // It falls back to the "generic" adapter if none match.
 func (r *Registry) DetectProvider(md *model.MetadataDescriptor) (ProviderAdapter, string, error) {

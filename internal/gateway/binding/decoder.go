@@ -3,10 +3,14 @@ package binding
 import (
 	"bytes"
 	"compress/flate"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/hidayat-SE/samlguard/internal/gateway/model"
@@ -19,95 +23,149 @@ type DefaultRequestDecoder struct {
 	MaxCompressRatio float64
 }
 
+func (d *DefaultRequestDecoder) getMaxRequestSize() int {
+	if d.MaxRequestSize > 0 {
+		return d.MaxRequestSize
+	}
+	return 256 * 1024 // 256KB default
+}
+
+func (d *DefaultRequestDecoder) getMaxInflatedSize() int {
+	if d.MaxInflatedSize > 0 {
+		return d.MaxInflatedSize
+	}
+	return 2 * 1024 * 1024 // 2MB default
+}
+
+func (d *DefaultRequestDecoder) getMaxCompressRatio() float64 {
+	if d.MaxCompressRatio > 0 {
+		return d.MaxCompressRatio
+	}
+	return 20.0 // 20:1 default
+}
+
 // Decode extracts the SAMLRequest parameter, performs base64 decoding, inflation, and limits checks.
 func (d *DefaultRequestDecoder) Decode(r *http.Request, binding string) (*model.TransportResult, error) {
-	if binding != "HTTP-Redirect" && binding != "HTTP-POST" {
-		return nil, errors.New("unsupported binding type")
+	if r == nil {
+		return nil, errors.New("http request is nil")
 	}
 
-	res := &model.TransportResult{
-		BindingType: binding,
-		RelayState:  r.URL.Query().Get("RelayState"),
+	normBinding := binding
+	switch binding {
+	case BindingHTTPRedirect, SAMLBindingHTTPRedirect:
+		normBinding = BindingHTTPRedirect
+	case BindingHTTPPost, SAMLBindingHTTPPost:
+		normBinding = BindingHTTPPost
+	default:
+		return nil, fmt.Errorf("unsupported binding type: %q", binding)
 	}
+
+	maxReqSize := d.getMaxRequestSize()
+	maxInflatedSize := d.getMaxInflatedSize()
+	maxCompressRatio := d.getMaxCompressRatio()
 
 	var rawBase64 string
-	if binding == "HTTP-Redirect" {
+	var relayState string
+
+	if normBinding == BindingHTTPRedirect {
+		if r.URL == nil {
+			return nil, errors.New("request URL is nil")
+		}
 		rawBase64 = r.URL.Query().Get("SAMLRequest")
+		relayState = r.URL.Query().Get("RelayState")
 	} else {
+		_ = r.ParseForm()
 		rawBase64 = r.PostFormValue("SAMLRequest")
-		if res.RelayState == "" {
-			res.RelayState = r.PostFormValue("RelayState")
+		relayState = r.PostFormValue("RelayState")
+		if relayState == "" && r.URL != nil {
+			relayState = r.URL.Query().Get("RelayState")
 		}
 	}
 
-	if rawBase64 == "" {
+	cleanBase64 := strings.TrimSpace(rawBase64)
+	if cleanBase64 == "" {
 		return nil, errors.New("missing SAMLRequest parameter")
 	}
 
-	if len(rawBase64) > d.MaxRequestSize {
-		return nil, errors.New("SAMLRequest exceeds maximum allowed size")
+	if len(cleanBase64) > maxReqSize {
+		return nil, fmt.Errorf("SAMLRequest exceeds maximum allowed size (%d > %d bytes)", len(cleanBase64), maxReqSize)
 	}
-
-	res.RawBase64 = rawBase64
 
 	// Base64 Decode
-	compressedBytes, err := base64.StdEncoding.DecodeString(rawBase64)
+	compressedBytes, err := base64.StdEncoding.DecodeString(cleanBase64)
 	if err != nil {
-		return nil, errors.New("failed to decode base64 SAMLRequest")
+		return nil, fmt.Errorf("failed to decode base64 SAMLRequest: %w", err)
 	}
-	res.CompressedBytes = compressedBytes
+	if len(compressedBytes) == 0 {
+		return nil, errors.New("decoded SAMLRequest payload is empty")
+	}
 
-	if binding == "HTTP-Redirect" {
-		// Inflate (DEFLATE compression is used for HTTP-Redirect)
-		inflated, err := d.inflate(compressedBytes)
+	var inflatedBytes []byte
+
+	if normBinding == BindingHTTPRedirect {
+		// Inflate: RFC 1951 raw DEFLATE decompression
+		inflated, err := d.inflate(compressedBytes, maxInflatedSize)
 		if err != nil {
 			return nil, err
 		}
-		res.InflatedBytes = inflated
-		res.InflatedSize = len(inflated)
+		inflatedBytes = inflated
 	} else {
-		// HTTP-POST is typically not compressed, just base64 encoded
-		res.InflatedBytes = compressedBytes
-		res.InflatedSize = len(compressedBytes)
+		// HTTP-POST payload is uncompressed raw XML
+		if len(compressedBytes) > maxInflatedSize {
+			return nil, fmt.Errorf("payload exceeds maximum allowed size (%d > %d bytes)", len(compressedBytes), maxInflatedSize)
+		}
+		inflatedBytes = compressedBytes
+	}
+
+	if len(inflatedBytes) == 0 {
+		return nil, errors.New("payload is empty after decompression")
 	}
 
 	// Validate UTF-8
-	if !utf8.Valid(res.InflatedBytes) {
-		return nil, errors.New("inflated payload contains invalid UTF-8 characters")
+	if !utf8.Valid(inflatedBytes) {
+		return nil, errors.New("payload contains invalid UTF-8 characters")
 	}
 
-	// Compression Ratio Check
-	if binding == "HTTP-Redirect" && len(compressedBytes) > 0 {
-		res.CompressionRatio = float64(res.InflatedSize) / float64(len(compressedBytes))
-		if res.CompressionRatio > d.MaxCompressRatio {
-			return nil, errors.New("compression ratio exceeds maximum allowed limit (potential zip bomb)")
+	// Compression Ratio Check for HTTP-Redirect
+	var ratio float64
+	if normBinding == BindingHTTPRedirect && len(compressedBytes) > 0 {
+		ratio = float64(len(inflatedBytes)) / float64(len(compressedBytes))
+		if ratio > maxCompressRatio {
+			return nil, fmt.Errorf("compression ratio %.2f exceeds maximum allowed limit %.2f (potential zip bomb)", ratio, maxCompressRatio)
 		}
 	}
 
-	// Compute SHA256 (stub for now, just placeholder so it compiles)
-	res.SHA256 = "TODO_SHA256"
+	// Compute SHA256 of the processed XML payload
+	sha256Sum := sha256.Sum256(inflatedBytes)
+	sha256Hex := hex.EncodeToString(sha256Sum[:])
+
+	res := &model.TransportResult{
+		RawBase64:        cleanBase64,
+		CompressedBytes:  compressedBytes,
+		InflatedBytes:    inflatedBytes,
+		SHA256:           sha256Hex,
+		CompressionRatio: ratio,
+		InflatedSize:     len(inflatedBytes),
+		RelayState:       relayState,
+		BindingType:      normBinding,
+	}
 
 	return res, nil
 }
 
-// inflate performs DEFLATE decompression using an io.LimitReader to prevent zip bombs
-func (d *DefaultRequestDecoder) inflate(compressed []byte) ([]byte, error) {
+// inflate performs RFC 1951 raw DEFLATE decompression with an io.LimitReader to protect against zip bombs
+func (d *DefaultRequestDecoder) inflate(compressed []byte, maxSize int) ([]byte, error) {
 	reader := flate.NewReader(bytes.NewReader(compressed))
 	defer reader.Close()
 
-	// Use LimitReader to enforce maximum inflated size
-	limitReader := io.LimitReader(reader, int64(d.MaxInflatedSize))
+	limitReader := io.LimitReader(reader, int64(maxSize+1))
 	inflated, err := io.ReadAll(limitReader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decompress raw DEFLATE payload: %w", err)
+	}
 
-	// If we read exactly MaxInflatedSize and haven't hit EOF on the underlying reader, it's too big
-	if err == nil && len(inflated) == d.MaxInflatedSize {
-		// Check if there is more data left
-		b := make([]byte, 1)
-		if n, _ := reader.Read(b); n > 0 {
-			return nil, errors.New("inflated payload exceeds maximum allowed size")
-		}
-	} else if err != nil && err != io.EOF {
-		return nil, err
+	if len(inflated) > maxSize {
+		return nil, fmt.Errorf("inflated payload exceeds maximum allowed size (%d bytes)", maxSize)
 	}
 
 	return inflated, nil

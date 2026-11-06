@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SAMLGuard - MFA Verification</title>
+    <title>SAMLGuard - Multi-Factor Verification</title>
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -21,25 +21,54 @@
             background: #1e293b;
             border-radius: 16px;
             padding: 2.5rem;
-            max-width: 420px;
+            max-width: 440px;
             width: 90%;
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
             border: 1px solid #334155;
         }
 
-        .logo { font-size: 2rem; margin-bottom: 0.5rem; }
+        .logo { font-size: 2rem; text-align: center; margin-bottom: 0.5rem; }
 
         h1 {
-            font-size: 1.5rem;
+            font-size: 1.4rem;
             font-weight: 700;
             margin-bottom: 0.5rem;
             color: #38bdf8;
+            text-align: center;
         }
 
         .subtitle {
             color: #94a3b8;
-            font-size: 0.9rem;
-            margin-bottom: 1.5rem;
+            font-size: 0.85rem;
+            text-align: center;
+            margin-bottom: 1.25rem;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1.25rem;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 0.6rem;
+            text-align: center;
+            font-size: 0.85rem;
+            font-weight: 600;
+            border-radius: 8px;
+            border: 1px solid #334155;
+            cursor: pointer;
+            text-decoration: none;
+            color: #94a3b8;
+            background: #0f172a;
+            transition: all 0.2s;
+        }
+
+        .tab.active {
+            background: #2563eb;
+            color: white;
+            border-color: #2563eb;
         }
 
         .message {
@@ -56,6 +85,40 @@
             background: #3b1c26;
             border-color: #dc2626;
             color: #fca5a5;
+        }
+
+        .qr-section {
+            text-align: center;
+            background: #0f172a;
+            padding: 1rem;
+            border-radius: 10px;
+            border: 1px solid #334155;
+            margin-bottom: 1.25rem;
+        }
+
+        .qr-section p {
+            font-size: 0.8rem;
+            color: #94a3b8;
+            margin-bottom: 0.75rem;
+        }
+
+        .qr-image {
+            display: block;
+            margin: 0 auto;
+            border-radius: 8px;
+            width: 170px;
+            height: 170px;
+            background: #ffffff;
+            padding: 5px;
+        }
+
+        .secret-key {
+            margin-top: 0.6rem;
+            font-family: monospace;
+            font-size: 0.85rem;
+            letter-spacing: 0.1em;
+            color: #38bdf8;
+            word-break: break-all;
         }
 
         label {
@@ -106,38 +169,27 @@
 
         .submit-btn:active { transform: translateY(0); }
 
-        .trust-device {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            margin-bottom: 1.25rem;
-            font-size: 0.875rem;
-            color: #94a3b8;
-        }
-
-        .trust-device input[type="checkbox"] {
-            width: 1rem;
-            height: 1rem;
-            accent-color: #2563eb;
-        }
-
-        .divider {
-            border: none;
-            border-top: 1px solid #334155;
-            margin: 1.25rem 0;
-        }
-
-        .backup-link {
+        .resend-section {
             text-align: center;
-            font-size: 0.8rem;
+            margin-top: 1rem;
+            font-size: 0.85rem;
         }
 
-        .backup-link a {
-            color: #60a5fa;
+        .resend-btn {
+            background: none;
+            border: none;
+            color: #38bdf8;
+            cursor: pointer;
+            font-size: 0.85rem;
+            text-decoration: underline;
+            padding: 0;
+        }
+
+        .resend-btn:disabled {
+            color: #64748b;
+            cursor: not-allowed;
             text-decoration: none;
         }
-
-        .backup-link a:hover { text-decoration: underline; }
 
         .footer {
             text-align: center;
@@ -150,19 +202,35 @@
 <body>
     <div class="card">
         <div class="logo">🔐</div>
-        <h1>MFA Verification</h1>
-        <p class="subtitle">{{.Email}}</p>
+        <h1>Multi-Factor Verification</h1>
+        <p class="subtitle">{{.MaskedEmail}}</p>
 
-        {{if .Message}}
-        <div class="message">{{.Message}}</div>
+        <div class="tabs">
+            <a class="tab {{if eq .Method "totp"}}active{{end}}" href="?method=totp">Authenticator App</a>
+            <a class="tab {{if eq .Method "email"}}active{{end}}" href="?method=email">Email OTP</a>
+        </div>
+
+        {{if .ErrorMessage}}
+        <div class="message error">{{.ErrorMessage}}</div>
+        {{end}}
+
+        {{if and .EnrollmentRequired (eq .Method "totp")}}
+        <div class="qr-section">
+            <p>Scan with Microsoft Authenticator, Google Authenticator or standard TOTP app:</p>
+            {{if .QRCodeDataURI}}
+            <img class="qr-image" src="{{.QRCodeDataURI}}" alt="TOTP QR Code"/>
+            {{end}}
+            {{if .SecretKey}}
+            <div class="secret-key">Key: {{.SecretKey}}</div>
+            {{end}}
+        </div>
         {{end}}
 
         <form method="POST" action="/mfa/verify" id="mfa-form">
-            <input type="hidden" name="user_id" value="{{.UserID}}"/>
-            <input type="hidden" name="method" value="{{.Method}}"/>
-            <input type="hidden" name="relay_state" value="{{.RelayState}}"/>
+            <input type="hidden" name="session_id" value="{{.SessionID}}"/>
             <input type="hidden" name="csrf_token" value="{{.CSRFToken}}"/>
-            <input type="hidden" name="device_fingerprint" id="device_fp" value=""/>
+            <input type="hidden" name="method" value="{{.Method}}"/>
+            <input type="hidden" name="is_pending" value="{{if .EnrollmentRequired}}true{{else}}false{{end}}"/>
 
             <label for="code">Verification Code</label>
             <input type="text"
@@ -170,43 +238,38 @@
                    name="code"
                    class="code-input"
                    placeholder="000000"
-                   maxlength="10"
+                   maxlength="8"
                    autocomplete="one-time-code"
                    inputmode="numeric"
                    pattern="[0-9]*"
                    autofocus
                    required/>
 
-            <div class="trust-device">
-                <input type="checkbox" id="trust_device" name="trust_device" value="true"/>
-                <label for="trust_device" style="margin-bottom: 0">Trust this device for 30 days</label>
-            </div>
-
-            <button type="submit" class="submit-btn">Verify</button>
+            <button type="submit" class="submit-btn">Verify Code</button>
         </form>
 
-        <hr class="divider"/>
-
-        <div class="backup-link">
-            <a href="#" onclick="document.querySelector('[name=method]').value='backup';return false;">
-                Use a backup code instead
-            </a>
+        {{if and (not .EnrollmentRequired) (eq .Method "totp")}}
+        <div class="resend-section">
+            <form method="POST" action="/mfa/re-enroll" style="display: inline;">
+                <input type="hidden" name="session_id" value="{{.SessionID}}"/>
+                <input type="hidden" name="csrf_token" value="{{.CSRFToken}}"/>
+                <button type="submit" class="resend-btn">Re-enroll Authenticator App</button>
+            </form>
         </div>
+        {{end}}
+
+        {{if eq .Method "email"}}
+        <div class="resend-section">
+            <form method="POST" action="/mfa/resend" style="display: inline;">
+                <input type="hidden" name="session_id" value="{{.SessionID}}"/>
+                <input type="hidden" name="csrf_token" value="{{.CSRFToken}}"/>
+                <input type="hidden" name="method" value="email"/>
+                <button type="submit" id="resend-btn" class="resend-btn">Resend OTP Code</button>
+            </form>
+        </div>
+        {{end}}
 
         <div class="footer">SAMLGuard Enterprise MFA Gateway</div>
     </div>
-
-    <script>
-        // Generate a simple device fingerprint
-        (function() {
-            var fp = [
-                navigator.userAgent,
-                navigator.language,
-                screen.width + 'x' + screen.height,
-                new Date().getTimezoneOffset()
-            ].join('|');
-            document.getElementById('device_fp').value = fp;
-        })();
-    </script>
 </body>
 </html>
