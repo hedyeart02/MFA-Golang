@@ -187,6 +187,7 @@ func validProdConfig() *Config {
 			IdPEntityID: "https://login.microsoftonline.com/tenant-123/v2.0",
 			IdPSSOURL:   "https://login.microsoftonline.com/tenant-123/saml2",
 			ACSURL:      "https://samlguard.prod.example/saml/acs",
+			SSOURL:      "https://samlguard.prod.example/saml/sso",
 		},
 		Database: DatabaseConfig{
 			Driver: "sqlite",
@@ -208,6 +209,17 @@ func TestConfig_Production_ValidSAMLSettingsPass(t *testing.T) {
 	cfg := validProdConfig()
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("expected valid production config to pass validation, got: %v", err)
+	}
+}
+
+func TestConfig_Development_AllowsHTTPLocalhost(t *testing.T) {
+	cfg := validProdConfig()
+	cfg.Env = "development"
+	cfg.SAML.ACSURL = "http://localhost:8080/saml/acs"
+	cfg.SAML.SSOURL = "http://localhost:8080/saml/sso"
+	cfg.SAML.IdPSSOURL = "http://localhost:8080/mock-idp"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected HTTP localhost URLs to be allowed in development mode, got: %v", err)
 	}
 }
 
@@ -247,12 +259,150 @@ func TestConfig_Production_MandatoryACSURL(t *testing.T) {
 	}
 }
 
-func TestConfig_Production_ProhibitRelativeACSURL(t *testing.T) {
+func TestConfig_Production_ACSURL_RejectsHTTP(t *testing.T) {
+	cfg := validProdConfig()
+	cfg.SAML.ACSURL = "http://samlguard.prod.example/saml/acs"
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "saml.acs_url must use HTTPS in production mode") {
+		t.Fatalf("expected error for HTTP saml.acs_url in production, got: %v", err)
+	}
+}
+
+func TestConfig_Production_ACSURL_RejectsRelative(t *testing.T) {
 	cfg := validProdConfig()
 	cfg.SAML.ACSURL = "/saml/acs"
 	err := cfg.Validate()
-	if err == nil || !strings.Contains(err.Error(), "must be an absolute URL in production mode") {
+	if err == nil || !strings.Contains(err.Error(), "must be an absolute HTTPS URL in production mode") {
 		t.Fatalf("expected error for relative /saml/acs in production, got: %v", err)
+	}
+}
+
+func TestConfig_Production_IdPSSOURL_RejectsHTTP(t *testing.T) {
+	cfg := validProdConfig()
+	cfg.SAML.IdPSSOURL = "http://login.microsoftonline.com/tenant-123/saml2"
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "saml.idp_sso_url must use HTTPS in production mode") {
+		t.Fatalf("expected error for HTTP saml.idp_sso_url in production, got: %v", err)
+	}
+}
+
+func TestConfig_Production_IdPSSOURL_RejectsRelative(t *testing.T) {
+	cfg := validProdConfig()
+	cfg.SAML.IdPSSOURL = "/idp/sso"
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "must be an absolute HTTPS URL in production mode") {
+		t.Fatalf("expected error for relative saml.idp_sso_url in production, got: %v", err)
+	}
+}
+
+func TestConfig_Production_SSOURL_RejectsHTTP(t *testing.T) {
+	cfg := validProdConfig()
+	cfg.SAML.SSOURL = "http://samlguard.prod.example/saml/sso"
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "saml.sso_url must use HTTPS in production mode") {
+		t.Fatalf("expected error for HTTP saml.sso_url in production, got: %v", err)
+	}
+}
+
+func TestConfig_Production_SSOURL_RejectsRelative(t *testing.T) {
+	cfg := validProdConfig()
+	cfg.SAML.SSOURL = "/saml/sso"
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "must be an absolute HTTPS URL in production mode") {
+		t.Fatalf("expected error for relative saml.sso_url in production, got: %v", err)
+	}
+}
+
+func TestConfig_Production_SSOURL_Mandatory(t *testing.T) {
+	cfg := validProdConfig()
+	cfg.SAML.SSOURL = ""
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "saml.sso_url is mandatory in production") {
+		t.Fatalf("expected error for empty saml.sso_url in production, got: %v", err)
+	}
+}
+
+func TestConfig_ExplicitCLIPath(t *testing.T) {
+	dir := t.TempDir()
+	customPath := filepath.Join(dir, "custom_cli.yaml")
+	yamlData := []byte(`
+server:
+  port: 8999
+saml:
+  entity_id: "urn:test:cli"
+`)
+	if err := os.WriteFile(customPath, yamlData, 0644); err != nil {
+		t.Fatalf("failed to write custom config: %v", err)
+	}
+
+	cfg, err := Load(customPath)
+	if err != nil {
+		t.Fatalf("expected Load to succeed with explicit CLI path, got error: %v", err)
+	}
+	if cfg.Server.Port != 8999 {
+		t.Errorf("expected port 8999 from CLI path, got %d", cfg.Server.Port)
+	}
+	if cfg.SAML.EntityID != "urn:test:cli" {
+		t.Errorf("expected entity ID urn:test:cli, got %s", cfg.SAML.EntityID)
+	}
+}
+
+func TestConfig_EnvironmentVariablePath(t *testing.T) {
+	dir := t.TempDir()
+	customPath := filepath.Join(dir, "custom_env.yaml")
+	yamlData := []byte(`
+server:
+  port: 8877
+saml:
+  entity_id: "urn:test:env_path"
+`)
+	if err := os.WriteFile(customPath, yamlData, 0644); err != nil {
+		t.Fatalf("failed to write custom config: %v", err)
+	}
+
+	t.Setenv("SAMLGUARD_CONFIG_PATH", customPath)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("expected Load to succeed with SAMLGUARD_CONFIG_PATH, got error: %v", err)
+	}
+	if cfg.Server.Port != 8877 {
+		t.Errorf("expected port 8877 from env path, got %d", cfg.Server.Port)
+	}
+	if cfg.SAML.EntityID != "urn:test:env_path" {
+		t.Errorf("expected entity ID urn:test:env_path, got %s", cfg.SAML.EntityID)
+	}
+}
+
+func TestConfig_ProgramDataLookup(t *testing.T) {
+	fakeProgramData := t.TempDir()
+	samlguardDir := filepath.Join(fakeProgramData, "SAMLGuard")
+	if err := os.MkdirAll(samlguardDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	configPath := filepath.Join(samlguardDir, "config.yaml")
+	yamlData := []byte(`
+server:
+  port: 8765
+saml:
+  entity_id: "urn:test:programdata"
+`)
+	if err := os.WriteFile(configPath, yamlData, 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	t.Setenv("ProgramData", fakeProgramData)
+	// Temporarily switch working dir to an empty temp dir so local configs aren't found
+	origDir, _ := os.Getwd()
+	emptyDir := t.TempDir()
+	_ = os.Chdir(emptyDir)
+	defer os.Chdir(origDir)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("expected Load to discover config in ProgramData, got error: %v", err)
+	}
+	if cfg.Server.Port != 8765 {
+		t.Errorf("expected port 8765 from ProgramData, got %d", cfg.Server.Port)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -290,5 +291,53 @@ func TestValidateUpstreamSAMLResponse_DevMode_AllowsMockFallback(t *testing.T) {
 	}
 	if claims.SubjectNameID != "test-user" {
 		t.Errorf("expected subject test-user, got %s", claims.SubjectNameID)
+	}
+}
+
+func TestHandler_EmbeddedTemplateFallbackOutsideRepo(t *testing.T) {
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+
+	absCert, _ := filepath.Abs("../../../cert/saml-signing.crt")
+	absKey, _ := filepath.Abs("../../../cert/saml-signing.key")
+
+	emptyDir := t.TempDir()
+	if err := os.Chdir(emptyDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer os.Chdir(origDir)
+
+	cfg := &config.Config{
+		SAML: config.SAMLConfig{
+			EntityID:  "https://192.168.0.178:18080",
+			SSOURL:    "https://192.168.0.178:18080/saml/sso",
+			ACSURL:    "https://192.168.0.178:18080/saml/acs",
+			IdPSSOURL: "https://mock-idp.samlguard.local/sso",
+			CertFile:  absCert,
+			KeyFile:   absKey,
+		},
+	}
+	dbPath := filepath.Join(emptyDir, "test_handler.db")
+	storage, err := mfa.NewSQLiteStorage(dbPath)
+	if err != nil {
+		t.Fatalf("setup storage: %v", err)
+	}
+	defer storage.Close()
+
+	mfaSvc := mfa.NewService(storage, nil, cfg, zap.NewNop())
+	respGen, err := gateway.NewResponseGenerator(cfg)
+	if err != nil {
+		t.Fatalf("setup respGen: %v", err)
+	}
+	p := &mockPipeline{}
+	h, err := NewSAMLHandler(p, mfaSvc, respGen, cfg, zap.NewNop())
+	if err != nil {
+		t.Fatalf("setup handler: %v", err)
+	}
+
+	if h.templates == nil {
+		t.Fatal("expected handler to load embedded template when working directory lacks external web/ templates")
 	}
 }

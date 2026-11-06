@@ -1,0 +1,101 @@
+# ==============================================================================
+# SAMLGuard Production Configuration Template
+# ==============================================================================
+
+# Environment profile ("production" or "development")
+# When set to production, strict security controls and HTTPS enforcement are active.
+env: "production"
+
+server:
+  host: "0.0.0.0"
+  port: 8443
+  read_timeout: 30s
+  write_timeout: 30s
+  shutdown_timeout: 15s
+  tls_enabled: true
+  tls_cert_file: "./cert/server.crt"
+  tls_key_file: "./cert/server.key"
+
+database:
+  driver: "sqlite"
+  # Linux standard: /var/lib/samlguard/samlguard.db
+  # Windows standard: C:\ProgramData\SAMLGuard\data\samlguard.db
+  # Container standard: /data/samlguard.db
+  path: "./data/samlguard.db"
+  max_idle_conns: 1
+  max_open_conns: 1
+  enable_foreign_keys: true
+
+saml:
+  # SAMLGuard Entity ID (must match SP configuration in IT Advisor)
+  entity_id: "https://samlguard.example.com/saml/metadata"
+  # Downstream ACS URL (ITA SAML assertion callback)
+  acs_url: "https://ita.example.com/api/current/authentication/saml2-callback"
+  # SAMLGuard public SSO URL
+  sso_url: "https://samlguard.example.com/saml/sso"
+  slo_url: "https://samlguard.example.com/saml/slo"
+  metadata_url: "https://samlguard.example.com/saml/metadata"
+  
+  # Cryptographic credentials for signing downstream SAML responses
+  cert_file: "./cert/saml-signing.crt"
+  key_file: "./cert/saml-signing.key"
+  sign_requests: true
+  sign_assertions: true
+  sign_responses: true
+
+  # Upstream Identity Provider (e.g., Microsoft Entra ID, Okta, PingIdentity)
+  idp_entity_id: "https://login.microsoftonline.com/your-tenant-id/v2.0"
+  idp_sso_url: "https://login.microsoftonline.com/your-tenant-id/saml2"
+  idp_cert_file: "./cert/upstream-idp.crt"
+  
+  allowed_audiences:
+    - "https://ita.example.com"
+    - "https://samlguard.example.com"
+
+  # AuthnContextClassRef: leave empty for dynamic per-method selection
+  # (TimeSyncToken for TOTP, unspecified for Email OTP)
+  authn_context_class_ref: ""
+
+  # Explicit mapping from upstream IdP role claims to IT Advisor groups
+  group_mapping:
+    "ITAdvisor-Admins": "Admin"
+    "ITAdvisor-Operators": "Operator"
+    "ITAdvisor-Viewers": "Viewer"
+  default_groups: []
+
+mfa:
+  issuer: "SAMLGuard"
+  max_retries: 5
+  otp_expiry: 5m
+  otp_length: 6
+  backup_code_count: 10
+  backup_code_length: 8
+  rate_limit_window: 15m
+  trust_device_days: 30
+  resend_cooldown: 60s
+  totp_skew: 1
+  # NEVER enable dummy OTP in production
+  allow_dummy_otp: false
+  # 64-character (32-byte) hex-encoded AES key for TOTP secrets encryption
+  encryption_key: "CHANGE_ME_GENERATE_64_CHAR_HEX_KEY_FOR_AES_ENCRYPTION"
+  # High-entropy server secret pepper for Email OTP HMAC digests
+  server_pepper: "CHANGE_ME_GENERATE_HIGH_ENTROPY_SERVER_PEPPER"
+
+smtp:
+  host: "smtp.mailgun.org"
+  port: 587
+  username: "postmaster@samlguard.example.com"
+  password: "YOUR_SMTP_PASSWORD"
+  from: "no-reply@samlguard.example.com"
+  from_name: "SAMLGuard MFA Security"
+  encryption: "starttls"
+
+logging:
+  level: "info"
+  format: "json"
+  output_path: "stdout"
+
+metrics:
+  enabled: true
+  path: "/metrics"
+

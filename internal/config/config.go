@@ -269,17 +269,44 @@ func Load(paths ...string) (*Config, error) {
 		}
 	} else {
 		// Look for default config files in standard search locations
-		loaded := false
-		candidateFiles := []string{
-			"configs/default.yaml",
-			"./configs/default.yaml",
+		var candidateFiles []string
+
+		// 1. Executable-relative paths (critical when running as a system service with arbitrary working dir)
+		if exePath, err := os.Executable(); err == nil {
+			exeDir := filepath.Dir(exePath)
+			candidateFiles = append(candidateFiles,
+				filepath.Join(exeDir, "configs", "config.yaml"),
+				filepath.Join(exeDir, "configs", "default.yaml"),
+				filepath.Join(exeDir, "config.yaml"),
+				filepath.Join(exeDir, "default.yaml"),
+			)
+		}
+
+		// 2. Working directory relative paths
+		candidateFiles = append(candidateFiles,
 			"configs/config.yaml",
 			"./configs/config.yaml",
-			"/etc/samlguard/default.yaml",
-			"/etc/samlguard/config.yaml",
-			"default.yaml",
+			"configs/default.yaml",
+			"./configs/default.yaml",
 			"config.yaml",
+			"default.yaml",
+		)
+
+		// 3. Windows standard directory (%ProgramData%\SAMLGuard)
+		if programData := os.Getenv("ProgramData"); programData != "" {
+			candidateFiles = append(candidateFiles,
+				filepath.Join(programData, "SAMLGuard", "config.yaml"),
+				filepath.Join(programData, "SAMLGuard", "default.yaml"),
+			)
 		}
+
+		// 4. Linux standard directory (/etc/samlguard)
+		candidateFiles = append(candidateFiles,
+			"/etc/samlguard/config.yaml",
+			"/etc/samlguard/default.yaml",
+		)
+
+		loaded := false
 		for _, candidate := range candidateFiles {
 			if fileExists(candidate) {
 				v.SetConfigFile(candidate)
@@ -289,7 +316,7 @@ func Load(paths ...string) (*Config, error) {
 				}
 			}
 		}
-		// If neither default file was found, continue with defaults + environment
+		// If no default file was found, continue with defaults + environment
 		_ = loaded
 	}
 
@@ -303,12 +330,28 @@ func Load(paths ...string) (*Config, error) {
 	}
 
 	if envName != "" {
-		envCandidates := []string{
+		var envCandidates []string
+		if exePath, err := os.Executable(); err == nil {
+			exeDir := filepath.Dir(exePath)
+			envCandidates = append(envCandidates,
+				filepath.Join(exeDir, "configs", envName+".yaml"),
+				filepath.Join(exeDir, envName+".yaml"),
+			)
+		}
+		envCandidates = append(envCandidates,
 			filepath.Join("configs", envName+".yaml"),
 			filepath.Join(".", "configs", envName+".yaml"),
-			filepath.Join("/etc/samlguard", envName+".yaml"),
-			envName + ".yaml",
+			envName+".yaml",
+		)
+		if programData := os.Getenv("ProgramData"); programData != "" {
+			envCandidates = append(envCandidates,
+				filepath.Join(programData, "SAMLGuard", envName+".yaml"),
+			)
 		}
+		envCandidates = append(envCandidates,
+			filepath.Join("/etc/samlguard", envName+".yaml"),
+		)
+
 		for _, envFile := range envCandidates {
 			if fileExists(envFile) {
 				v.SetConfigFile(envFile)
@@ -404,15 +447,33 @@ func (c *Config) Validate() error {
 			return errors.New("security violation: mock IdP SSO URL cannot be used in production mode")
 		}
 
-		if strings.TrimSpace(c.SAML.ACSURL) == "" {
-			return errors.New("security violation: saml.acs_url is mandatory in production mode")
+		// HTTPS Enforcement for external SAML endpoints in production
+		if err := requireHTTPS("saml.acs_url", c.SAML.ACSURL); err != nil {
+			return err
 		}
-		trimmedACS := strings.TrimRight(strings.TrimSpace(c.SAML.ACSURL), "/")
-		if trimmedACS == "/saml/acs" || (!strings.HasPrefix(trimmedACS, "http://") && !strings.HasPrefix(trimmedACS, "https://")) {
-			return errors.New("security violation: saml.acs_url must be an absolute URL in production mode; relative /saml/acs fallback is forbidden")
+		if err := requireHTTPS("saml.idp_sso_url", c.SAML.IdPSSOURL); err != nil {
+			return err
+		}
+		if err := requireHTTPS("saml.sso_url", c.SAML.SSOURL); err != nil {
+			return err
 		}
 	}
 
+	return nil
+}
+
+func requireHTTPS(paramName, rawURL string) error {
+	trimmed := strings.TrimSpace(rawURL)
+	if trimmed == "" {
+		return fmt.Errorf("security violation: %s is mandatory in production mode", paramName)
+	}
+	lower := strings.ToLower(trimmed)
+	if !strings.HasPrefix(lower, "https://") {
+		if strings.HasPrefix(lower, "http://") {
+			return fmt.Errorf("security violation: %s must use HTTPS in production mode (HTTP is rejected)", paramName)
+		}
+		return fmt.Errorf("security violation: %s must be an absolute HTTPS URL in production mode (relative URLs rejected)", paramName)
+	}
 	return nil
 }
 

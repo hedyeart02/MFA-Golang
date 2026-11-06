@@ -3,6 +3,7 @@ package mfa
 import (
 	"context"
 	"encoding/base32"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -163,4 +164,20 @@ func TestTOTPPendingEnrollmentAndAtomicActivation(t *testing.T) {
 func decodeBase32(s string) []byte {
 	b, _ := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(s)
 	return b
+}
+
+func TestSQLiteStorage_AutoCreateParentDir(t *testing.T) {
+	tempBase := t.TempDir()
+	nestedDir := filepath.Join(tempBase, "sub", "nested", "data")
+	dbPath := filepath.Join(nestedDir, "samlguard.db")
+
+	storage, err := NewSQLiteStorage(dbPath)
+	if err != nil {
+		t.Fatalf("expected NewSQLiteStorage to auto-create nested directory, got error: %v", err)
+	}
+	defer storage.Close()
+
+	if _, err := os.Stat(nestedDir); os.IsNotExist(err) {
+		t.Fatalf("expected nested directory %q to be created", nestedDir)
+	}
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/hidayat-SE/samlguard/internal/gateway/pipeline"
 	"github.com/hidayat-SE/samlguard/internal/mfa"
 	"github.com/hidayat-SE/samlguard/pkg/response"
+	"github.com/hidayat-SE/samlguard/web"
 	"go.uber.org/zap"
 )
 
@@ -71,9 +72,13 @@ func NewSAMLHandler(
 	}
 
 	var tmpl *template.Template
+	// 1. Try external template file if present (allows operator customization)
 	templatePath := filepath.Join("web", "templates", "mfa_challenge.html")
 	if t, err := template.ParseFiles(templatePath); err == nil {
 		tmpl = t
+	} else if embeddedTmpl, err := web.ParseMFAChallengeTemplate(); err == nil {
+		// 2. Fall back to embedded template baked into the binary via go:embed
+		tmpl = embeddedTmpl
 	}
 
 	var idpCertStore *goxmldsig.MemoryX509CertificateStore

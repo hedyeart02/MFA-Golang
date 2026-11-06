@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -156,6 +157,7 @@ func testProductionConfig(t *testing.T) *config.Config {
 	cfg.SAML.IdPEntityID = "https://login.microsoftonline.com/tenant-prod/v2.0"
 	cfg.SAML.IdPSSOURL = "https://login.microsoftonline.com/tenant-prod/saml2"
 	cfg.SAML.ACSURL = "https://samlguard.prod.example.com/saml/acs"
+	cfg.SAML.SSOURL = "https://samlguard.prod.example.com/saml/sso"
 	return cfg
 }
 
@@ -204,8 +206,38 @@ func TestSetupApp_ProductionStartup_RelativeACSURLFails(t *testing.T) {
 	cfg.SAML.ACSURL = "/saml/acs"
 
 	_, err := SetupApp(cfg, testLogger())
-	if err == nil || !strings.Contains(err.Error(), "must be an absolute URL in production mode") {
+	if err == nil || !strings.Contains(err.Error(), "must be an absolute HTTPS URL in production mode") {
 		t.Fatalf("expected SetupApp to fail startup for relative /saml/acs in production, got: %v", err)
+	}
+}
+
+func TestSetupApp_ProductionStartup_HTTPACSURLFails(t *testing.T) {
+	cfg := testProductionConfig(t)
+	cfg.SAML.ACSURL = "http://samlguard.prod.example.com/saml/acs"
+
+	_, err := SetupApp(cfg, testLogger())
+	if err == nil || !strings.Contains(err.Error(), "saml.acs_url must use HTTPS in production mode") {
+		t.Fatalf("expected SetupApp to fail startup for HTTP ACSURL in production, got: %v", err)
+	}
+}
+
+func TestSetupApp_ProductionStartup_HTTPIdPSSOURLFails(t *testing.T) {
+	cfg := testProductionConfig(t)
+	cfg.SAML.IdPSSOURL = "http://login.microsoftonline.com/tenant-prod/saml2"
+
+	_, err := SetupApp(cfg, testLogger())
+	if err == nil || !strings.Contains(err.Error(), "saml.idp_sso_url must use HTTPS in production mode") {
+		t.Fatalf("expected SetupApp to fail startup for HTTP IdPSSOURL in production, got: %v", err)
+	}
+}
+
+func TestSetupApp_ProductionStartup_HTTPSSOURLFails(t *testing.T) {
+	cfg := testProductionConfig(t)
+	cfg.SAML.SSOURL = "http://samlguard.prod.example.com/saml/sso"
+
+	_, err := SetupApp(cfg, testLogger())
+	if err == nil || !strings.Contains(err.Error(), "saml.sso_url must use HTTPS in production mode") {
+		t.Fatalf("expected SetupApp to fail startup for HTTP SSOURL in production, got: %v", err)
 	}
 }
 
@@ -218,5 +250,40 @@ func TestSetupApp_ProductionStartup_ValidSAMLPasses(t *testing.T) {
 	}
 	if app == nil {
 		t.Fatal("expected non-nil gin engine")
+	}
+}
+
+func TestServer_GracefulShutdown(t *testing.T) {
+	app, err := SetupApp(testConfig(t), testLogger())
+	if err != nil {
+		t.Fatalf("setup app: %v", err)
+	}
+
+	srv := &http.Server{
+		Addr:    "127.0.0.1:0", // allocate free ephemeral port
+		Handler: app,
+	}
+
+	started := make(chan struct{})
+	serverDone := make(chan error, 1)
+	go func() {
+		close(started)
+		serverDone <- srv.ListenAndServe()
+	}()
+
+	<-started
+	// Allow small window for server to start listening
+	time.Sleep(50 * time.Millisecond)
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("expected graceful shutdown to succeed, got: %v", err)
+	}
+
+	err = <-serverDone
+	if err != nil && err != http.ErrServerClosed {
+		t.Errorf("unexpected server exit error: %v", err)
 	}
 }

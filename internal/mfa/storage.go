@@ -8,6 +8,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -68,6 +71,23 @@ func NewSQLiteStorage(dbPath string) (*SQLiteStorage, error) {
 		connStr = "./data/samlguard.db"
 	}
 
+	// Auto-create parent directory if storing database on filesystem
+	if connStr != ":memory:" && !strings.HasPrefix(connStr, "file::memory:") {
+		cleanPath := connStr
+		if strings.HasPrefix(cleanPath, "file:") {
+			cleanPath = strings.TrimPrefix(cleanPath, "file:")
+			if idx := strings.Index(cleanPath, "?"); idx != -1 {
+				cleanPath = cleanPath[:idx]
+			}
+		}
+		dir := filepath.Dir(cleanPath)
+		if dir != "" && dir != "." {
+			if err := os.MkdirAll(dir, 0700); err != nil {
+				return nil, fmt.Errorf("creating database directory %q: %w", dir, err)
+			}
+		}
+	}
+
 	db, err := sql.Open("sqlite", connStr)
 	if err != nil {
 		return nil, fmt.Errorf("opening sqlite database: %w", err)
@@ -80,6 +100,20 @@ func NewSQLiteStorage(dbPath string) (*SQLiteStorage, error) {
 	if err := s.Init(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("initializing database schema: %w", err)
+	}
+
+	// On Unix-like systems, ensure database file permissions are restricted to owner (0600)
+	if connStr != ":memory:" && !strings.HasPrefix(connStr, "file::memory:") {
+		cleanPath := connStr
+		if strings.HasPrefix(cleanPath, "file:") {
+			cleanPath = strings.TrimPrefix(cleanPath, "file:")
+			if idx := strings.Index(cleanPath, "?"); idx != -1 {
+				cleanPath = cleanPath[:idx]
+			}
+		}
+		if fileInfo, err := os.Stat(cleanPath); err == nil && !fileInfo.IsDir() {
+			_ = os.Chmod(cleanPath, 0600)
+		}
 	}
 
 	return s, nil

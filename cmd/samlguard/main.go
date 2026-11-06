@@ -1,8 +1,13 @@
 package main
 
 import (
+	"context"
+	"flag"
 	"fmt"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -196,6 +201,18 @@ func SetupApp(cfg *config.Config, appLogger *logger.Logger) (*gin.Engine, error)
 }
 
 func main() {
+	// Parse CLI flags (-config, --config, -c, -version)
+	var configFilePath string
+	flag.StringVar(&configFilePath, "config", "", "Path to YAML configuration file")
+	flag.StringVar(&configFilePath, "c", "", "Path to YAML configuration file (shorthand)")
+	showVersion := flag.Bool("version", false, "Print version and exit")
+	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("SAMLGuard version %s\n", Version)
+		return
+	}
+
 	// 1. Initialize structured logger
 	zapConfig := zap.NewProductionConfig()
 	zapLogger, err := zapConfig.Build()
@@ -206,7 +223,12 @@ func main() {
 	appLogger := logger.New(zapLogger)
 
 	// 2. Load and validate runtime configuration (startup must fail clearly on error)
-	cfg, err := config.Load()
+	var cfg *config.Config
+	if configFilePath != "" {
+		cfg, err = config.Load(configFilePath)
+	} else {
+		cfg, err = config.Load()
+	}
 	if err != nil {
 		appLogger.System().Fatal("fatal configuration error during application startup", zap.Error(err))
 	}
@@ -232,10 +254,8 @@ func main() {
 		appLogger.System().Fatal("application startup failed during dependency wiring", zap.Error(err))
 	}
 
-	// 4. Run HTTP server with configured timeouts and host/port
+	// 4. Construct HTTP server with configured timeouts and host/port
 	serverAddr := cfg.Server.Address()
-	appLogger.System().Info("listening and serving HTTP requests", zap.String("address", serverAddr))
-
 	srv := &http.Server{
 		Addr:         serverAddr,
 		Handler:      engine,
@@ -243,13 +263,57 @@ func main() {
 		WriteTimeout: cfg.Server.WriteTimeout,
 	}
 
-	if cfg.TLS.Enabled {
-		if err := srv.ListenAndServeTLS(cfg.TLS.CertFile, cfg.TLS.KeyFile); err != nil && err != http.ErrServerClosed {
-			appLogger.System().Fatal("server terminated unexpectedly with TLS", zap.Error(err))
+	// 5. Windows Service Control Manager or interactive console execution
+	if isWindowsService() {
+		appLogger.System().Info("running under Windows Service Control Manager", zap.String("service_name", "SAMLGuard"))
+		if err := runAsWindowsService("SAMLGuard", srv, cfg, appLogger); err != nil {
+			appLogger.System().Fatal("Windows service terminated unexpectedly", zap.Error(err))
 		}
-	} else {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			appLogger.System().Fatal("server terminated unexpectedly", zap.Error(err))
+		return
+	}
+
+	runInteractive(srv, cfg, appLogger)
+}
+
+// runInteractive runs the HTTP server for console execution and listens for OS interrupt signals.
+func runInteractive(srv *http.Server, cfg *config.Config, appLogger *logger.Logger) {
+	appLogger.System().Info("listening and serving HTTP requests", zap.String("address", srv.Addr))
+
+	serverErrors := make(chan error, 1)
+
+	go func() {
+		if cfg.TLS.Enabled {
+			if err := srv.ListenAndServeTLS(cfg.TLS.CertFile, cfg.TLS.KeyFile); err != nil && err != http.ErrServerClosed {
+				serverErrors <- err
+			}
+		} else {
+			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				serverErrors <- err
+			}
+		}
+	}()
+
+	// Graceful shutdown listening for OS signals (SIGINT/SIGTERM on Linux, Ctrl+C / console close on Windows)
+	shutdownSignal := make(chan os.Signal, 1)
+	signal.Notify(shutdownSignal, os.Interrupt, syscall.SIGTERM)
+
+	select {
+	case err := <-serverErrors:
+		appLogger.System().Fatal("server terminated unexpectedly", zap.Error(err))
+	case sig := <-shutdownSignal:
+		appLogger.System().Info("received shutdown signal, initiating graceful stop", zap.String("signal", sig.String()))
+
+		shutdownTimeout := cfg.Server.ShutdownTimeout
+		if shutdownTimeout <= 0 {
+			shutdownTimeout = 15 * time.Second
+		}
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			appLogger.System().Error("server forced to stop after shutdown timeout", zap.Error(err))
+		} else {
+			appLogger.System().Info("server shutdown completed cleanly")
 		}
 	}
 }
