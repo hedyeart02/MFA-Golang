@@ -339,3 +339,4 @@ func parseCertDetails(certPath string) CertDetails {
 
 	return details
 }
+

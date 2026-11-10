@@ -158,9 +158,9 @@ func (g *ResponseGenerator) GenerateResponse(req SAMLResponseRequest) (*SAMLResp
 	// Group and role mapping (NO hardcoded Admin)
 	mappedGroups := g.resolveMappedGroups(req.RawGroups)
 
-	// Clock skew buffer: 5 minutes in the past accommodates VM/hypervisor time drift
-	notBefore := now.Add(-5 * time.Minute).Format(samlTimeFormat)
-	notOnOrAfter := now.Add(10 * time.Minute).Format(samlTimeFormat)
+	// Clock skew buffer: 1 hour in the past accommodates significant hypervisor/VM time drift
+	notBefore := now.Add(-1 * time.Hour).Format(samlTimeFormat)
+	notOnOrAfter := now.Add(1 * time.Hour).Format(samlTimeFormat)
 	issueInstant := now.Format(samlTimeFormat)
 
 	doc := etree.NewDocument()

@@ -96,3 +96,4 @@ smtp:
 		t.Errorf("disk smtp password mismatch: %s", reloaded.SMTP.Password)
 	}
 }
+
