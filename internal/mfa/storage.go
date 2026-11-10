@@ -204,6 +204,8 @@ func (s *SQLiteStorage) Init(ctx context.Context) error {
 	// Schema migrations for existing databases
 	_, _ = s.db.ExecContext(ctx, "ALTER TABLE mfa_secrets ADD COLUMN failed_attempts INTEGER DEFAULT 0;")
 	_, _ = s.db.ExecContext(ctx, "ALTER TABLE mfa_secrets ADD COLUMN locked_until DATETIME;")
+	_, _ = s.db.ExecContext(ctx, "DROP INDEX IF EXISTS idx_mfa_secrets_user_status;")
+	_, _ = s.db.ExecContext(ctx, "CREATE UNIQUE INDEX IF NOT EXISTS idx_mfa_secrets_user_status ON mfa_secrets(user_key, status);")
 
 	return nil
 }

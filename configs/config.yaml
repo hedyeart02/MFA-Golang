@@ -61,7 +61,7 @@ mfa:
   trust_device_days: 30
   encryption_key: "ce41c3c23d1488f29c088138dda3b52527aaf3a6ec1e9254d35f6f095889461d"
   totp_skew: 1
-  allow_dummy_otp: true
+  allow_dummy_otp: false
   resend_cooldown: 60s
   server_pepper: "samlguard-email-otp-pepper-secret-key-32b"
 

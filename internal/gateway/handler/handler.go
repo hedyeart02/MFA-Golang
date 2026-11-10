@@ -46,7 +46,7 @@ type ChallengeViewModel struct {
 	Method             string // "totp", "email"
 	EnrollmentRequired bool
 	SecretKey          string
-	QRCodeDataURI      string
+	QRCodeDataURI      template.URL
 	Message            string
 	ErrorMessage       string
 	ResendCooldown     int
@@ -525,6 +525,59 @@ func (h *SAMLHandler) HandleACS(c *gin.Context) {
 	h.renderMFAChallengeView(c, state, "totp", "")
 }
 
+// HandleACSGet handles GET /saml/acs and GET /acs (for method switching, tab clicks, and page reloads)
+func (h *SAMLHandler) HandleACSGet(c *gin.Context) {
+	sessionID, _ := c.Cookie("samlguard_auth_state")
+	if sessionID == "" {
+		sessionID = c.Query("session_id")
+	}
+
+	if sessionID == "" {
+		c.Redirect(http.StatusFound, "/login")
+		return
+	}
+
+	state, err := h.correlationStore.Get(sessionID)
+	if err != nil || state == nil || state.UserIdentityKey == "" {
+		c.Redirect(http.StatusFound, "/login")
+		return
+	}
+
+	method := c.DefaultQuery("method", "totp")
+	if method != "totp" && method != "email" {
+		method = "totp"
+	}
+
+	if c.Query("re_enroll") == "true" {
+		ctx := c.Request.Context()
+		enrollData, err := h.mfaService.StartTOTPEnrollmentForce(ctx, state.UserIdentityKey, state.UserEmail)
+		if err == nil && enrollData != nil {
+			vm := ChallengeViewModel{
+				SessionID:          state.SessionID,
+				CSRFToken:          state.CSRFToken,
+				Email:              state.UserEmail,
+				MaskedEmail:        maskEmail(state.UserEmail),
+				Method:             "totp",
+				EnrollmentRequired: true,
+				SecretKey:          enrollData.SecretKey,
+				QRCodeDataURI:      template.URL(enrollData.QRCodeDataURI),
+				Message:            "New authenticator key generated. Scan QR code and verify to activate.",
+				ResendCooldown:     60,
+			}
+			c.Header("Content-Type", "text/html; charset=utf-8")
+			if h.templates != nil {
+				if err := h.templates.Execute(c.Writer, vm); err == nil {
+					return
+				}
+			}
+			c.String(http.StatusOK, renderInlineMFAPage(vm))
+			return
+		}
+	}
+
+	h.renderMFAChallengeView(c, state, method, "")
+}
+
 // HandleMFAVerify accepts POST /mfa/verify
 func (h *SAMLHandler) HandleMFAVerify(c *gin.Context) {
 	sessionID, _ := c.Cookie("samlguard_auth_state")
@@ -702,7 +755,7 @@ func (h *SAMLHandler) HandleMFAReEnroll(c *gin.Context) {
 		Method:             "totp",
 		EnrollmentRequired: true,
 		SecretKey:          enrollData.SecretKey,
-		QRCodeDataURI:      enrollData.QRCodeDataURI,
+		QRCodeDataURI:      template.URL(enrollData.QRCodeDataURI),
 		Message:            "New authenticator key generated. Scan QR code and verify to activate.",
 		ResendCooldown:     60,
 	}
@@ -735,10 +788,17 @@ func (h *SAMLHandler) renderMFAChallengeView(c *gin.Context, state *AuthSessionS
 		if !hasActiveTOTP {
 			// Needs enrollment: generate pending secret & QR code
 			enrollData, err := h.mfaService.StartTOTPEnrollment(ctx, state.UserIdentityKey, state.UserEmail)
-			if err == nil && enrollData != nil {
+			if err != nil {
+				if h.logger != nil {
+					h.logger.Error("failed to start totp enrollment", zap.Error(err))
+				}
+				if vm.ErrorMessage == "" {
+					vm.ErrorMessage = fmt.Sprintf("Failed to generate authenticator setup: %v", err)
+				}
+			} else if enrollData != nil {
 				vm.EnrollmentRequired = true
 				vm.SecretKey = enrollData.SecretKey
-				vm.QRCodeDataURI = enrollData.QRCodeDataURI
+				vm.QRCodeDataURI = template.URL(enrollData.QRCodeDataURI)
 			}
 		}
 	} else if method == "email" {
@@ -785,37 +845,121 @@ func (h *SAMLHandler) renderMockUpstreamLogin(c *gin.Context, sessionID, outboun
 		AuthnContextClassRef: "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport",
 	}
 
-	result, err := h.responseGen.GenerateResponse(mockReq)
-	if err != nil {
-		response.Error(c, http.StatusInternalServerError, fmt.Errorf("failed to generate mock upstream SAML response: %w", err))
-		return
+	result, _ := h.responseGen.GenerateResponse(mockReq)
+	defaultSAMLResponse := ""
+	if result != nil {
+		defaultSAMLResponse = result.SAMLResponse
 	}
 
 	html := fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head>
-	<title>Simulated Upstream IdP</title>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>SAMLGuard - Corporate Sign In</title>
 	<style>
-		body { font-family: -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-		.card { background: #1e293b; padding: 2.5rem; border-radius: 12px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); max-width: 440px; width: 90%%; }
-		h1 { color: #38bdf8; font-size: 1.5rem; margin-top: 0; }
-		p { color: #94a3b8; font-size: 0.9rem; line-height: 1.5; }
-		button { background: #2563eb; color: white; border: none; padding: 0.8rem 1.5rem; font-size: 1rem; font-weight: 600; border-radius: 8px; cursor: pointer; width: 100%%; margin-top: 1rem; }
-		button:hover { background: #1d4ed8; }
+		body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+		.card { background: #1e293b; padding: 2.5rem; border-radius: 16px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); max-width: 440px; width: 90%%%%; border: 1px solid #334155; }
+		.logo { font-size: 2.2rem; text-align: center; margin-bottom: 0.5rem; }
+		h1 { color: #38bdf8; font-size: 1.4rem; font-weight: 700; margin-bottom: 0.5rem; text-align: center; }
+		.subtitle { color: #94a3b8; font-size: 0.85rem; text-align: center; margin-bottom: 1.5rem; }
+		label { display: block; font-size: 0.875rem; font-weight: 500; color: #94a3b8; margin-bottom: 0.5rem; }
+		input[type=text] { width: 100%%%%; padding: 0.875rem; border: 2px solid #334155; border-radius: 10px; background: #0f172a; color: #e2e8f0; font-size: 1rem; box-sizing: border-box; margin-bottom: 1.25rem; transition: border-color 0.2s; }
+		input[type=text]:focus { outline: none; border-color: #38bdf8; }
+		button.submit-btn { width: 100%%%%; padding: 0.875rem; border: none; border-radius: 10px; background: linear-gradient(135deg, #2563eb, #1d4ed8); color: white; font-size: 1rem; font-weight: 600; cursor: pointer; transition: transform 0.1s, box-shadow 0.2s; }
+		button.submit-btn:hover { background: #1d4ed8; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4); }
+		.footer { margin-top: 1.5rem; text-align: center; font-size: 0.75rem; color: #64748b; }
 	</style>
 </head>
 <body>
 	<div class="card">
-		<h1>Simulated Upstream IdP</h1>
-		<p>Authenticate as verified user <strong>apc</strong> to continue to SAMLGuard MFA.</p>
-		<form method="POST" action="/saml/acs">
-			<input type="hidden" name="RelayState" value="%s"/>
+		<div class="logo">🛡️</div>
+		<h1>Corporate Sign In</h1>
+		<p class="subtitle">Enter your Schneider Electric IT Advisor account</p>
+		<form method="POST" action="/mock-idp/submit">
+			<input type="hidden" name="session_id" value="%s"/>
+			<input type="hidden" name="outbound_id" value="%s"/>
 			<input type="hidden" name="SAMLResponse" value="%s"/>
-			<button type="submit">Sign In as apc (Verified User)</button>
+			<label for="username">Username or Corporate Email</label>
+			<input type="text" id="username" name="username" placeholder="e.g. itaadmin or user@domain.com" required autofocus autocomplete="username"/>
+			<button type="submit" class="submit-btn">Continue to Verification &rarr;</button>
 		</form>
+		<div class="footer">SAMLGuard Enterprise MFA Gateway</div>
 	</div>
 </body>
+</html>`, sessionID, outboundID, defaultSAMLResponse)
+	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
+}
+
+// HandleMockIDPSubmit processes the user's entered username or email and generates the SAML response
+func (h *SAMLHandler) HandleMockIDPSubmit(c *gin.Context) {
+	sessionID := c.PostForm("session_id")
+	outboundID := c.PostForm("outbound_id")
+	rawUser := strings.TrimSpace(c.PostForm("username"))
+
+	if sessionID == "" || rawUser == "" {
+		c.Redirect(http.StatusFound, "/login")
+		return
+	}
+
+	state, err := h.correlationStore.Get(sessionID)
+	if err != nil || state == nil {
+		c.Redirect(http.StatusFound, "/login")
+		return
+	}
+
+	mockDestination := h.cfg.SAML.ACSURL
+	if mockDestination == "" {
+		mockDestination = "/saml/acs"
+	}
+	mockIssuer := h.cfg.SAML.IdPEntityID
+	if mockIssuer == "" {
+		mockIssuer = "https://mock-idp.samlguard.local"
+	}
+	mockAudience := h.cfg.SAML.EntityID
+	if mockAudience == "" {
+		mockAudience = "https://192.168.0.178:18080"
+	}
+
+	nameID := rawUser
+	email := rawUser
+	if !strings.Contains(rawUser, "@") {
+		email = rawUser + "@example.local"
+	}
+
+	mockReq := gateway.SAMLResponseRequest{
+		InResponseTo:         outboundID,
+		Destination:          mockDestination,
+		RelayState:           sessionID,
+		Audience:             mockAudience,
+		Issuer:               mockIssuer,
+		SubjectNameID:        nameID,
+		SubjectNameIDFormat:  "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent",
+		Email:                email,
+		DisplayName:          rawUser,
+		RawGroups:            []string{"ita-admins"},
+		AuthnContextClassRef: "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport",
+	}
+
+	result, err := h.responseGen.GenerateResponse(mockReq)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, fmt.Errorf("failed to generate upstream SAML response: %w", err))
+		return
+	}
+
+	html := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head><title>SAMLGuard - Redirecting to MFA</title></head>
+<body onload="document.forms[0].submit()">
+	<noscript><p>Redirecting to verification...</p></noscript>
+	<form method="POST" action="/saml/acs">
+		<input type="hidden" name="RelayState" value="%s"/>
+		<input type="hidden" name="SAMLResponse" value="%s"/>
+		<noscript><button type="submit">Continue to Verification &rarr;</button></noscript>
+	</form>
+</body>
 </html>`, sessionID, result.SAMLResponse)
+
 	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
 }
 
@@ -953,11 +1097,9 @@ func renderInlineMFAPage(vm ChallengeViewModel) string {
 	var reenrollHTML string
 	if !vm.EnrollmentRequired && vm.Method == "totp" {
 		reenrollHTML = fmt.Sprintf(`
-		<form method="POST" action="/mfa/re-enroll" style="margin-top: 1rem; text-align: center;">
-			<input type="hidden" name="session_id" value="%s"/>
-			<input type="hidden" name="csrf_token" value="%s"/>
-			<button type="submit" style="background: none; border: none; color: #38bdf8; text-decoration: underline; cursor: pointer; font-size: 0.85rem;">Re-enroll Authenticator App</button>
-		</form>`, vm.SessionID, vm.CSRFToken)
+		<div style="margin-top: 1rem; text-align: center;">
+			<a href="?method=totp&re_enroll=true&session_id=%s" style="color: #38bdf8; text-decoration: underline; cursor: pointer; font-size: 0.85rem;">Scan New QR Code / Re-enroll Authenticator</a>
+		</div>`, vm.SessionID)
 	}
 
 	var resendHTML string
@@ -994,8 +1136,8 @@ func renderInlineMFAPage(vm ChallengeViewModel) string {
 		<h1>🔐 Multi-Factor Verification</h1>
 		<div class="sub">Verified Identity: %s</div>
 		<div class="tabs">
-			<a class="tab %s" href="?method=totp">Authenticator</a>
-			<a class="tab %s" href="?method=email">Email OTP</a>
+			<a class="tab %s" href="?method=totp&session_id=%s">Authenticator</a>
+			<a class="tab %s" href="?method=email&session_id=%s">Email OTP</a>
 		</div>
 		%s
 		%s
@@ -1014,7 +1156,9 @@ func renderInlineMFAPage(vm ChallengeViewModel) string {
 </html>`,
 		vm.MaskedEmail,
 		activeTab(vm.Method == "totp"),
+		vm.SessionID,
 		activeTab(vm.Method == "email"),
+		vm.SessionID,
 		errorHTML,
 		qrHTML,
 		vm.SessionID,

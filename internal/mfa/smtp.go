@@ -63,9 +63,10 @@ func (s *SMTPSender) Send(ctx context.Context, recipient, code string) error {
 		if s.logger != nil {
 			s.logger.Info("local/development mode: simulated email delivery",
 				zap.String("recipient", maskRecipient(recipient)),
-				zap.String("code", "***OTP_SENT***"),
+				zap.String("code", code),
 			)
 		}
+		fmt.Printf("\n📧 [SIMULATED EMAIL OTP] To: %s | Verification Code: %s (Expires in 5m)\n\n", recipient, code)
 		return nil
 	}
 

@@ -206,8 +206,8 @@
         <p class="subtitle">{{.MaskedEmail}}</p>
 
         <div class="tabs">
-            <a class="tab {{if eq .Method "totp"}}active{{end}}" href="?method=totp">Authenticator App</a>
-            <a class="tab {{if eq .Method "email"}}active{{end}}" href="?method=email">Email OTP</a>
+            <a class="tab {{if eq .Method "totp"}}active{{end}}" href="?method=totp&session_id={{.SessionID}}">Authenticator App</a>
+            <a class="tab {{if eq .Method "email"}}active{{end}}" href="?method=email&session_id={{.SessionID}}">Email OTP</a>
         </div>
 
         {{if .ErrorMessage}}
@@ -250,11 +250,7 @@
 
         {{if and (not .EnrollmentRequired) (eq .Method "totp")}}
         <div class="resend-section">
-            <form method="POST" action="/mfa/re-enroll" style="display: inline;">
-                <input type="hidden" name="session_id" value="{{.SessionID}}"/>
-                <input type="hidden" name="csrf_token" value="{{.CSRFToken}}"/>
-                <button type="submit" class="resend-btn">Re-enroll Authenticator App</button>
-            </form>
+            <a href="?method=totp&re_enroll=true&session_id={{.SessionID}}" class="resend-btn" style="color: #38bdf8; text-decoration: underline; font-size: 0.85rem;">Scan New QR Code / Re-enroll</a>
         </div>
         {{end}}
 

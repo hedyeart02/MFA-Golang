@@ -177,6 +177,7 @@ func SetupAppWithCleanup(cfg *config.Config, appLogger *logger.Logger) (*gin.Eng
 	{
 		samlGroup.GET("/sso", samlHandler.HandleSSO)
 		samlGroup.POST("/acs", samlHandler.HandleACS)
+		samlGroup.GET("/acs", samlHandler.HandleACSGet)
 		samlGroup.GET("/metadata", samlHandler.HandleMetadata)
 		samlGroup.GET("/metadata/idp", samlHandler.HandleIdPMetadata)
 		samlGroup.GET("/metadata/sp", samlHandler.HandleSPMetadata)
@@ -187,12 +188,14 @@ func SetupAppWithCleanup(cfg *config.Config, appLogger *logger.Logger) (*gin.Eng
 	r.GET("/login", samlHandler.HandleSSO)
 	r.POST("/login", samlHandler.HandleSSO)
 	r.POST("/acs", samlHandler.HandleACS)
+	r.GET("/acs", samlHandler.HandleACSGet)
 	r.GET("/metadata", samlHandler.HandleMetadata)
 	r.GET("/metadata/idp", samlHandler.HandleIdPMetadata)
 	r.GET("/metadata/sp", samlHandler.HandleSPMetadata)
 	r.POST("/mfa/verify", samlHandler.HandleMFAVerify)
 	r.POST("/mfa/resend", samlHandler.HandleMFAResend)
 	r.POST("/mfa/re-enroll", samlHandler.HandleMFAReEnroll)
+	r.POST("/mock-idp/submit", samlHandler.HandleMockIDPSubmit)
 
 	// Health endpoint
 	r.GET("/health", func(c *gin.Context) {
