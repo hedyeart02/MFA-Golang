@@ -523,7 +523,7 @@ func (h *SAMLHandler) HandleACS(c *gin.Context) {
 				zap.String("email", claims.Email),
 			)
 			c.Header("Content-Type", "text/html; charset=utf-8")
-			c.String(http.StatusForbidden, `<div style="font-family: sans-serif; padding: 2.5rem; background: #0f172a; color: #fecaca; min-height: 100vh; text-align: center;"><div style="max-width: 500px; margin: 3rem auto; background: #1e293b; padding: 2rem; border-radius: 12px; border: 1px solid #b91c1c;"><h2 style="color: #f87171; margin-top: 0;">⚠️ Akses Disekat</h2><p style="color: #e2e8f0; line-height: 1.6;">Akaun <strong>%s</strong> tidak dijumpai dalam rekod Schneider IT Advisor. Sila hubungi Administrator untuk jemputan akses.</p></div></div>`, claims.SubjectNameID)
+			c.String(http.StatusForbidden, `<div style="font-family: sans-serif; padding: 2.5rem; background: #0f172a; color: #fecaca; min-height: 100vh; text-align: center;"><div style="max-width: 500px; margin: 3rem auto; background: #1e293b; padding: 2rem; border-radius: 12px; border: 1px solid #b91c1c;"><h2 style="color: #f87171; margin-top: 0;">⚠️ Access Denied</h2><p style="color: #e2e8f0; line-height: 1.6;">The account <strong>%s</strong> was not found in Schneider IT Advisor records. Please contact your system administrator for access invitation.</p></div></div>`, claims.SubjectNameID)
 			return
 		}
 	}
@@ -870,7 +870,7 @@ func (h *SAMLHandler) renderMockUpstreamLogin(c *gin.Context, sessionID, outboun
 
 	errorBanner := ""
 	if errorMessage != "" {
-		errorBanner = fmt.Sprintf(`<div style="background: #450a0a; border: 1px solid #b91c1c; color: #fecaca; padding: 0.8rem 1rem; border-radius: 8px; margin-bottom: 1.25rem; font-size: 0.875rem; text-align: left; line-height: 1.4;">⚠️ <strong>Akses Disekat:</strong> %s</div>`, errorMessage)
+		errorBanner = fmt.Sprintf(`<div style="background: #450a0a; border: 1px solid #b91c1c; color: #fecaca; padding: 0.8rem 1rem; border-radius: 8px; margin-bottom: 1.25rem; font-size: 0.875rem; text-align: left; line-height: 1.4;">⚠️ <strong>Access Denied:</strong> %s</div>`, errorMessage)
 	}
 
 	html := fmt.Sprintf(`<!DOCTYPE html>
@@ -939,7 +939,7 @@ func (h *SAMLHandler) HandleMockIDPSubmit(c *gin.Context) {
 				zap.String("identifier", rawUser),
 				zap.String("session_id", sessionID),
 			)
-			h.renderMockUpstreamLogin(c, sessionID, outboundID, rawUser, fmt.Sprintf("Akaun '%s' tidak dijumpai dalam rekod IT Advisor. Sila hubungi Administrator untuk jemputan akses.", rawUser))
+			h.renderMockUpstreamLogin(c, sessionID, outboundID, rawUser, fmt.Sprintf("Account '%s' was not found in IT Advisor records. Please contact your system administrator for access invitation.", rawUser))
 			return
 		}
 	}

@@ -592,7 +592,7 @@
                         </span>
                     </div>
                     <p style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 1.25rem;">
-                        Halang pengguna luar daripada mendaftar sendiri dan sekat penciptaan akaun kosong (*blank accounts*) dalam Schneider IT Advisor. Hanya pengguna yang sah dalam rekod ITA sahaja dibenarkan melepasi pengesahan.
+                        Prevent unauthorized external users from self-registering and block blank account creation in Schneider IT Advisor. Only pre-authorized users present in ITA records are permitted through authentication.
                     </p>
 
                     <div class="form-group" style="padding: 1rem; background: #0f172a; border-radius: 8px; border: 1px solid #334155; margin-bottom: 1.5rem;">
@@ -600,9 +600,9 @@
                             <input type="checkbox" id="ita_enforce_whitelist" name="ita_enforce_whitelist" value="true" {{if .Settings.ITAEnforceWhitelist}}checked{{end}}>
                             <span class="toggle-switch"></span>
                             <div>
-                                <span style="font-weight: 600; color: #f8fafc;">Enforce User Whitelist (Sekat Akaun Tidak Berdaftar)</span>
+                                <span style="font-weight: 600; color: #f8fafc;">Enforce User Whitelist (Block Unregistered Accounts)</span>
                                 <p class="help-text" style="margin-top: 0.2rem;">
-                                    Bila diaktifkan, SAMLGuard akan menyekat sebarang cubaan login oleh username/emel yang tiada dalam rekod ITA sebelum sebarang token SAML dihantar.
+                                    When enabled, SAMLGuard blocks sign-in attempts for any username or email not present in ITA records before any SAML assertion is dispatched.
                                 </p>
                             </div>
                         </label>
@@ -612,13 +612,13 @@
                         <div class="form-group">
                             <label for="ita_api_url">ITA REST API Base URL</label>
                             <input type="text" id="ita_api_url" name="ita_api_url" value="{{.Settings.ITAAPIURL}}" placeholder="https://192.168.0.119/api/current">
-                            <p class="help-text">Endpoint REST API ITA untuk tarik (*fetch*) senarai pengguna.</p>
+                            <p class="help-text">ITA REST API endpoint to retrieve authorized users.</p>
                         </div>
 
                         <div class="form-group">
                             <label for="ita_api_username">ITA Admin Username</label>
                             <input type="text" id="ita_api_username" name="ita_api_username" value="{{.Settings.ITAAPIUsername}}" placeholder="apc">
-                            <p class="help-text">Akaun pentadbir ITA dengan kebenaran membaca senarai pengguna.</p>
+                            <p class="help-text">ITA administrator account with permission to read user directories.</p>
                         </div>
                     </div>
 
@@ -626,7 +626,7 @@
                         <div class="form-group">
                             <label for="ita_api_password">ITA Admin Password</label>
                             <div class="input-group">
-                                <input type="password" id="ita_api_password" name="ita_api_password" placeholder="•••••••• (Kosongkan jika tidak mahu ubah)">
+                                <input type="password" id="ita_api_password" name="ita_api_password" placeholder="•••••••• (Leave blank to keep current)">
                                 <button type="button" class="btn btn-secondary" onclick="togglePasswordVisibility('ita_api_password')">👁️</button>
                             </div>
                         </div>
@@ -644,17 +644,17 @@
                     <!-- Authorized Users List Table -->
                     <div style="margin-top: 1.5rem;">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-                            <label style="margin-bottom: 0;">Pengguna Sah Dibenarkan Login ({{len .AuthorizedUsers}} Akaun)</label>
-                            <button type="button" class="btn btn-sm btn-secondary" onclick="showAddUserPrompt()">+ Tambah Pengguna Manual</button>
+                            <label style="margin-bottom: 0;">Authorized Users Permitted to Login ({{len .AuthorizedUsers}} Accounts)</label>
+                            <button type="button" class="btn btn-sm btn-secondary" onclick="showAddUserPrompt()">+ Add Manual User</button>
                         </div>
                         <table class="table" id="authorizedUsersTable">
                             <thead>
                                 <tr>
                                     <th>Username</th>
-                                    <th>Emel</th>
-                                    <th>Nama Penuh</th>
-                                    <th>Sumber</th>
-                                    <th style="width: 80px;">Tindakan</th>
+                                    <th>Email</th>
+                                    <th>Full Name</th>
+                                    <th>Source</th>
+                                    <th style="width: 80px;">Action</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -670,7 +670,7 @@
                                     </td>
                                     <td>
                                         {{if ne .Username "apc"}}
-                                        <button type="button" class="btn btn-sm btn-danger" onclick="deleteAuthorizedUser('{{.Username}}')">Padam</button>
+                                        <button type="button" class="btn btn-sm btn-danger" onclick="deleteAuthorizedUser('{{.Username}}')">Delete</button>
                                         {{else}}
                                         <span style="font-size: 0.75rem; color: #64748b;">System</span>
                                         {{end}}
@@ -679,7 +679,7 @@
                                 {{else}}
                                 <tr>
                                     <td colspan="5" style="text-align: center; color: #64748b; padding: 1.5rem;">
-                                        Tiada pengguna dalam senarai. Klik "Sync Users From ITA Now" untuk muat turun akaun dari ITA.
+                                        No users currently in database. Click "Sync Users From ITA Now" to fetch user accounts from IT Advisor.
                                     </td>
                                 </tr>
                                 {{end}}
@@ -1091,14 +1091,14 @@
 
                 resultBox.style.display = 'block';
                 if (data.success) {
-                    resultBox.innerHTML = `<div class="alert alert-success" style="margin-bottom:0;">✅ ${data.message} Halaman sedang disegarkan...</div>`;
+                    resultBox.innerHTML = `<div class="alert alert-success" style="margin-bottom:0;">✅ ${data.message} Refreshing page...</div>`;
                     setTimeout(() => { window.location.reload(); }, 1500);
                 } else {
-                    resultBox.innerHTML = `<div class="alert alert-danger" style="margin-bottom:0;">⚠️ <strong>Sync Gagal:</strong> ${data.error}</div>`;
+                    resultBox.innerHTML = `<div class="alert alert-danger" style="margin-bottom:0;">⚠️ <strong>Sync Failed:</strong> ${data.error}</div>`;
                 }
             } catch (err) {
                 resultBox.style.display = 'block';
-                resultBox.innerHTML = `<div class="alert alert-danger" style="margin-bottom:0;">⚠️ <strong>Ralat Rangkaian:</strong> ${err.message}</div>`;
+                resultBox.innerHTML = `<div class="alert alert-danger" style="margin-bottom:0;">⚠️ <strong>Network Error:</strong> ${err.message}</div>`;
             } finally {
                 btn.disabled = false;
                 spinner.style.display = 'none';
@@ -1106,11 +1106,11 @@
         }
 
         async function showAddUserPrompt() {
-            const username = prompt("Masukkan Username ITA (cth: itaadmin atau nama pengguna baru):");
+            const username = prompt("Enter ITA Username (e.g. itaadmin or new user identifier):");
             if (!username || !username.trim()) return;
 
-            const email = prompt("Masukkan Emel (pilihan):", "") || "";
-            const fullName = prompt("Masukkan Nama Penuh (pilihan):", "") || "";
+            const email = prompt("Enter Email (optional):", "") || "";
+            const fullName = prompt("Enter Full Name (optional):", "") || "";
 
             try {
                 const resp = await fetch('/admin/users/add', {
@@ -1123,15 +1123,15 @@
                     alert(data.message);
                     window.location.reload();
                 } else {
-                    alert("Gagal: " + data.error);
+                    alert("Failed: " + data.error);
                 }
             } catch (err) {
-                alert("Ralat: " + err.message);
+                alert("Error: " + err.message);
             }
         }
 
         async function deleteAuthorizedUser(username) {
-            if (!confirm(`Adakah anda pasti mahu memadam pengguna '${username}' daripada senarai sah? Pengguna ini tidak lagi boleh login.`)) {
+            if (!confirm(`Are you sure you want to remove user '${username}' from the authorized whitelist? This user will no longer be permitted to log in.`)) {
                 return;
             }
 
@@ -1145,10 +1145,10 @@
                 if (data.success) {
                     window.location.reload();
                 } else {
-                    alert("Gagal: " + data.error);
+                    alert("Failed: " + data.error);
                 }
             } catch (err) {
-                alert("Ralat: " + err.message);
+                alert("Error: " + err.message);
             }
         }
     </script>

@@ -208,7 +208,7 @@ func (h *SAMLHandler) HandleAdminITASyncPost(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": fmt.Sprintf("Berjaya! %d pengguna disegerakkan dari Schneider IT Advisor.", len(users)),
+		"message": fmt.Sprintf("Successfully synced %d users from Schneider IT Advisor.", len(users)),
 		"count":   len(users),
 		"users":   users,
 	})
@@ -240,7 +240,7 @@ func (h *SAMLHandler) HandleAdminUserAddPost(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": fmt.Sprintf("Pengguna '%s' berjaya ditambah.", user.Username)})
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": fmt.Sprintf("User '%s' was successfully added.", user.Username)})
 }
 
 // HandleAdminUserDeletePost removes a user from authorized_users table.
@@ -260,7 +260,7 @@ func (h *SAMLHandler) HandleAdminUserDeletePost(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": fmt.Sprintf("Pengguna '%s' telah dipadam.", req.Username)})
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": fmt.Sprintf("User '%s' has been removed.", req.Username)})
 }
 
 // HandleAdminTestEmailPost executes a real-time SMTP test and returns JSON status.
