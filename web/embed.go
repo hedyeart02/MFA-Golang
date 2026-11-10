@@ -11,6 +11,9 @@ var DefaultMFAChallengeHTML string
 //go:embed templates/error.html
 var DefaultErrorHTML string
 
+//go:embed templates/admin_settings.html
+var DefaultAdminSettingsHTML string
+
 // ParseMFAChallengeTemplate parses and returns the embedded MFA challenge template
 func ParseMFAChallengeTemplate() (*template.Template, error) {
 	return template.New("mfa_challenge.html").Parse(DefaultMFAChallengeHTML)
@@ -21,3 +24,7 @@ func ParseErrorTemplate() (*template.Template, error) {
 	return template.New("error.html").Parse(DefaultErrorHTML)
 }
 
+// ParseAdminSettingsTemplate parses and returns the embedded admin settings template
+func ParseAdminSettingsTemplate() (*template.Template, error) {
+	return template.New("admin_settings.html").Parse(DefaultAdminSettingsHTML)
+}

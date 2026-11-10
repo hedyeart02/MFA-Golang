@@ -197,6 +197,15 @@ func SetupAppWithCleanup(cfg *config.Config, appLogger *logger.Logger) (*gin.Eng
 	r.POST("/mfa/re-enroll", samlHandler.HandleMFAReEnroll)
 	r.POST("/mock-idp/submit", samlHandler.HandleMockIDPSubmit)
 
+	// Dedicated Admin Settings & Management routes
+	r.GET("/admin/settings", samlHandler.HandleAdminSettingsGet)
+	r.POST("/admin/settings", samlHandler.HandleAdminSettingsPost)
+	r.POST("/admin/settings/test-email", samlHandler.HandleAdminTestEmailPost)
+	r.GET("/admin/cert/download", samlHandler.HandleAdminCertDownload)
+	r.GET("/admin", func(c *gin.Context) {
+		c.Redirect(http.StatusTemporaryRedirect, "/admin/settings")
+	})
+
 	// Health endpoint
 	r.GET("/health", func(c *gin.Context) {
 		response.Success(c, gin.H{"status": "ok"})

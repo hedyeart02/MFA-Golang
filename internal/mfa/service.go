@@ -47,6 +47,44 @@ func NewService(storage Storage, smtpSender *SMTPSender, cfg *config.Config, log
 	}
 }
 
+// SMTPSender returns the active SMTPSender instance.
+func (s *Service) SMTPSender() *SMTPSender {
+	return s.smtpSender
+}
+
+// UpdateSMTPSender safely swaps the active SMTPSender.
+func (s *Service) UpdateSMTPSender(sender *SMTPSender) {
+	s.smtpSender = sender
+}
+
+// TestEmail sends a test email using either provided parameters or active settings.
+func (s *Service) TestEmail(ctx context.Context, host string, port int, username, password, from, fromName, encryption, recipient string) error {
+	if host == "" {
+		host = s.cfg.SMTP.Host
+	}
+	if port <= 0 {
+		port = s.cfg.SMTP.Port
+	}
+	if username == "" {
+		username = s.cfg.SMTP.Username
+	}
+	if password == "" && host == s.cfg.SMTP.Host && username == s.cfg.SMTP.Username {
+		password = s.cfg.SMTP.Password
+	}
+	if from == "" {
+		from = s.cfg.SMTP.From
+	}
+	if fromName == "" {
+		fromName = s.cfg.SMTP.FromName
+	}
+	if encryption == "" {
+		encryption = s.cfg.SMTP.Encryption
+	}
+
+	sender := NewSMTPSender(host, port, username, password, from, fromName, encryption, s.logger)
+	return sender.SendTestEmail(ctx, recipient)
+}
+
 // CheckDummyOTP validates if the dummy OTP 000000 was supplied.
 func (s *Service) CheckDummyOTP(code string) (bool, error) {
 	if code != "000000" {

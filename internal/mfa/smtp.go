@@ -49,6 +49,7 @@ func NewSMTPSender(host string, port int, username, password, from, fromName, en
 	}
 }
 
+// Send sends an email with the verification code. In local/development mode with localhost, it logs the simulated code.
 func (s *SMTPSender) Send(ctx context.Context, recipient, code string) error {
 	if s.logger != nil {
 		s.logger.Info("dispatching MFA email OTP",
@@ -72,7 +73,36 @@ func (s *SMTPSender) Send(ctx context.Context, recipient, code string) error {
 
 	subject := "Your SAMLGuard Verification Code"
 	body := fmt.Sprintf("Your one-time verification code is:\r\n\r\n%s\r\n\r\nThis code will expire in 5 minutes. If you did not request this code, please ignore this email.", code)
+	return s.sendMail(ctx, recipient, subject, body)
+}
 
+// SendTestEmail sends an explicit test email to verify SMTP connectivity, credentials, and delivery.
+func (s *SMTPSender) SendTestEmail(ctx context.Context, recipient string) error {
+	if strings.TrimSpace(recipient) == "" {
+		return fmt.Errorf("recipient email address cannot be empty")
+	}
+	if strings.TrimSpace(s.host) == "" {
+		return fmt.Errorf("SMTP host cannot be empty")
+	}
+
+	subject := "SAMLGuard Enterprise Gateway - SMTP Test"
+	body := fmt.Sprintf(
+		"Hello,\r\n\r\n"+
+			"This is a verified test email sent from SAMLGuard Enterprise MFA Gateway.\r\n\r\n"+
+			"Configuration Details:\r\n"+
+			" • SMTP Host: %s\r\n"+
+			" • SMTP Port: %d\r\n"+
+			" • Encryption: %s\r\n"+
+			" • Sender: %s <%s>\r\n"+
+			" • Timestamp: %s\r\n\r\n"+
+			"If you received this message, your SMTP email delivery is configured properly and ready for production Email OTP.\r\n",
+		s.host, s.port, strings.ToUpper(s.encryption), s.fromName, s.from, time.Now().Format(time.RFC1123Z),
+	)
+
+	return s.sendMail(ctx, recipient, subject, body)
+}
+
+func (s *SMTPSender) sendMail(ctx context.Context, recipient, subject, body string) error {
 	msg := fmt.Sprintf("From: %s <%s>\r\n"+
 		"To: %s\r\n"+
 		"Subject: %s\r\n"+
