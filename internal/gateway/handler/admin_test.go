@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -86,6 +87,9 @@ smtp:
 	r.GET("/admin/settings", h.HandleAdminSettingsGet)
 	r.POST("/admin/settings", h.HandleAdminSettingsPost)
 	r.POST("/admin/settings/test-email", h.HandleAdminTestEmailPost)
+	r.POST("/admin/ita/sync", h.HandleAdminITASyncPost)
+	r.POST("/admin/users/add", h.HandleAdminUserAddPost)
+	r.POST("/admin/users/delete", h.HandleAdminUserDeletePost)
 	r.GET("/admin/cert/download", h.HandleAdminCertDownload)
 
 	return r, h, cfgFile
@@ -200,5 +204,71 @@ func TestAdminSettings_TestEmail(t *testing.T) {
 	}
 	if res["success"] == true {
 		t.Errorf("expected success false on empty recipient")
+	}
+}
+
+func TestAdminSettings_AddAndDeleteUser(t *testing.T) {
+	r, h, _ := setupTestAdminHandler(t)
+
+	// 1. Add user
+	addPayload := map[string]string{
+		"username":  "testoperator",
+		"email":     "testoperator@company.com",
+		"full_name": "Test Operator",
+	}
+	body, _ := json.Marshal(addPayload)
+	req := httptest.NewRequest("POST", "/admin/users/add", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", w.Code)
+	}
+
+	// Verify user is authorized
+	auth, err := h.mfaService.IsUserAuthorized(req.Context(), "testoperator")
+	if err != nil || !auth {
+		t.Fatalf("expected testoperator to be authorized, auth=%v, err=%v", auth, err)
+	}
+
+	// 2. Delete user
+	delPayload := map[string]string{"username": "testoperator"}
+	delBody, _ := json.Marshal(delPayload)
+	reqDel := httptest.NewRequest("POST", "/admin/users/delete", bytes.NewReader(delBody))
+	reqDel.Header.Set("Content-Type", "application/json")
+	wDel := httptest.NewRecorder()
+	r.ServeHTTP(wDel, reqDel)
+
+	if wDel.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", wDel.Code)
+	}
+
+	// Verify user is no longer authorized
+	authAfter, _ := h.mfaService.IsUserAuthorized(req.Context(), "testoperator")
+	if authAfter {
+		t.Fatalf("expected testoperator to NOT be authorized after deletion")
+	}
+}
+
+func TestAdminSettings_WhitelistEnforcement(t *testing.T) {
+	_, h, _ := setupTestAdminHandler(t)
+	ctx := context.Background()
+
+	// Default apc and itaadmin should be authorized
+	apcAuth, err := h.mfaService.IsUserAuthorized(ctx, "apc")
+	if err != nil || !apcAuth {
+		t.Fatalf("expected apc to be authorized by default, auth=%v, err=%v", apcAuth, err)
+	}
+
+	itaadminAuth, err := h.mfaService.IsUserAuthorized(ctx, "itaadmin@samlguard.local")
+	if err != nil || !itaadminAuth {
+		t.Fatalf("expected itaadmin to be authorized by default, auth=%v, err=%v", itaadminAuth, err)
+	}
+
+	// Unknown random email should be strictly BLOCKED!
+	randomAuth, err := h.mfaService.IsUserAuthorized(ctx, "realchromatic@gmail.com")
+	if err != nil || randomAuth {
+		t.Fatalf("expected random email to be BLOCKED, got auth=%v", randomAuth)
 	}
 }

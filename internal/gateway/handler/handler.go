@@ -212,7 +212,7 @@ func (h *SAMLHandler) HandleSSO(c *gin.Context) {
 			return
 		}
 		// Render mock upstream login form that posts a signed SAMLResponse to /saml/acs
-		h.renderMockUpstreamLogin(c, sessionID, outboundID)
+		h.renderMockUpstreamLogin(c, sessionID, outboundID, "", "")
 		return
 	}
 
@@ -510,6 +510,23 @@ func (h *SAMLHandler) HandleACS(c *gin.Context) {
 	}
 
 	userKey := fmt.Sprintf("%s|%s", upstreamEntityID, claims.SubjectNameID)
+
+	// Whitelist verification for inbound claims
+	if h.cfg.ITA.EnforceUserWhitelist {
+		authorized, _ := h.mfaService.IsUserAuthorized(c.Request.Context(), claims.SubjectNameID)
+		if !authorized && claims.Email != "" {
+			authorized, _ = h.mfaService.IsUserAuthorized(c.Request.Context(), claims.Email)
+		}
+		if !authorized {
+			h.logger.Warn("inbound assertion user rejected by ITA whitelist policy",
+				zap.String("subject", claims.SubjectNameID),
+				zap.String("email", claims.Email),
+			)
+			c.Header("Content-Type", "text/html; charset=utf-8")
+			c.String(http.StatusForbidden, `<div style="font-family: sans-serif; padding: 2.5rem; background: #0f172a; color: #fecaca; min-height: 100vh; text-align: center;"><div style="max-width: 500px; margin: 3rem auto; background: #1e293b; padding: 2rem; border-radius: 12px; border: 1px solid #b91c1c;"><h2 style="color: #f87171; margin-top: 0;">⚠️ Akses Disekat</h2><p style="color: #e2e8f0; line-height: 1.6;">Akaun <strong>%s</strong> tidak dijumpai dalam rekod Schneider IT Advisor. Sila hubungi Administrator untuk jemputan akses.</p></div></div>`, claims.SubjectNameID)
+			return
+		}
+	}
 
 	state.UpstreamEntityID = upstreamEntityID
 	state.SubjectNameID = claims.SubjectNameID
@@ -817,7 +834,7 @@ func (h *SAMLHandler) renderMFAChallengeView(c *gin.Context, state *AuthSessionS
 	c.String(http.StatusOK, renderInlineMFAPage(vm))
 }
 
-func (h *SAMLHandler) renderMockUpstreamLogin(c *gin.Context, sessionID, outboundID string) {
+func (h *SAMLHandler) renderMockUpstreamLogin(c *gin.Context, sessionID, outboundID, prefillUser, errorMessage string) {
 	mockDestination := h.cfg.SAML.ACSURL
 	if mockDestination == "" {
 		mockDestination = "/saml/acs"
@@ -851,6 +868,11 @@ func (h *SAMLHandler) renderMockUpstreamLogin(c *gin.Context, sessionID, outboun
 		defaultSAMLResponse = result.SAMLResponse
 	}
 
+	errorBanner := ""
+	if errorMessage != "" {
+		errorBanner = fmt.Sprintf(`<div style="background: #450a0a; border: 1px solid #b91c1c; color: #fecaca; padding: 0.8rem 1rem; border-radius: 8px; margin-bottom: 1.25rem; font-size: 0.875rem; text-align: left; line-height: 1.4;">⚠️ <strong>Akses Disekat:</strong> %s</div>`, errorMessage)
+	}
+
 	html := fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head>
@@ -859,16 +881,16 @@ func (h *SAMLHandler) renderMockUpstreamLogin(c *gin.Context, sessionID, outboun
 	<title>SAMLGuard - Corporate Sign In</title>
 	<style>
 		body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-		.card { background: #1e293b; padding: 2.5rem; border-radius: 16px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); max-width: 440px; width: 90%%%%; border: 1px solid #334155; }
-		.logo { font-size: 2.2rem; text-align: center; margin-bottom: 0.5rem; }
-		h1 { color: #38bdf8; font-size: 1.4rem; font-weight: 700; margin-bottom: 0.5rem; text-align: center; }
-		.subtitle { color: #94a3b8; font-size: 0.85rem; text-align: center; margin-bottom: 1.5rem; }
-		label { display: block; font-size: 0.875rem; font-weight: 500; color: #94a3b8; margin-bottom: 0.5rem; }
+		.card { background: #1e293b; padding: 2.5rem; border-radius: 16px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); max-width: 440px; width: 90%%%%; border: 1px solid #334155; text-align: center; }
+		.logo { font-size: 2.2rem; margin-bottom: 0.5rem; }
+		h1 { color: #38bdf8; font-size: 1.4rem; font-weight: 700; margin-bottom: 0.5rem; }
+		.subtitle { color: #94a3b8; font-size: 0.85rem; margin-bottom: 1.5rem; }
+		label { display: block; font-size: 0.875rem; font-weight: 500; color: #94a3b8; margin-bottom: 0.5rem; text-align: left; }
 		input[type=text] { width: 100%%%%; padding: 0.875rem; border: 2px solid #334155; border-radius: 10px; background: #0f172a; color: #e2e8f0; font-size: 1rem; box-sizing: border-box; margin-bottom: 1.25rem; transition: border-color 0.2s; }
 		input[type=text]:focus { outline: none; border-color: #38bdf8; }
 		button.submit-btn { width: 100%%%%; padding: 0.875rem; border: none; border-radius: 10px; background: linear-gradient(135deg, #2563eb, #1d4ed8); color: white; font-size: 1rem; font-weight: 600; cursor: pointer; transition: transform 0.1s, box-shadow 0.2s; }
 		button.submit-btn:hover { background: #1d4ed8; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4); }
-		.footer { margin-top: 1.5rem; text-align: center; font-size: 0.75rem; color: #64748b; }
+		.footer { margin-top: 1.5rem; font-size: 0.75rem; color: #64748b; }
 	</style>
 </head>
 <body>
@@ -876,18 +898,19 @@ func (h *SAMLHandler) renderMockUpstreamLogin(c *gin.Context, sessionID, outboun
 		<div class="logo">🛡️</div>
 		<h1>Corporate Sign In</h1>
 		<p class="subtitle">Enter your Schneider Electric IT Advisor account</p>
+		%s
 		<form method="POST" action="/mock-idp/submit">
 			<input type="hidden" name="session_id" value="%s"/>
 			<input type="hidden" name="outbound_id" value="%s"/>
 			<input type="hidden" name="SAMLResponse" value="%s"/>
 			<label for="username">Username or Corporate Email</label>
-			<input type="text" id="username" name="username" placeholder="e.g. itaadmin or user@domain.com" required autofocus autocomplete="username"/>
+			<input type="text" id="username" name="username" value="%s" placeholder="e.g. itaadmin or user@domain.com" required autofocus autocomplete="username"/>
 			<button type="submit" class="submit-btn">Continue to Verification &rarr;</button>
 		</form>
 		<div class="footer">SAMLGuard Enterprise MFA Gateway</div>
 	</div>
 </body>
-</html>`, sessionID, outboundID, defaultSAMLResponse)
+</html>`, errorBanner, sessionID, outboundID, defaultSAMLResponse, prefillUser)
 	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
 }
 
@@ -906,6 +929,19 @@ func (h *SAMLHandler) HandleMockIDPSubmit(c *gin.Context) {
 	if err != nil || state == nil {
 		c.Redirect(http.StatusFound, "/login")
 		return
+	}
+
+	// Whitelist verification: block unauthorized users before generating any SAML token
+	if h.cfg.ITA.EnforceUserWhitelist {
+		authorized, err := h.mfaService.IsUserAuthorized(c.Request.Context(), rawUser)
+		if err != nil || !authorized {
+			h.logger.Warn("unauthorized login attempt blocked: user not found in ITA record",
+				zap.String("identifier", rawUser),
+				zap.String("session_id", sessionID),
+			)
+			h.renderMockUpstreamLogin(c, sessionID, outboundID, rawUser, fmt.Sprintf("Akaun '%s' tidak dijumpai dalam rekod IT Advisor. Sila hubungi Administrator untuk jemputan akses.", rawUser))
+			return
+		}
 	}
 
 	mockDestination := h.cfg.SAML.ACSURL

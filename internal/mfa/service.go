@@ -57,6 +57,47 @@ func (s *Service) UpdateSMTPSender(sender *SMTPSender) {
 	s.smtpSender = sender
 }
 
+// Storage returns the underlying Storage instance.
+func (s *Service) Storage() Storage {
+	return s.storage
+}
+
+// IsUserAuthorized checks whether an identifier (username or email) is authorized to log in.
+func (s *Service) IsUserAuthorized(ctx context.Context, identifier string) (bool, error) {
+	if s.cfg != nil && !s.cfg.ITA.EnforceUserWhitelist {
+		return true, nil // Whitelist enforcement disabled
+	}
+
+	// 1. Check database authorized users table (synced from ITA or added manually)
+	if s.storage != nil {
+		authorized, err := s.storage.IsUserAuthorized(ctx, identifier)
+		if err == nil && authorized {
+			return true, nil
+		}
+	}
+
+	// 2. Check config manual fallback list
+	if s.cfg != nil {
+		normalized := strings.ToLower(strings.TrimSpace(identifier))
+		for _, u := range s.cfg.ITA.ManualAllowedUsers {
+			if strings.ToLower(strings.TrimSpace(u)) == normalized {
+				return true, nil
+			}
+		}
+		// Also check prefix if identifier is an email (e.g. itaadmin@samlguard.local -> itaadmin)
+		if atIdx := strings.Index(normalized, "@"); atIdx > 0 {
+			prefix := normalized[:atIdx]
+			for _, u := range s.cfg.ITA.ManualAllowedUsers {
+				if strings.ToLower(strings.TrimSpace(u)) == prefix {
+					return true, nil
+				}
+			}
+		}
+	}
+
+	return false, nil
+}
+
 // TestEmail sends a test email using either provided parameters or active settings.
 func (s *Service) TestEmail(ctx context.Context, host string, port int, username, password, from, fromName, encryption, recipient string) error {
 	if host == "" {

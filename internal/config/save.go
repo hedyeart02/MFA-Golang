@@ -41,6 +41,13 @@ type AdminSettingsPayload struct {
 	SMTPFrom       string `json:"smtp_from" form:"smtp_from"`
 	SMTPFromName   string `json:"smtp_from_name" form:"smtp_from_name"`
 	SMTPEncryption string `json:"smtp_encryption" form:"smtp_encryption"`
+
+	// ITA User Sync & Whitelist Guard
+	ITAAPIURL             string   `json:"ita_api_url" form:"ita_api_url"`
+	ITAAPIUsername        string   `json:"ita_api_username" form:"ita_api_username"`
+	ITAAPIPassword        string   `json:"ita_api_password" form:"ita_api_password"`
+	ITAEnforceWhitelist   bool     `json:"ita_enforce_whitelist" form:"ita_enforce_whitelist"`
+	ITAManualAllowedUsers []string `json:"ita_manual_allowed_users" form:"ita_manual_allowed_users"`
 }
 
 // SaveConfig updates the in-memory Config and persists the changes to the specified YAML file.
@@ -186,6 +193,40 @@ func SaveConfig(filePath string, cfg *Config, payload *AdminSettingsPayload) err
 	if payload.SMTPEncryption != "" {
 		smtpMap["encryption"] = strings.ToLower(strings.TrimSpace(payload.SMTPEncryption))
 		cfg.SMTP.Encryption = smtpMap["encryption"].(string)
+	}
+
+	// Update ITA section
+	itaMap, _ := raw["ita"].(map[string]interface{})
+	if itaMap == nil {
+		itaMap = make(map[string]interface{})
+		raw["ita"] = itaMap
+	}
+	if payload.ITAAPIURL != "" {
+		itaMap["api_url"] = strings.TrimSpace(payload.ITAAPIURL)
+		cfg.ITA.APIURL = itaMap["api_url"].(string)
+	}
+	itaMap["api_username"] = strings.TrimSpace(payload.ITAAPIUsername)
+	cfg.ITA.APIUsername = itaMap["api_username"].(string)
+
+	if payload.ITAAPIPassword != "" {
+		itaMap["api_password"] = payload.ITAAPIPassword
+		cfg.ITA.APIPassword = payload.ITAAPIPassword
+	}
+	itaMap["enforce_user_whitelist"] = payload.ITAEnforceWhitelist
+	cfg.ITA.EnforceUserWhitelist = payload.ITAEnforceWhitelist
+
+	if len(payload.ITAManualAllowedUsers) > 0 {
+		var list []interface{}
+		var cfgList []string
+		for _, u := range payload.ITAManualAllowedUsers {
+			tu := strings.TrimSpace(u)
+			if tu != "" {
+				list = append(list, tu)
+				cfgList = append(cfgList, tu)
+			}
+		}
+		itaMap["manual_allowed_users"] = list
+		cfg.ITA.ManualAllowedUsers = cfgList
 	}
 
 	// 3. Write back cleanly

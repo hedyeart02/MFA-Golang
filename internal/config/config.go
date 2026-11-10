@@ -26,6 +26,7 @@ type Config struct {
 	Plugins  PluginsConfig  `mapstructure:"plugins"`
 	Security SecurityConfig `mapstructure:"security"`
 	SMTP     SMTPConfig     `mapstructure:"smtp"`
+	ITA      ITAConfig      `mapstructure:"ita"`
 	Env      string         `mapstructure:"env"`
 
 	// Gateway Feature Flags
@@ -131,6 +132,15 @@ type SMTPConfig struct {
 	Encryption string `mapstructure:"encryption"` // "starttls", "tls", "none"
 }
 
+type ITAConfig struct {
+	APIURL               string        `mapstructure:"api_url"`
+	APIUsername          string        `mapstructure:"api_username"`
+	APIPassword          string        `mapstructure:"api_password"`
+	EnforceUserWhitelist bool          `mapstructure:"enforce_user_whitelist"`
+	AutoSyncInterval     time.Duration `mapstructure:"auto_sync_interval"`
+	ManualAllowedUsers   []string      `mapstructure:"manual_allowed_users"`
+}
+
 func (c *Config) IsProduction() bool {
 	if c == nil {
 		return false
@@ -220,6 +230,12 @@ func SetDefaults(v *viper.Viper) {
 
 	v.SetDefault("smtp.port", 587)
 	v.SetDefault("smtp.encryption", "starttls")
+
+	v.SetDefault("ita.api_url", "https://192.168.0.119/api/current")
+	v.SetDefault("ita.api_username", "apc")
+	v.SetDefault("ita.enforce_user_whitelist", true)
+	v.SetDefault("ita.auto_sync_interval", 30*time.Minute)
+	v.SetDefault("ita.manual_allowed_users", []string{"apc", "itaadmin"})
 
 	v.SetDefault("audit.enabled", true)
 	v.SetDefault("audit.async", true)

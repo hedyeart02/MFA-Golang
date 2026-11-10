@@ -41,6 +41,17 @@ type MFASecret struct {
 	UpdatedAt            time.Time
 }
 
+// AuthorizedUser represents an authorized user in the system (from ITA or manual whitelist).
+type AuthorizedUser struct {
+	ID        int64     `json:"id"`
+	Username  string    `json:"username"`
+	Email     string    `json:"email"`
+	FullName  string    `json:"full_name"`
+	Source    string    `json:"source"` // "ita_sync" or "manual"
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type Storage interface {
 	Init(ctx context.Context) error
 	Close() error
@@ -58,6 +69,13 @@ type Storage interface {
 	SaveEmailOTP(ctx context.Context, userKey string, hmacDigest []byte, expiresAt, resendAfter time.Time) error
 	VerifyAndConsumeEmailOTP(ctx context.Context, userKey string, code string, pepper string, maxAttempts int) (bool, error)
 	CheckEmailOTPResend(ctx context.Context, userKey string) (time.Duration, error)
+
+	// User Whitelist / Authorization methods
+	IsUserAuthorized(ctx context.Context, identifier string) (bool, error)
+	SaveAuthorizedUsers(ctx context.Context, users []AuthorizedUser) error
+	ListAuthorizedUsers(ctx context.Context) ([]AuthorizedUser, error)
+	AddAuthorizedUser(ctx context.Context, user AuthorizedUser) error
+	DeleteAuthorizedUser(ctx context.Context, username string) error
 }
 
 type SQLiteStorage struct {
@@ -195,6 +213,19 @@ func (s *SQLiteStorage) Init(ctx context.Context) error {
 		updated_at DATETIME NOT NULL
 	);
 	CREATE INDEX IF NOT EXISTS idx_email_otps_expiry ON email_otps(expires_at);
+
+	CREATE TABLE IF NOT EXISTS authorized_users (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		username TEXT NOT NULL COLLATE NOCASE,
+		email TEXT COLLATE NOCASE,
+		full_name TEXT,
+		source TEXT NOT NULL DEFAULT 'ita_sync',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		UNIQUE(username)
+	);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_authorized_users_username ON authorized_users(username);
+	CREATE INDEX IF NOT EXISTS idx_authorized_users_email ON authorized_users(email);
 	`
 
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
@@ -206,6 +237,17 @@ func (s *SQLiteStorage) Init(ctx context.Context) error {
 	_, _ = s.db.ExecContext(ctx, "ALTER TABLE mfa_secrets ADD COLUMN locked_until DATETIME;")
 	_, _ = s.db.ExecContext(ctx, "DROP INDEX IF EXISTS idx_mfa_secrets_user_status;")
 	_, _ = s.db.ExecContext(ctx, "CREATE UNIQUE INDEX IF NOT EXISTS idx_mfa_secrets_user_status ON mfa_secrets(user_key, status);")
+
+	// Seed default ITA administrator accounts if table is empty
+	var userCount int
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM authorized_users;").Scan(&userCount); err == nil && userCount == 0 {
+		now := time.Now()
+		_, _ = s.db.ExecContext(ctx, `
+			INSERT OR IGNORE INTO authorized_users (username, email, full_name, source, created_at, updated_at) VALUES 
+			('apc', 'apc@samlguard.local', 'Default APC Administrator', 'system_default', ?, ?),
+			('itaadmin', 'itaadmin@samlguard.local', 'ITA Administrator', 'system_default', ?, ?)
+		`, now, now, now, now)
+	}
 
 	return nil
 }
@@ -477,4 +519,135 @@ func (s *SQLiteStorage) VerifyAndConsumeEmailOTP(ctx context.Context, userKey st
 	}
 
 	return true, nil
+}
+
+// IsUserAuthorized checks if a username, email, or prefix exists in the authorized_users table.
+func (s *SQLiteStorage) IsUserAuthorized(ctx context.Context, identifier string) (bool, error) {
+	trimmed := strings.ToLower(strings.TrimSpace(identifier))
+	if trimmed == "" {
+		return false, nil
+	}
+
+	// 1. Direct match on username or email
+	query := `SELECT COUNT(1) FROM authorized_users WHERE LOWER(username) = ? OR LOWER(email) = ?`
+	var count int
+	if err := s.db.QueryRowContext(ctx, query, trimmed, trimmed).Scan(&count); err != nil {
+		return false, err
+	}
+	if count > 0 {
+		return true, nil
+	}
+
+	// 2. If identifier has domain (e.g. user@domain.com), also check prefix as username
+	if atIdx := strings.Index(trimmed, "@"); atIdx > 0 {
+		prefix := trimmed[:atIdx]
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM authorized_users WHERE LOWER(username) = ?`, prefix).Scan(&count); err == nil && count > 0 {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// SaveAuthorizedUsers atomically saves or updates multiple users from ITA API sync.
+func (s *SQLiteStorage) SaveAuthorizedUsers(ctx context.Context, users []AuthorizedUser) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	now := time.Now()
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO authorized_users (username, email, full_name, source, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(username) DO UPDATE SET
+			email = CASE WHEN excluded.email != '' THEN excluded.email ELSE authorized_users.email END,
+			full_name = CASE WHEN excluded.full_name != '' THEN excluded.full_name ELSE authorized_users.full_name END,
+			source = excluded.source,
+			updated_at = excluded.updated_at
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, u := range users {
+		uname := strings.TrimSpace(u.Username)
+		if uname == "" {
+			continue
+		}
+		source := u.Source
+		if source == "" {
+			source = "ita_sync"
+		}
+		if _, err := stmt.ExecContext(ctx, uname, strings.TrimSpace(u.Email), strings.TrimSpace(u.FullName), source, now, now); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// ListAuthorizedUsers retrieves all authorized users from the database.
+func (s *SQLiteStorage) ListAuthorizedUsers(ctx context.Context) ([]AuthorizedUser, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, username, COALESCE(email, ''), COALESCE(full_name, ''), source, created_at, updated_at FROM authorized_users ORDER BY username ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []AuthorizedUser
+	for rows.Next() {
+		var u AuthorizedUser
+		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.FullName, &u.Source, &u.CreatedAt, &u.UpdatedAt); err != nil {
+			return nil, err
+		}
+		list = append(list, u)
+	}
+	return list, nil
+}
+
+// AddAuthorizedUser adds a single authorized user (manual whitelist).
+func (s *SQLiteStorage) AddAuthorizedUser(ctx context.Context, user AuthorizedUser) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	uname := strings.TrimSpace(user.Username)
+	if uname == "" {
+		return errors.New("username cannot be empty")
+	}
+	source := user.Source
+	if source == "" {
+		source = "manual"
+	}
+
+	now := time.Now()
+	query := `
+		INSERT INTO authorized_users (username, email, full_name, source, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(username) DO UPDATE SET
+			email = excluded.email,
+			full_name = excluded.full_name,
+			source = excluded.source,
+			updated_at = excluded.updated_at
+	`
+	_, err := s.db.ExecContext(ctx, query, uname, strings.TrimSpace(user.Email), strings.TrimSpace(user.FullName), source, now, now)
+	return err
+}
+
+// DeleteAuthorizedUser removes a user from the authorized users table.
+func (s *SQLiteStorage) DeleteAuthorizedUser(ctx context.Context, username string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	trimmed := strings.TrimSpace(username)
+	if trimmed == "" {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, `DELETE FROM authorized_users WHERE LOWER(username) = LOWER(?)`, trimmed)
+	return err
 }

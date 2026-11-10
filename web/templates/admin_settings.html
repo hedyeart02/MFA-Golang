@@ -582,6 +582,110 @@
                         </ol>
                     </div>
                 </div>
+
+                <!-- ITA User Account Synchronization & Whitelist Guard Card -->
+                <div class="card" style="margin-top: 1.5rem;">
+                    <div class="card-header">
+                        <h2>🛡️ ITA User Synchronization & Whitelist Protection</h2>
+                        <span class="badge {{if .Settings.ITAEnforceWhitelist}}badge-success{{else}}badge-warning{{end}}">
+                            {{if .Settings.ITAEnforceWhitelist}}● Whitelist Active{{else}}○ Whitelist Disabled{{end}}
+                        </span>
+                    </div>
+                    <p style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 1.25rem;">
+                        Halang pengguna luar daripada mendaftar sendiri dan sekat penciptaan akaun kosong (*blank accounts*) dalam Schneider IT Advisor. Hanya pengguna yang sah dalam rekod ITA sahaja dibenarkan melepasi pengesahan.
+                    </p>
+
+                    <div class="form-group" style="padding: 1rem; background: #0f172a; border-radius: 8px; border: 1px solid #334155; margin-bottom: 1.5rem;">
+                        <label class="toggle-label">
+                            <input type="checkbox" id="ita_enforce_whitelist" name="ita_enforce_whitelist" value="true" {{if .Settings.ITAEnforceWhitelist}}checked{{end}}>
+                            <span class="toggle-switch"></span>
+                            <div>
+                                <span style="font-weight: 600; color: #f8fafc;">Enforce User Whitelist (Sekat Akaun Tidak Berdaftar)</span>
+                                <p class="help-text" style="margin-top: 0.2rem;">
+                                    Bila diaktifkan, SAMLGuard akan menyekat sebarang cubaan login oleh username/emel yang tiada dalam rekod ITA sebelum sebarang token SAML dihantar.
+                                </p>
+                            </div>
+                        </label>
+                    </div>
+
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="ita_api_url">ITA REST API Base URL</label>
+                            <input type="text" id="ita_api_url" name="ita_api_url" value="{{.Settings.ITAAPIURL}}" placeholder="https://192.168.0.119/api/current">
+                            <p class="help-text">Endpoint REST API ITA untuk tarik (*fetch*) senarai pengguna.</p>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="ita_api_username">ITA Admin Username</label>
+                            <input type="text" id="ita_api_username" name="ita_api_username" value="{{.Settings.ITAAPIUsername}}" placeholder="apc">
+                            <p class="help-text">Akaun pentadbir ITA dengan kebenaran membaca senarai pengguna.</p>
+                        </div>
+                    </div>
+
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="ita_api_password">ITA Admin Password</label>
+                            <div class="input-group">
+                                <input type="password" id="ita_api_password" name="ita_api_password" placeholder="•••••••• (Kosongkan jika tidak mahu ubah)">
+                                <button type="button" class="btn btn-secondary" onclick="togglePasswordVisibility('ita_api_password')">👁️</button>
+                            </div>
+                        </div>
+
+                        <div class="form-group" style="display: flex; flex-direction: column; justify-content: flex-end;">
+                            <button type="button" class="btn btn-info" id="btnITASync" onclick="syncUsersFromITA()" style="width: 100%; justify-content: center;">
+                                <span id="itaSyncSpinner" class="spinner" style="display: none;"></span>
+                                <span>🔄 Sync Users From ITA Now</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="itaSyncResult" style="margin-top: 1rem; display: none;"></div>
+
+                    <!-- Authorized Users List Table -->
+                    <div style="margin-top: 1.5rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                            <label style="margin-bottom: 0;">Pengguna Sah Dibenarkan Login ({{len .AuthorizedUsers}} Akaun)</label>
+                            <button type="button" class="btn btn-sm btn-secondary" onclick="showAddUserPrompt()">+ Tambah Pengguna Manual</button>
+                        </div>
+                        <table class="table" id="authorizedUsersTable">
+                            <thead>
+                                <tr>
+                                    <th>Username</th>
+                                    <th>Emel</th>
+                                    <th>Nama Penuh</th>
+                                    <th>Sumber</th>
+                                    <th style="width: 80px;">Tindakan</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {{range .AuthorizedUsers}}
+                                <tr>
+                                    <td><strong style="color: #93c5fd;">{{.Username}}</strong></td>
+                                    <td>{{if .Email}}{{.Email}}{{else}}<span style="color: #64748b;">-</span>{{end}}</td>
+                                    <td>{{if .FullName}}{{.FullName}}{{else}}<span style="color: #64748b;">-</span>{{end}}</td>
+                                    <td>
+                                        <span class="badge {{if eq .Source "ita_sync"}}badge-info{{else if eq .Source "manual"}}badge-warning{{else}}badge-success{{end}}">
+                                            {{.Source}}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        {{if ne .Username "apc"}}
+                                        <button type="button" class="btn btn-sm btn-danger" onclick="deleteAuthorizedUser('{{.Username}}')">Padam</button>
+                                        {{else}}
+                                        <span style="font-size: 0.75rem; color: #64748b;">System</span>
+                                        {{end}}
+                                    </td>
+                                </tr>
+                                {{else}}
+                                <tr>
+                                    <td colspan="5" style="text-align: center; color: #64748b; padding: 1.5rem;">
+                                        Tiada pengguna dalam senarai. Klik "Sync Users From ITA Now" untuk muat turun akaun dari ITA.
+                                    </td>
+                                </tr>
+                                {{end}}
+                            </tbody>
+                        </table>
+                    </div>
             </div>
 
             <!-- TAB 3: MFA & SMTP -->
@@ -959,6 +1063,92 @@
             } finally {
                 btn.disabled = false;
                 spinner.style.display = 'none';
+            }
+        }
+
+        async function syncUsersFromITA() {
+            const btn = document.getElementById('btnITASync');
+            const spinner = document.getElementById('itaSyncSpinner');
+            const resultBox = document.getElementById('itaSyncResult');
+
+            btn.disabled = true;
+            spinner.style.display = 'inline-block';
+            resultBox.style.display = 'none';
+
+            const payload = {
+                api_url: document.getElementById('ita_api_url').value.trim(),
+                api_username: document.getElementById('ita_api_username').value.trim(),
+                api_password: document.getElementById('ita_api_password').value
+            };
+
+            try {
+                const resp = await fetch('/admin/ita/sync', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await resp.json();
+
+                resultBox.style.display = 'block';
+                if (data.success) {
+                    resultBox.innerHTML = `<div class="alert alert-success" style="margin-bottom:0;">✅ ${data.message} Halaman sedang disegarkan...</div>`;
+                    setTimeout(() => { window.location.reload(); }, 1500);
+                } else {
+                    resultBox.innerHTML = `<div class="alert alert-danger" style="margin-bottom:0;">⚠️ <strong>Sync Gagal:</strong> ${data.error}</div>`;
+                }
+            } catch (err) {
+                resultBox.style.display = 'block';
+                resultBox.innerHTML = `<div class="alert alert-danger" style="margin-bottom:0;">⚠️ <strong>Ralat Rangkaian:</strong> ${err.message}</div>`;
+            } finally {
+                btn.disabled = false;
+                spinner.style.display = 'none';
+            }
+        }
+
+        async function showAddUserPrompt() {
+            const username = prompt("Masukkan Username ITA (cth: itaadmin atau nama pengguna baru):");
+            if (!username || !username.trim()) return;
+
+            const email = prompt("Masukkan Emel (pilihan):", "") || "";
+            const fullName = prompt("Masukkan Nama Penuh (pilihan):", "") || "";
+
+            try {
+                const resp = await fetch('/admin/users/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: username.trim(), email: email.trim(), full_name: fullName.trim() })
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    alert(data.message);
+                    window.location.reload();
+                } else {
+                    alert("Gagal: " + data.error);
+                }
+            } catch (err) {
+                alert("Ralat: " + err.message);
+            }
+        }
+
+        async function deleteAuthorizedUser(username) {
+            if (!confirm(`Adakah anda pasti mahu memadam pengguna '${username}' daripada senarai sah? Pengguna ini tidak lagi boleh login.`)) {
+                return;
+            }
+
+            try {
+                const resp = await fetch('/admin/users/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: username })
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    window.location.reload();
+                } else {
+                    alert("Gagal: " + data.error);
+                }
+            } catch (err) {
+                alert("Ralat: " + err.message);
             }
         }
     </script>

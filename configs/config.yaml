@@ -92,6 +92,16 @@ services:
   api_key: ""
   timeout: 10s
 
+ita:
+  api_url: "https://192.168.0.119/api/current"
+  api_username: "apc"
+  api_password: ""
+  enforce_user_whitelist: true
+  auto_sync_interval: 30m
+  manual_allowed_users:
+    - "apc"
+    - "itaadmin"
+
 logging:
   level: "info"
   format: "json"

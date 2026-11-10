@@ -201,6 +201,9 @@ func SetupAppWithCleanup(cfg *config.Config, appLogger *logger.Logger) (*gin.Eng
 	r.GET("/admin/settings", samlHandler.HandleAdminSettingsGet)
 	r.POST("/admin/settings", samlHandler.HandleAdminSettingsPost)
 	r.POST("/admin/settings/test-email", samlHandler.HandleAdminTestEmailPost)
+	r.POST("/admin/ita/sync", samlHandler.HandleAdminITASyncPost)
+	r.POST("/admin/users/add", samlHandler.HandleAdminUserAddPost)
+	r.POST("/admin/users/delete", samlHandler.HandleAdminUserDeletePost)
 	r.GET("/admin/cert/download", samlHandler.HandleAdminCertDownload)
 	r.GET("/admin", func(c *gin.Context) {
 		c.Redirect(http.StatusTemporaryRedirect, "/admin/settings")

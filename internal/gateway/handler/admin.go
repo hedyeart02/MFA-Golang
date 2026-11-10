@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/pem"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/hidayat-SE/samlguard/internal/config"
+	"github.com/hidayat-SE/samlguard/internal/ita"
 	"github.com/hidayat-SE/samlguard/internal/mfa"
 	"github.com/hidayat-SE/samlguard/web"
 	"go.uber.org/zap"
@@ -37,6 +39,7 @@ type AdminSettingsViewModel struct {
 	Port                int
 	AllowedAudiencesStr string
 	CertInfo            CertDetails
+	AuthorizedUsers     []mfa.AuthorizedUser
 	ServerTimeUTC       string
 	ServerTimeLocal     string
 	SuccessMessage      string
@@ -115,6 +118,12 @@ func (cHandler *SAMLHandler) HandleAdminSettingsPost(c *gin.Context) {
 	payload.SMTPFromName = strings.TrimSpace(c.PostForm("smtp_from_name"))
 	payload.SMTPEncryption = strings.ToLower(strings.TrimSpace(c.PostForm("smtp_encryption")))
 
+	// ITA API Integration & User Whitelist
+	payload.ITAAPIURL = strings.TrimSpace(c.PostForm("ita_api_url"))
+	payload.ITAAPIUsername = strings.TrimSpace(c.PostForm("ita_api_username"))
+	payload.ITAAPIPassword = c.PostForm("ita_api_password") // if empty, SaveConfig preserves current
+	payload.ITAEnforceWhitelist = c.PostForm("ita_enforce_whitelist") == "true"
+
 	// Persist to configs/config.yaml and update runtime in-memory
 	configPath := "configs/config.yaml"
 	if err := config.SaveConfig(configPath, cHandler.cfg, &payload); err != nil {
@@ -141,11 +150,117 @@ func (cHandler *SAMLHandler) HandleAdminSettingsPost(c *gin.Context) {
 		zap.String("path", configPath),
 		zap.String("entity_id", cHandler.cfg.SAML.EntityID),
 		zap.String("acs_url", cHandler.cfg.SAML.ACSURL),
-		zap.String("smtp_host", cHandler.cfg.SMTP.Host),
+		zap.Bool("enforce_whitelist", cHandler.cfg.ITA.EnforceUserWhitelist),
 	)
 
 	vm := cHandler.buildAdminViewModel("Configuration updated successfully and saved to "+configPath, "")
 	cHandler.renderAdminSettings(c, vm)
+}
+
+// HandleAdminITASyncPost connects to ITA API, fetches current users, and updates SQLite.
+func (h *SAMLHandler) HandleAdminITASyncPost(c *gin.Context) {
+	var req struct {
+		APIURL      string `json:"api_url"`
+		APIUsername string `json:"api_username"`
+		APIPassword string `json:"api_password"`
+	}
+	_ = c.ShouldBindJSON(&req)
+
+	apiURL := req.APIURL
+	if apiURL == "" {
+		apiURL = h.cfg.ITA.APIURL
+	}
+	username := req.APIUsername
+	if username == "" {
+		username = h.cfg.ITA.APIUsername
+	}
+	password := req.APIPassword
+	if password == "" {
+		password = h.cfg.ITA.APIPassword
+	}
+
+	itaClient := ita.NewClient(15 * time.Second)
+	users, err := itaClient.FetchUsers(c.Request.Context(), apiURL, username, password)
+	if err != nil {
+		h.logger.Warn("ITA user sync failed", zap.Error(err), zap.String("api_url", apiURL))
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	if h.mfaService != nil && h.mfaService.Storage() != nil {
+		if err := h.mfaService.Storage().SaveAuthorizedUsers(c.Request.Context(), users); err != nil {
+			h.logger.Error("saving synced ITA users failed", zap.Error(err))
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"error":   fmt.Sprintf("Failed to save synced users: %v", err),
+			})
+			return
+		}
+	}
+
+	h.logger.Info("successfully synced users from Schneider ITA",
+		zap.Int("user_count", len(users)),
+		zap.String("api_url", apiURL),
+	)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": fmt.Sprintf("Berjaya! %d pengguna disegerakkan dari Schneider IT Advisor.", len(users)),
+		"count":   len(users),
+		"users":   users,
+	})
+}
+
+// HandleAdminUserAddPost manually adds an authorized user.
+func (h *SAMLHandler) HandleAdminUserAddPost(c *gin.Context) {
+	var req struct {
+		Username string `json:"username"`
+		Email    string `json:"email"`
+		FullName string `json:"full_name"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Username) == "" {
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": "Username is required"})
+		return
+	}
+
+	user := mfa.AuthorizedUser{
+		Username: strings.TrimSpace(req.Username),
+		Email:    strings.TrimSpace(req.Email),
+		FullName: strings.TrimSpace(req.FullName),
+		Source:   "manual",
+	}
+
+	if h.mfaService != nil && h.mfaService.Storage() != nil {
+		if err := h.mfaService.Storage().AddAuthorizedUser(c.Request.Context(), user); err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
+			return
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": fmt.Sprintf("Pengguna '%s' berjaya ditambah.", user.Username)})
+}
+
+// HandleAdminUserDeletePost removes a user from authorized_users table.
+func (h *SAMLHandler) HandleAdminUserDeletePost(c *gin.Context) {
+	var req struct {
+		Username string `json:"username"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Username) == "" {
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": "Username is required"})
+		return
+	}
+
+	if h.mfaService != nil && h.mfaService.Storage() != nil {
+		if err := h.mfaService.Storage().DeleteAuthorizedUser(c.Request.Context(), req.Username); err != nil {
+			c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
+			return
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": fmt.Sprintf("Pengguna '%s' telah dipadam.", req.Username)})
 }
 
 // HandleAdminTestEmailPost executes a real-time SMTP test and returns JSON status.
@@ -233,37 +348,50 @@ func (h *SAMLHandler) HandleAdminCertDownload(c *gin.Context) {
 
 func (h *SAMLHandler) buildAdminViewModel(successMsg, errorMsg string) *AdminSettingsViewModel {
 	payload := &config.AdminSettingsPayload{
-		IdPEntityID:        h.cfg.SAML.IdPEntityID,
-		IdPSSOURL:          h.cfg.SAML.IdPSSOURL,
-		IdPMetadataURL:     h.cfg.SAML.IdPMetadataURL,
-		IdPCertFile:        h.cfg.SAML.IdPCertFile,
-		EntityID:           h.cfg.SAML.EntityID,
-		ACSURL:             h.cfg.SAML.ACSURL,
-		SSOURL:             h.cfg.SAML.SSOURL,
-		SLOURL:             h.cfg.SAML.SLOURL,
-		AllowedAudiences:   h.cfg.SAML.AllowedAudiences,
-		GroupMapping:       h.cfg.SAML.GroupMapping,
-		MFADefaultProvider: h.cfg.MFA.DefaultProvider,
-		MFAIssuer:          h.cfg.MFA.Issuer,
-		OTPExpiry:          h.cfg.MFA.OTPExpiry,
-		ResendCooldown:     h.cfg.MFA.ResendCooldown,
-		AllowDummyOTP:      h.cfg.MFA.AllowDummyOTP,
-		SMTPHost:           h.cfg.SMTP.Host,
-		SMTPPort:           h.cfg.SMTP.Port,
-		SMTPUsername:       h.cfg.SMTP.Username,
-		SMTPFrom:           h.cfg.SMTP.From,
-		SMTPFromName:       h.cfg.SMTP.FromName,
-		SMTPEncryption:     h.cfg.SMTP.Encryption,
+		IdPEntityID:           h.cfg.SAML.IdPEntityID,
+		IdPSSOURL:             h.cfg.SAML.IdPSSOURL,
+		IdPMetadataURL:        h.cfg.SAML.IdPMetadataURL,
+		IdPCertFile:           h.cfg.SAML.IdPCertFile,
+		EntityID:              h.cfg.SAML.EntityID,
+		ACSURL:                h.cfg.SAML.ACSURL,
+		SSOURL:                h.cfg.SAML.SSOURL,
+		SLOURL:                h.cfg.SAML.SLOURL,
+		AllowedAudiences:      h.cfg.SAML.AllowedAudiences,
+		GroupMapping:          h.cfg.SAML.GroupMapping,
+		MFADefaultProvider:    h.cfg.MFA.DefaultProvider,
+		MFAIssuer:             h.cfg.MFA.Issuer,
+		OTPExpiry:             h.cfg.MFA.OTPExpiry,
+		ResendCooldown:        h.cfg.MFA.ResendCooldown,
+		AllowDummyOTP:         h.cfg.MFA.AllowDummyOTP,
+		SMTPHost:              h.cfg.SMTP.Host,
+		SMTPPort:              h.cfg.SMTP.Port,
+		SMTPUsername:          h.cfg.SMTP.Username,
+		SMTPFrom:              h.cfg.SMTP.From,
+		SMTPFromName:          h.cfg.SMTP.FromName,
+		SMTPEncryption:        h.cfg.SMTP.Encryption,
+		ITAAPIURL:             h.cfg.ITA.APIURL,
+		ITAAPIUsername:        h.cfg.ITA.APIUsername,
+		ITAEnforceWhitelist:   h.cfg.ITA.EnforceUserWhitelist,
+		ITAManualAllowedUsers: h.cfg.ITA.ManualAllowedUsers,
 	}
 
 	now := time.Now()
 	certInfo := parseCertDetails(h.cfg.SAML.CertFile)
+
+	var authorizedUsers []mfa.AuthorizedUser
+	if h.mfaService != nil && h.mfaService.Storage() != nil {
+		users, err := h.mfaService.Storage().ListAuthorizedUsers(context.Background())
+		if err == nil {
+			authorizedUsers = users
+		}
+	}
 
 	return &AdminSettingsViewModel{
 		Settings:            payload,
 		Port:                h.cfg.Server.Port,
 		AllowedAudiencesStr: strings.Join(h.cfg.SAML.AllowedAudiences, ", "),
 		CertInfo:            certInfo,
+		AuthorizedUsers:     authorizedUsers,
 		ServerTimeUTC:       now.UTC().Format("2006-01-02 15:04:05 UTC"),
 		ServerTimeLocal:     now.Format("2006-01-02 15:04:05 MST"),
 		SuccessMessage:      successMsg,
@@ -339,4 +467,3 @@ func parseCertDetails(certPath string) CertDetails {
 
 	return details
 }
-
