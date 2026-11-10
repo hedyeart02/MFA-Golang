@@ -1,10 +1,11 @@
 server:
-  port: 443
+  port: 8443
+  tls_enabled: true
 
 database:
-  driver: postgres
-  connection_string: "host=db port=5432 user=samlguard dbname=samlguard sslmode=require"
+  driver: sqlite
+  path: "./data/samlguard.db"
 
 logging:
-  level: warn
+  level: info
   format: json

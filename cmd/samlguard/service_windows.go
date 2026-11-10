@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"net"
 	"net/http"
 	"time"
 
@@ -27,6 +29,7 @@ type samlguardService struct {
 	srv       *http.Server
 	cfg       *config.Config
 	appLogger *logger.Logger
+	cleanup   func()
 }
 
 // Execute handles Windows SCM state transitions and control commands.
@@ -34,24 +37,51 @@ func (s *samlguardService) Execute(args []string, r <-chan svc.ChangeRequest, ch
 	const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown
 	changes <- svc.Status{State: svc.StartPending}
 
+	// 1. Validate TLS certificate and key up-front if TLS is enabled
+	if s.cfg != nil && s.cfg.TLS.Enabled {
+		if _, err := tls.LoadX509KeyPair(s.cfg.TLS.CertFile, s.cfg.TLS.KeyFile); err != nil {
+			s.appLogger.System().Error("failed to load TLS certificate or key in Windows service", zap.Error(err))
+			if s.cleanup != nil {
+				s.cleanup()
+			}
+			changes <- svc.Status{State: svc.Stopped}
+			return false, 1
+		}
+	}
+
+	// 2. Synchronously create and bind the TCP listener before reporting Running to SCM
+	ln, err := net.Listen("tcp", s.srv.Addr)
+	if err != nil {
+		s.appLogger.System().Error("failed to bind HTTP listener in Windows service",
+			zap.Error(err),
+			zap.String("address", s.srv.Addr),
+		)
+		if s.cleanup != nil {
+			s.cleanup()
+		}
+		changes <- svc.Status{State: svc.Stopped}
+		return false, 1
+	}
+
 	serverErrors := make(chan error, 1)
 
 	go func() {
 		s.appLogger.System().Info("Windows service HTTP listener starting",
-			zap.String("address", s.srv.Addr),
-			zap.Bool("tls_enabled", s.cfg.TLS.Enabled),
+			zap.String("address", ln.Addr().String()),
+			zap.Bool("tls_enabled", s.cfg != nil && s.cfg.TLS.Enabled),
 		)
-		if s.cfg.TLS.Enabled {
-			if err := s.srv.ListenAndServeTLS(s.cfg.TLS.CertFile, s.cfg.TLS.KeyFile); err != nil && err != http.ErrServerClosed {
+		if s.cfg != nil && s.cfg.TLS.Enabled {
+			if err := s.srv.ServeTLS(ln, s.cfg.TLS.CertFile, s.cfg.TLS.KeyFile); err != nil && err != http.ErrServerClosed {
 				serverErrors <- err
 			}
 		} else {
-			if err := s.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			if err := s.srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 				serverErrors <- err
 			}
 		}
 	}()
 
+	// 3. Listener is successfully bound and serving: report RUNNING to SCM
 	changes <- svc.Status{State: svc.Running, Accepts: cmdsAccepted}
 	s.appLogger.System().Info("Windows service state reported as RUNNING to SCM")
 
@@ -59,7 +89,10 @@ func (s *samlguardService) Execute(args []string, r <-chan svc.ChangeRequest, ch
 		select {
 		case err := <-serverErrors:
 			s.appLogger.System().Error("HTTP server failed unexpectedly in Windows service", zap.Error(err))
-			changes <- svc.Status{State: svc.StopPending}
+			if s.cleanup != nil {
+				s.cleanup()
+			}
+			changes <- svc.Status{State: svc.Stopped}
 			return false, 1
 
 		case c := <-r:
@@ -72,9 +105,9 @@ func (s *samlguardService) Execute(args []string, r <-chan svc.ChangeRequest, ch
 				)
 				changes <- svc.Status{State: svc.StopPending}
 
-				shutdownTimeout := s.cfg.Server.ShutdownTimeout
-				if shutdownTimeout <= 0 {
-					shutdownTimeout = 15 * time.Second
+				shutdownTimeout := 15 * time.Second
+				if s.cfg != nil && s.cfg.Server.ShutdownTimeout > 0 {
+					shutdownTimeout = s.cfg.Server.ShutdownTimeout
 				}
 				shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 				defer cancel()
@@ -83,6 +116,10 @@ func (s *samlguardService) Execute(args []string, r <-chan svc.ChangeRequest, ch
 					s.appLogger.System().Error("Windows service server forced to stop after timeout", zap.Error(err))
 				} else {
 					s.appLogger.System().Info("Windows service server shutdown completed cleanly")
+				}
+
+				if s.cleanup != nil {
+					s.cleanup()
 				}
 
 				changes <- svc.Status{State: svc.Stopped}
@@ -98,11 +135,12 @@ func (s *samlguardService) Execute(args []string, r <-chan svc.ChangeRequest, ch
 }
 
 // runAsWindowsService registers and runs the application under the Windows Service Control Manager.
-func runAsWindowsService(name string, srv *http.Server, cfg *config.Config, appLogger *logger.Logger) error {
+func runAsWindowsService(name string, srv *http.Server, cfg *config.Config, appLogger *logger.Logger, cleanup func()) error {
 	service := &samlguardService{
 		srv:       srv,
 		cfg:       cfg,
 		appLogger: appLogger,
+		cleanup:   cleanup,
 	}
 	return svc.Run(name, service)
 }

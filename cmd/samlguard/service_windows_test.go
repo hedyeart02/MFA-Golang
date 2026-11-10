@@ -3,6 +3,7 @@
 package main
 
 import (
+	"net"
 	"net/http"
 	"testing"
 	"time"
@@ -206,6 +207,243 @@ func TestWindowsServiceHandler_ShutdownCommand(t *testing.T) {
 	case <-execDone:
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for Execute to return")
+	}
+}
+
+func TestWindowsServiceHandler_ListenerStartupFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	zapLogger, _ := zap.NewDevelopment()
+	appLog := logger.New(zapLogger)
+
+	// Pre-bind a port to force a listener port collision
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to bind test listener: %v", err)
+	}
+	defer ln.Close()
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Host:            "127.0.0.1",
+			Port:            ln.Addr().(*net.TCPAddr).Port,
+			ShutdownTimeout: 5 * time.Second,
+		},
+	}
+
+	srv := &http.Server{
+		Addr:    ln.Addr().String(),
+		Handler: gin.New(),
+	}
+
+	cleanupCalled := false
+	service := &samlguardService{
+		srv:       srv,
+		cfg:       cfg,
+		appLogger: appLog,
+		cleanup: func() {
+			cleanupCalled = true
+		},
+	}
+
+	reqChan := make(chan svc.ChangeRequest, 5)
+	statusChan := make(chan svc.Status, 10)
+	execDone := make(chan struct{})
+
+	var sec bool
+	var ec uint32
+
+	go func() {
+		sec, ec = service.Execute([]string{"SAMLGuard"}, reqChan, statusChan)
+		close(execDone)
+	}()
+
+	// 1. Must report StartPending
+	select {
+	case st := <-statusChan:
+		if st.State != svc.StartPending {
+			t.Fatalf("expected StartPending, got %v", st.State)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for StartPending")
+	}
+
+	// 2. Must report Stopped (and MUST NEVER report Running!)
+	select {
+	case st := <-statusChan:
+		if st.State != svc.Stopped {
+			t.Fatalf("expected Stopped after listener bind failure, got %v", st.State)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for Stopped status on bind failure")
+	}
+
+	// 3. Must return exit code 1
+	select {
+	case <-execDone:
+		if sec != false || ec != 1 {
+			t.Fatalf("expected (false, 1), got (%v, %d)", sec, ec)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for Execute to finish")
+	}
+
+	// 4. Must execute cleanup
+	if !cleanupCalled {
+		t.Fatalf("expected cleanup function to be called on listener startup failure")
+	}
+}
+
+func TestWindowsServiceHandler_TLSConfigFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	zapLogger, _ := zap.NewDevelopment()
+	appLog := logger.New(zapLogger)
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Host: "127.0.0.1",
+			Port: 0,
+		},
+		TLS: config.TLSConfig{
+			Enabled:  true,
+			CertFile: "nonexistent-cert.pem",
+			KeyFile:  "nonexistent-key.pem",
+		},
+	}
+
+	srv := &http.Server{
+		Addr:    "127.0.0.1:0",
+		Handler: gin.New(),
+	}
+
+	cleanupCalled := false
+	service := &samlguardService{
+		srv:       srv,
+		cfg:       cfg,
+		appLogger: appLog,
+		cleanup: func() {
+			cleanupCalled = true
+		},
+	}
+
+	reqChan := make(chan svc.ChangeRequest, 5)
+	statusChan := make(chan svc.Status, 10)
+	execDone := make(chan struct{})
+
+	var sec bool
+	var ec uint32
+
+	go func() {
+		sec, ec = service.Execute([]string{"SAMLGuard"}, reqChan, statusChan)
+		close(execDone)
+	}()
+
+	// 1. Verify StartPending
+	select {
+	case st := <-statusChan:
+		if st.State != svc.StartPending {
+			t.Fatalf("expected StartPending, got %v", st.State)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for StartPending")
+	}
+
+	// 2. Verify Stopped (and NEVER Running)
+	select {
+	case st := <-statusChan:
+		if st.State != svc.Stopped {
+			t.Fatalf("expected Stopped after TLS failure, got %v", st.State)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for Stopped status on TLS failure")
+	}
+
+	// 3. Verify exit code 1
+	select {
+	case <-execDone:
+		if sec != false || ec != 1 {
+			t.Fatalf("expected (false, 1), got (%v, %d)", sec, ec)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for Execute to finish")
+	}
+
+	if !cleanupCalled {
+		t.Fatalf("expected cleanup function to be called on TLS configuration failure")
+	}
+}
+
+func TestWindowsServiceHandler_ResourceCleanupOnStop(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	zapLogger, _ := zap.NewDevelopment()
+	appLog := logger.New(zapLogger)
+
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Host:            "127.0.0.1",
+			Port:            0,
+			ShutdownTimeout: 5 * time.Second,
+		},
+	}
+
+	srv := &http.Server{
+		Addr:    "127.0.0.1:0",
+		Handler: gin.New(),
+	}
+
+	cleanupCalled := false
+	service := &samlguardService{
+		srv:       srv,
+		cfg:       cfg,
+		appLogger: appLog,
+		cleanup: func() {
+			cleanupCalled = true
+		},
+	}
+
+	reqChan := make(chan svc.ChangeRequest, 5)
+	statusChan := make(chan svc.Status, 10)
+	execDone := make(chan struct{})
+
+	go func() {
+		_, _ = service.Execute([]string{"SAMLGuard"}, reqChan, statusChan)
+		close(execDone)
+	}()
+
+	// Drain StartPending & Running
+	select {
+	case <-statusChan:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for StartPending")
+	}
+	select {
+	case <-statusChan:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for Running")
+	}
+
+	// Send Stop
+	reqChan <- svc.ChangeRequest{Cmd: svc.Stop}
+
+	// Drain StopPending & Stopped
+	select {
+	case <-statusChan:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for StopPending")
+	}
+	select {
+	case <-statusChan:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for Stopped")
+	}
+
+	select {
+	case <-execDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for Execute to return")
+	}
+
+	if !cleanupCalled {
+		t.Fatalf("expected cleanup to be called on clean service stop")
 	}
 }
 

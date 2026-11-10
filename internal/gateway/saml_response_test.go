@@ -1,6 +1,9 @@
 package gateway
 
 import (
+	"crypto"
+	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
@@ -232,5 +235,80 @@ func TestSAMLResponse_IndependentXMLDSigVerification(t *testing.T) {
 	_, err = valCtx.Validate(tamperedGroupAssertionEl)
 	if err == nil {
 		t.Fatal("SECURITY ERROR: signature validation PASSED on tampered group assertion!")
+	}
+}
+
+func TestCertificatePrivateKeyConsistency(t *testing.T) {
+	testPairs := []struct {
+		name     string
+		certPath string
+		keyPath  string
+	}{
+		{
+			name:     "SAML Signing Keypair",
+			certPath: "../../cert/saml-signing.crt",
+			keyPath:  "../../cert/saml-signing.key",
+		},
+		{
+			name:     "Server TLS Keypair",
+			certPath: "../../cert/server.crt",
+			keyPath:  "../../cert/server.key",
+		},
+	}
+
+	for _, pair := range testPairs {
+		t.Run(pair.name, func(t *testing.T) {
+			certPEM, err := os.ReadFile(pair.certPath)
+			if err != nil {
+				t.Fatalf("failed to read cert file %s: %v", pair.certPath, err)
+			}
+			keyPEM, err := os.ReadFile(pair.keyPath)
+			if err != nil {
+				t.Fatalf("failed to read key file %s: %v", pair.keyPath, err)
+			}
+
+			cBlock, _ := pem.Decode(certPEM)
+			if cBlock == nil {
+				t.Fatalf("no PEM certificate in %s", pair.certPath)
+			}
+			cert, err := x509.ParseCertificate(cBlock.Bytes)
+			if err != nil {
+				t.Fatalf("parsing certificate: %v", err)
+			}
+
+			kBlock, _ := pem.Decode(keyPEM)
+			if kBlock == nil {
+				t.Fatalf("no PEM private key in %s", pair.keyPath)
+			}
+			var privKey *rsa.PrivateKey
+			if k, err := x509.ParsePKCS8PrivateKey(kBlock.Bytes); err == nil {
+				privKey = k.(*rsa.PrivateKey)
+			} else if k, err := x509.ParsePKCS1PrivateKey(kBlock.Bytes); err == nil {
+				privKey = k
+			} else {
+				t.Fatalf("failed to parse private key in %s", pair.keyPath)
+			}
+
+			pubKey, ok := cert.PublicKey.(*rsa.PublicKey)
+			if !ok {
+				t.Fatalf("certificate public key is not RSA")
+			}
+
+			// 1. Modulus and Exponent exact match
+			if pubKey.N.Cmp(privKey.N) != 0 || pubKey.E != privKey.E {
+				t.Fatalf("CRITICAL SECURITY ERROR: Certificate public key does NOT match private key for %s", pair.name)
+			}
+
+			// 2. Cryptographic Sign and Verify Round-trip
+			testPayload := []byte("samlguard-cryptographic-pair-verification-test")
+			hashed := sha256.Sum256(testPayload)
+			sig, err := rsa.SignPKCS1v15(nil, privKey, crypto.SHA256, hashed[:])
+			if err != nil {
+				t.Fatalf("signing test payload failed: %v", err)
+			}
+			if err := rsa.VerifyPKCS1v15(pubKey, crypto.SHA256, hashed[:], sig); err != nil {
+				t.Fatalf("verifying test signature failed: %v", err)
+			}
+		})
 	}
 }

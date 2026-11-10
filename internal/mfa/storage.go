@@ -134,6 +134,40 @@ func (s *SQLiteStorage) Init(ctx context.Context) error {
 	_, _ = s.db.ExecContext(ctx, "PRAGMA journal_mode=WAL;")
 	_, _ = s.db.ExecContext(ctx, "PRAGMA busy_timeout=5000;")
 
+	// Check if legacy schema exists in mfa_secrets (database schema migration)
+	if rows, err := s.db.QueryContext(ctx, "PRAGMA table_info(mfa_secrets);"); err == nil {
+		var hasUserKey, hasUserID, hasStatus, hasLastAccepted bool
+		for rows.Next() {
+			var cid int
+			var name, ctype string
+			var notnull, pk int
+			var dfltValue interface{}
+			if err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err == nil {
+				switch name {
+				case "user_key":
+					hasUserKey = true
+				case "user_id":
+					hasUserID = true
+				case "status":
+					hasStatus = true
+				case "last_accepted_timestep":
+					hasLastAccepted = true
+				}
+			}
+		}
+		rows.Close()
+
+		if hasUserID && !hasUserKey {
+			_, _ = s.db.ExecContext(ctx, "ALTER TABLE mfa_secrets RENAME COLUMN user_id TO user_key;")
+		}
+		if !hasStatus && (hasUserID || hasUserKey) {
+			_, _ = s.db.ExecContext(ctx, "ALTER TABLE mfa_secrets ADD COLUMN status TEXT NOT NULL DEFAULT 'active';")
+		}
+		if !hasLastAccepted && (hasUserID || hasUserKey) {
+			_, _ = s.db.ExecContext(ctx, "ALTER TABLE mfa_secrets ADD COLUMN last_accepted_timestep INTEGER DEFAULT 0;")
+		}
+	}
+
 	schema := `
 	CREATE TABLE IF NOT EXISTS mfa_secrets (
 		id TEXT PRIMARY KEY,
@@ -148,7 +182,7 @@ func (s *SQLiteStorage) Init(ctx context.Context) error {
 		updated_at DATETIME NOT NULL,
 		UNIQUE(user_key, status)
 	);
-	CREATE INDEX IF NOT EXISTS idx_mfa_secrets_user_status ON mfa_secrets(user_key, status);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_mfa_secrets_user_status ON mfa_secrets(user_key, status);
 
 	CREATE TABLE IF NOT EXISTS email_otps (
 		user_key TEXT PRIMARY KEY,

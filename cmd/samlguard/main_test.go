@@ -287,3 +287,54 @@ func TestServer_GracefulShutdown(t *testing.T) {
 		t.Errorf("unexpected server exit error: %v", err)
 	}
 }
+
+func TestSetupAppWithCleanup_ResourceCleanup(t *testing.T) {
+	app, cleanup, err := SetupAppWithCleanup(testConfig(t), testLogger())
+	if err != nil {
+		t.Fatalf("unexpected setup error: %v", err)
+	}
+	if app == nil {
+		t.Fatal("expected non-nil engine")
+	}
+	if cleanup == nil {
+		t.Fatal("expected non-nil cleanup function")
+	}
+
+	// Verify cleanup executes without panic or error
+	cleanup()
+}
+
+func TestSetupApp_MetadataRoutes(t *testing.T) {
+	app, cleanup, err := SetupAppWithCleanup(testConfig(t), testLogger())
+	if err != nil {
+		t.Fatalf("unexpected setup error: %v", err)
+	}
+	defer cleanup()
+
+	routes := []struct {
+		path            string
+		expectedCode    int
+		expectedContent string
+	}{
+		{"/saml/metadata", http.StatusOK, "IDPSSODescriptor"},
+		{"/saml/metadata", http.StatusOK, "SPSSODescriptor"},
+		{"/saml/metadata/idp", http.StatusOK, "IDPSSODescriptor"},
+		{"/saml/metadata/sp", http.StatusOK, "SPSSODescriptor"},
+		{"/metadata", http.StatusOK, "IDPSSODescriptor"},
+		{"/metadata/idp", http.StatusOK, "IDPSSODescriptor"},
+		{"/metadata/sp", http.StatusOK, "SPSSODescriptor"},
+	}
+
+	for _, tc := range routes {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, tc.path, nil)
+		app.ServeHTTP(w, req)
+
+		if w.Code != tc.expectedCode {
+			t.Errorf("expected %s to return %d, got %d", tc.path, tc.expectedCode, w.Code)
+		}
+		if !strings.Contains(w.Body.String(), tc.expectedContent) {
+			t.Errorf("expected %s to contain %s", tc.path, tc.expectedContent)
+		}
+	}
+}

@@ -88,8 +88,9 @@ try {
     $created = $true
 }
 
-# Configure service failure recovery actions (restart after 5 seconds)
-& sc.exe failure $ServiceName reset= 86400 actions= restart/5000/restart/5000// | Out-Null
+# Configure service failure recovery actions (restart after 5 seconds on 1st, 2nd, and subsequent crashes)
+& sc.exe failure $ServiceName reset= 86400 actions= restart/5000/restart/5000/restart/5000 | Out-Null
+& sc.exe failureflag $ServiceName 1 | Out-Null
 
 Write-Host "==> Installation complete!" -ForegroundColor Green
 Write-Host "    Executable:     $ServiceExe"

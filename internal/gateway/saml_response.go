@@ -111,6 +111,14 @@ func NewResponseGenerator(cfg *config.Config) (*ResponseGenerator, error) {
 	}, nil
 }
 
+// Certificate returns the X.509 certificate used for SAML signing
+func (g *ResponseGenerator) Certificate() *x509.Certificate {
+	if g == nil {
+		return nil
+	}
+	return g.certificate
+}
+
 // GenerateResponse produces a signed SAML 2.0 Response with W3C Exclusive XML Canonicalization (C14N)
 func (g *ResponseGenerator) GenerateResponse(req SAMLResponseRequest) (*SAMLResponseResult, error) {
 	now := time.Now().UTC()

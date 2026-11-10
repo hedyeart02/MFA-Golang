@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/xml"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -10,8 +11,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/crewjam/saml"
 	"github.com/gin-gonic/gin"
 	"github.com/hidayat-SE/samlguard/internal/config"
+	fedmetadata "github.com/hidayat-SE/samlguard/internal/federation/metadata"
 	"github.com/hidayat-SE/samlguard/internal/gateway"
 	"github.com/hidayat-SE/samlguard/internal/gateway/model"
 	"github.com/hidayat-SE/samlguard/internal/gateway/pipeline"
@@ -131,6 +134,134 @@ func TestHandler_HandleMetadata(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("expected status 200, got %d", w.Code)
 	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "IDPSSODescriptor") {
+		t.Error("expected metadata to contain IDPSSODescriptor for ITA")
+	}
+	if !strings.Contains(body, "SPSSODescriptor") {
+		t.Error("expected metadata to contain SPSSODescriptor for Entra ID")
+	}
+	if !strings.Contains(body, "KeyDescriptor") {
+		t.Error("expected metadata to contain KeyDescriptor with signing certificate")
+	}
+}
+
+func TestHandler_DualFederationMetadata_DedicatedRoles(t *testing.T) {
+	p := &mockPipeline{}
+	h, _ := setupTestHandler(t, p)
+
+	r := gin.New()
+	r.GET("/saml/metadata", h.HandleMetadata)
+	r.GET("/saml/metadata/idp", h.HandleIdPMetadata)
+	r.GET("/saml/metadata/sp", h.HandleSPMetadata)
+
+	// 1. Verify Pure Downstream IdP Metadata (for Schneider Electric IT Advisor)
+	t.Run("Pure Downstream IdP Metadata", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/saml/metadata/idp", nil)
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d", w.Code)
+		}
+		if ct := w.Header().Get("Content-Type"); ct != "application/samlmetadata+xml" {
+			t.Errorf("expected application/samlmetadata+xml, got %s", ct)
+		}
+
+		body := w.Body.String()
+		if !strings.Contains(body, "<md:IDPSSODescriptor") {
+			t.Error("IdP metadata MUST contain IDPSSODescriptor")
+		}
+		if strings.Contains(body, "<md:SPSSODescriptor") {
+			t.Error("IdP metadata MUST NOT contain SPSSODescriptor (role separation failure)")
+		}
+		if !strings.Contains(body, "HTTP-Redirect") || !strings.Contains(body, "HTTP-POST") {
+			t.Error("IdP metadata must offer both HTTP-Redirect and HTTP-POST SSO bindings")
+		}
+
+		// Parse with independent SAML metadata parser (internal/federation/metadata)
+		parser := &fedmetadata.Parser{}
+		desc, err := parser.Parse([]byte(body))
+		if err != nil {
+			t.Fatalf("independent metadata parser failed to parse IdP metadata: %v", err)
+		}
+		if desc.EntityID != h.cfg.SAML.EntityID {
+			t.Errorf("expected EntityID %q, got %q", h.cfg.SAML.EntityID, desc.EntityID)
+		}
+		if len(desc.SSOEndpoints) != 2 {
+			t.Errorf("expected 2 SSO endpoints (Redirect & POST), got %d", len(desc.SSOEndpoints))
+		}
+		if len(desc.Certificates) == 0 {
+			t.Error("expected at least 1 signing certificate in IdP metadata")
+		}
+	})
+
+	// 2. Verify Pure Upstream SP Metadata (for Microsoft Entra ID / Keycloak)
+	t.Run("Pure Upstream SP Metadata", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/saml/metadata/sp", nil)
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d", w.Code)
+		}
+		if ct := w.Header().Get("Content-Type"); ct != "application/samlmetadata+xml" {
+			t.Errorf("expected application/samlmetadata+xml, got %s", ct)
+		}
+
+		body := w.Body.String()
+		if !strings.Contains(body, "<md:SPSSODescriptor") {
+			t.Error("SP metadata MUST contain SPSSODescriptor")
+		}
+		if strings.Contains(body, "<md:IDPSSODescriptor") {
+			t.Error("SP metadata MUST NOT contain IDPSSODescriptor (role separation failure)")
+		}
+		if !strings.Contains(body, "<md:AssertionConsumerService") {
+			t.Error("SP metadata MUST contain AssertionConsumerService")
+		}
+
+		// Parse with standard crewjam/saml parser
+		var ed saml.EntityDescriptor
+		if err := xml.Unmarshal([]byte(body), &ed); err != nil {
+			t.Fatalf("crewjam XML unmarshal failed for SP metadata: %v", err)
+		}
+		if ed.EntityID != h.cfg.SAML.EntityID {
+			t.Errorf("expected EntityID %q, got %q", h.cfg.SAML.EntityID, ed.EntityID)
+		}
+		if len(ed.SPSSODescriptors) != 1 {
+			t.Fatalf("expected exactly 1 SPSSODescriptor, got %d", len(ed.SPSSODescriptors))
+		}
+		if len(ed.IDPSSODescriptors) != 0 {
+			t.Errorf("expected 0 IDPSSODescriptors in pure SP metadata, got %d", len(ed.IDPSSODescriptors))
+		}
+		spDesc := ed.SPSSODescriptors[0]
+		if len(spDesc.AssertionConsumerServices) == 0 {
+			t.Error("expected at least 1 AssertionConsumerService in SP metadata")
+		}
+		if spDesc.AssertionConsumerServices[0].Binding != "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" {
+			t.Errorf("expected HTTP-POST ACS binding, got %s", spDesc.AssertionConsumerServices[0].Binding)
+		}
+	})
+
+	// 3. Verify Query Parameter Role Dispatch (?role=idp and ?role=sp)
+	t.Run("Query Parameter Role Dispatch", func(t *testing.T) {
+		// Test ?role=idp
+		wIdP := httptest.NewRecorder()
+		reqIdP := httptest.NewRequest(http.MethodGet, "/saml/metadata?role=idp", nil)
+		r.ServeHTTP(wIdP, reqIdP)
+		if !strings.Contains(wIdP.Body.String(), "<md:IDPSSODescriptor") || strings.Contains(wIdP.Body.String(), "<md:SPSSODescriptor") {
+			t.Error("expected ?role=idp to serve pure IdP metadata without SPSSODescriptor")
+		}
+
+		// Test ?role=sp
+		wSP := httptest.NewRecorder()
+		reqSP := httptest.NewRequest(http.MethodGet, "/saml/metadata?role=sp", nil)
+		r.ServeHTTP(wSP, reqSP)
+		if !strings.Contains(wSP.Body.String(), "<md:SPSSODescriptor") || strings.Contains(wSP.Body.String(), "<md:IDPSSODescriptor") {
+			t.Error("expected ?role=sp to serve pure SP metadata without IDPSSODescriptor")
+		}
+	})
 }
 
 func buildSignedUpstreamResponse(t *testing.T, respGen *gateway.ResponseGenerator, issuer, recipient, inResponseTo string) string {
@@ -339,5 +470,61 @@ func TestHandler_EmbeddedTemplateFallbackOutsideRepo(t *testing.T) {
 
 	if h.templates == nil {
 		t.Fatal("expected handler to load embedded template when working directory lacks external web/ templates")
+	}
+}
+
+func TestNewSAMLHandler_IdPCertificateRolloverBundle(t *testing.T) {
+	tempDir := t.TempDir()
+	certBundlePath := filepath.Join(tempDir, "idp-bundle.crt")
+
+	// Read existing signing cert to duplicate into a 2-cert bundle
+	singleCert, err := os.ReadFile("../../../cert/saml-signing.crt")
+	if err != nil {
+		t.Fatalf("failed to read signing cert: %v", err)
+	}
+
+	bundleContent := append(singleCert, []byte("\n")...)
+	bundleContent = append(bundleContent, singleCert...)
+	if err := os.WriteFile(certBundlePath, bundleContent, 0600); err != nil {
+		t.Fatalf("failed to write bundle: %v", err)
+	}
+
+	absKey, _ := filepath.Abs("../../../cert/saml-signing.key")
+	cfg := &config.Config{
+		SAML: config.SAMLConfig{
+			EntityID:    "https://192.168.0.178:18080",
+			SSOURL:      "https://192.168.0.178:18080/saml/sso",
+			ACSURL:      "https://192.168.0.178:18080/saml/acs",
+			IdPSSOURL:   "https://idp.example.com/sso",
+			IdPEntityID: "https://idp.example.com",
+			IdPCertFile: certBundlePath,
+			CertFile:    certBundlePath,
+			KeyFile:     absKey,
+		},
+	}
+	dbPath := filepath.Join(tempDir, "bundle_test.db")
+	storage, err := mfa.NewSQLiteStorage(dbPath)
+	if err != nil {
+		t.Fatalf("setup storage: %v", err)
+	}
+	defer storage.Close()
+
+	mfaSvc := mfa.NewService(storage, nil, cfg, zap.NewNop())
+	respGen, err := gateway.NewResponseGenerator(cfg)
+	if err != nil {
+		t.Fatalf("setup respGen: %v", err)
+	}
+
+	p := &mockPipeline{}
+	h, err := NewSAMLHandler(p, mfaSvc, respGen, cfg, zap.NewNop())
+	if err != nil {
+		t.Fatalf("NewSAMLHandler failed: %v", err)
+	}
+
+	if h.idpCertStore == nil {
+		t.Fatal("expected idpCertStore to be initialized")
+	}
+	if len(h.idpCertStore.Roots) != 2 {
+		t.Fatalf("expected 2 certificates in idpCertStore.Roots for rollover bundle, got: %d", len(h.idpCertStore.Roots))
 	}
 }

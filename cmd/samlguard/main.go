@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -35,13 +37,14 @@ import (
 // Version string populated at build time
 var Version = "1.0.0-dev"
 
-// SetupApp constructs and wires all runtime dependencies into the Gin engine
-func SetupApp(cfg *config.Config, appLogger *logger.Logger) (*gin.Engine, error) {
+// SetupAppWithCleanup constructs and wires all runtime dependencies into the Gin engine
+// and returns a resource cleanup function to be invoked on server shutdown.
+func SetupAppWithCleanup(cfg *config.Config, appLogger *logger.Logger) (*gin.Engine, func(), error) {
 	if cfg == nil {
-		return nil, fmt.Errorf("configuration cannot be nil")
+		return nil, nil, fmt.Errorf("configuration cannot be nil")
 	}
 	if err := cfg.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid runtime configuration: %w", err)
+		return nil, nil, fmt.Errorf("invalid runtime configuration: %w", err)
 	}
 
 	r := gin.Default()
@@ -77,7 +80,7 @@ func SetupApp(cfg *config.Config, appLogger *logger.Logger) (*gin.Engine, error)
 	metadataResolver := resolver.NewDefaultMetadataResolver(
 		metadataSources,
 		cfg.SAML.MetadataURL,
-		&fedmetadata.StaticFileLoader{},
+		&fedmetadata.SmartLoader{},
 		&fedmetadata.Parser{},
 	)
 
@@ -124,13 +127,23 @@ func SetupApp(cfg *config.Config, appLogger *logger.Logger) (*gin.Engine, error)
 
 	// 5. Validate dependencies during startup
 	if err := authnPipeline.Validate(); err != nil {
-		return nil, fmt.Errorf("pipeline dependency validation failed: %w", err)
+		return nil, nil, fmt.Errorf("pipeline dependency validation failed: %w", err)
 	}
 
 	// 6. Initialize MFA dependencies & Response Generator
 	mfaStorage, err := mfa.NewSQLiteStorage(cfg.Database.Path)
 	if err != nil {
-		return nil, fmt.Errorf("mfa storage initialization failed: %w", err)
+		return nil, nil, fmt.Errorf("mfa storage initialization failed: %w", err)
+	}
+
+	cleanup := func() {
+		if mfaStorage != nil {
+			if closeErr := mfaStorage.Close(); closeErr != nil {
+				appLogger.System().Warn("error closing database storage", zap.Error(closeErr))
+			} else {
+				appLogger.System().Info("database storage closed successfully")
+			}
+		}
 	}
 
 	smtpSender := mfa.NewSMTPSender(
@@ -148,13 +161,15 @@ func SetupApp(cfg *config.Config, appLogger *logger.Logger) (*gin.Engine, error)
 
 	responseGen, err := gateway.NewResponseGenerator(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("saml response generator initialization failed: %w", err)
+		cleanup()
+		return nil, nil, fmt.Errorf("saml response generator initialization failed: %w", err)
 	}
 
 	// 7. Construct SAMLHandler with real pipeline, mfaService, and responseGen
 	samlHandler, err := handler.NewSAMLHandler(authnPipeline, mfaService, responseGen, cfg, appLogger.System())
 	if err != nil {
-		return nil, fmt.Errorf("handler initialization failed: %w", err)
+		cleanup()
+		return nil, nil, fmt.Errorf("handler initialization failed: %w", err)
 	}
 
 	// Register SAML and MFA routes
@@ -163,6 +178,8 @@ func SetupApp(cfg *config.Config, appLogger *logger.Logger) (*gin.Engine, error)
 		samlGroup.GET("/sso", samlHandler.HandleSSO)
 		samlGroup.POST("/acs", samlHandler.HandleACS)
 		samlGroup.GET("/metadata", samlHandler.HandleMetadata)
+		samlGroup.GET("/metadata/idp", samlHandler.HandleIdPMetadata)
+		samlGroup.GET("/metadata/sp", samlHandler.HandleSPMetadata)
 		samlGroup.POST("/re-enroll", samlHandler.HandleMFAReEnroll)
 	}
 
@@ -170,6 +187,9 @@ func SetupApp(cfg *config.Config, appLogger *logger.Logger) (*gin.Engine, error)
 	r.GET("/login", samlHandler.HandleSSO)
 	r.POST("/login", samlHandler.HandleSSO)
 	r.POST("/acs", samlHandler.HandleACS)
+	r.GET("/metadata", samlHandler.HandleMetadata)
+	r.GET("/metadata/idp", samlHandler.HandleIdPMetadata)
+	r.GET("/metadata/sp", samlHandler.HandleSPMetadata)
 	r.POST("/mfa/verify", samlHandler.HandleMFAVerify)
 	r.POST("/mfa/resend", samlHandler.HandleMFAResend)
 	r.POST("/mfa/re-enroll", samlHandler.HandleMFAReEnroll)
@@ -197,7 +217,13 @@ func SetupApp(cfg *config.Config, appLogger *logger.Logger) (*gin.Engine, error)
 	// Metrics endpoint
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
-	return r, nil
+	return r, cleanup, nil
+}
+
+// SetupApp constructs and wires all runtime dependencies into the Gin engine
+func SetupApp(cfg *config.Config, appLogger *logger.Logger) (*gin.Engine, error) {
+	engine, _, err := SetupAppWithCleanup(cfg, appLogger)
+	return engine, err
 }
 
 func main() {
@@ -249,7 +275,7 @@ func main() {
 	)
 
 	// 3. Assemble and wire application runtime
-	engine, err := SetupApp(cfg, appLogger)
+	engine, cleanup, err := SetupAppWithCleanup(cfg, appLogger)
 	if err != nil {
 		appLogger.System().Fatal("application startup failed during dependency wiring", zap.Error(err))
 	}
@@ -266,28 +292,47 @@ func main() {
 	// 5. Windows Service Control Manager or interactive console execution
 	if isWindowsService() {
 		appLogger.System().Info("running under Windows Service Control Manager", zap.String("service_name", "SAMLGuard"))
-		if err := runAsWindowsService("SAMLGuard", srv, cfg, appLogger); err != nil {
+		if err := runAsWindowsService("SAMLGuard", srv, cfg, appLogger, cleanup); err != nil {
 			appLogger.System().Fatal("Windows service terminated unexpectedly", zap.Error(err))
 		}
 		return
 	}
 
-	runInteractive(srv, cfg, appLogger)
+	runInteractive(srv, cfg, appLogger, cleanup)
 }
 
 // runInteractive runs the HTTP server for console execution and listens for OS interrupt signals.
-func runInteractive(srv *http.Server, cfg *config.Config, appLogger *logger.Logger) {
-	appLogger.System().Info("listening and serving HTTP requests", zap.String("address", srv.Addr))
+func runInteractive(srv *http.Server, cfg *config.Config, appLogger *logger.Logger, cleanup func()) {
+	// Synchronously validate TLS keypair upfront if TLS is enabled
+	if cfg.TLS.Enabled {
+		if _, err := tls.LoadX509KeyPair(cfg.TLS.CertFile, cfg.TLS.KeyFile); err != nil {
+			if cleanup != nil {
+				cleanup()
+			}
+			appLogger.System().Fatal("failed to load TLS certificate or key", zap.Error(err))
+		}
+	}
+
+	// Synchronously bind the TCP listener to detect port collisions or socket errors immediately
+	ln, err := net.Listen("tcp", srv.Addr)
+	if err != nil {
+		if cleanup != nil {
+			cleanup()
+		}
+		appLogger.System().Fatal("failed to bind HTTP listener", zap.Error(err), zap.String("address", srv.Addr))
+	}
+
+	appLogger.System().Info("listening and serving HTTP requests", zap.String("address", ln.Addr().String()))
 
 	serverErrors := make(chan error, 1)
 
 	go func() {
 		if cfg.TLS.Enabled {
-			if err := srv.ListenAndServeTLS(cfg.TLS.CertFile, cfg.TLS.KeyFile); err != nil && err != http.ErrServerClosed {
+			if err := srv.ServeTLS(ln, cfg.TLS.CertFile, cfg.TLS.KeyFile); err != nil && err != http.ErrServerClosed {
 				serverErrors <- err
 			}
 		} else {
-			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 				serverErrors <- err
 			}
 		}
@@ -299,6 +344,9 @@ func runInteractive(srv *http.Server, cfg *config.Config, appLogger *logger.Logg
 
 	select {
 	case err := <-serverErrors:
+		if cleanup != nil {
+			cleanup()
+		}
 		appLogger.System().Fatal("server terminated unexpectedly", zap.Error(err))
 	case sig := <-shutdownSignal:
 		appLogger.System().Info("received shutdown signal, initiating graceful stop", zap.String("signal", sig.String()))
@@ -314,6 +362,10 @@ func runInteractive(srv *http.Server, cfg *config.Config, appLogger *logger.Logg
 			appLogger.System().Error("server forced to stop after shutdown timeout", zap.Error(err))
 		} else {
 			appLogger.System().Info("server shutdown completed cleanly")
+		}
+
+		if cleanup != nil {
+			cleanup()
 		}
 	}
 }

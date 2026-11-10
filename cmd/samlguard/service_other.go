@@ -16,7 +16,7 @@ func isWindowsService() bool {
 }
 
 // runAsWindowsService is a stub on non-Windows platforms.
-func runAsWindowsService(name string, srv *http.Server, cfg *config.Config, appLogger *logger.Logger) error {
+func runAsWindowsService(name string, srv *http.Server, cfg *config.Config, appLogger *logger.Logger, cleanup func()) error {
 	return fmt.Errorf("windows service execution is not supported on this platform")
 }
 

@@ -2,9 +2,12 @@ package metadata
 
 import (
 	"context"
+	"crypto/tls"
 	"io"
 	"net/http"
 	"os"
+	"strings"
+	"time"
 )
 
 // MetadataLoader is responsible for retrieving raw XML bytes from various sources
@@ -33,6 +36,30 @@ func (l *HTTPMetadataLoader) Load(ctx context.Context, source string) ([]byte, e
 	}
 	defer resp.Body.Close()
 	return io.ReadAll(resp.Body)
+}
+
+// SmartLoader dynamically dispatches to HTTPMetadataLoader for http/https URLs and StaticFileLoader for file paths.
+type SmartLoader struct {
+	HTTPClient *http.Client
+}
+
+func (l *SmartLoader) Load(ctx context.Context, source string) ([]byte, error) {
+	trimmed := strings.TrimSpace(source)
+	if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+		client := l.HTTPClient
+		if client == nil {
+			client = &http.Client{
+				Timeout: 10 * time.Second,
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+				},
+			}
+		}
+		loader := &HTTPMetadataLoader{Client: client}
+		return loader.Load(ctx, trimmed)
+	}
+	fileLoader := &StaticFileLoader{}
+	return fileLoader.Load(ctx, trimmed)
 }
 
 // MemoryLoader is primarily used for testing or direct byte injection

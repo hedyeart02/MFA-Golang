@@ -89,12 +89,23 @@ func NewSAMLHandler(
 	if certPath != "" {
 		certData, err := os.ReadFile(certPath)
 		if err == nil {
-			block, _ := pem.Decode(certData)
-			if block != nil {
-				if parsedCert, err := x509.ParseCertificate(block.Bytes); err == nil {
-					idpCertStore = &goxmldsig.MemoryX509CertificateStore{
-						Roots: []*x509.Certificate{parsedCert},
+			var roots []*x509.Certificate
+			rest := certData
+			for len(rest) > 0 {
+				var block *pem.Block
+				block, rest = pem.Decode(rest)
+				if block == nil {
+					break
+				}
+				if block.Type == "CERTIFICATE" {
+					if parsedCert, err := x509.ParseCertificate(block.Bytes); err == nil {
+						roots = append(roots, parsedCert)
 					}
+				}
+			}
+			if len(roots) > 0 {
+				idpCertStore = &goxmldsig.MemoryX509CertificateStore{
+					Roots: roots,
 				}
 			}
 		}
@@ -808,13 +819,102 @@ func (h *SAMLHandler) renderMockUpstreamLogin(c *gin.Context, sessionID, outboun
 	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
 }
 
-func (h *SAMLHandler) HandleMetadata(c *gin.Context) {
-	c.Data(http.StatusOK, "application/samlmetadata+xml", []byte(fmt.Sprintf(`<?xml version="1.0"?>
+func (h *SAMLHandler) getKeyDescriptorXML() string {
+	if h.responseGen != nil && h.responseGen.Certificate() != nil {
+		certB64 := base64.StdEncoding.EncodeToString(h.responseGen.Certificate().Raw)
+		if certB64 != "" {
+			return fmt.Sprintf(`    <md:KeyDescriptor use="signing">
+      <ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+        <ds:X509Data>
+          <ds:X509Certificate>%s</ds:X509Certificate>
+        </ds:X509Data>
+      </ds:KeyInfo>
+    </md:KeyDescriptor>
+`, certB64)
+		}
+	}
+	return ""
+}
+
+func (h *SAMLHandler) getACSLocation() string {
+	if h.cfg.SAML.ACSURL != "" {
+		return h.cfg.SAML.ACSURL
+	}
+	return h.cfg.SAML.EntityID + "/saml/acs"
+}
+
+// HandleIdPMetadata renders SAML 2.0 Identity Provider metadata strictly for downstream SPs (Schneider Electric IT Advisor).
+func (h *SAMLHandler) HandleIdPMetadata(c *gin.Context) {
+	keyDescriptor := h.getKeyDescriptorXML()
+
+	metadataXML := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" entityID="%s">
-  <md:IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+  <md:IDPSSODescriptor WantAuthnRequestsSigned="false" protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+%s    <md:NameIDFormat>urn:oasis:names:tc:SAML:2.0:nameid-format:persistent</md:NameIDFormat>
+    <md:NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified</md:NameIDFormat>
+    <md:NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress</md:NameIDFormat>
     <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="%s"/>
+    <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="%s"/>
   </md:IDPSSODescriptor>
-</md:EntityDescriptor>`, h.cfg.SAML.EntityID, h.cfg.SAML.SSOURL)))
+</md:EntityDescriptor>`, h.cfg.SAML.EntityID, keyDescriptor, h.cfg.SAML.SSOURL, h.cfg.SAML.SSOURL)
+
+	c.Data(http.StatusOK, "application/samlmetadata+xml", []byte(metadataXML))
+}
+
+// HandleSPMetadata renders SAML 2.0 Service Provider metadata strictly for upstream IdPs (Microsoft Entra ID / Keycloak).
+func (h *SAMLHandler) HandleSPMetadata(c *gin.Context) {
+	keyDescriptor := h.getKeyDescriptorXML()
+	acsLocation := h.getACSLocation()
+
+	metadataXML := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" entityID="%s">
+  <md:SPSSODescriptor AuthnRequestsSigned="false" WantAssertionsSigned="true" protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+%s    <md:NameIDFormat>urn:oasis:names:tc:SAML:2.0:nameid-format:persistent</md:NameIDFormat>
+    <md:NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified</md:NameIDFormat>
+    <md:NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress</md:NameIDFormat>
+    <md:AssertionConsumerService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="%s" index="0" isDefault="true"/>
+  </md:SPSSODescriptor>
+</md:EntityDescriptor>`, h.cfg.SAML.EntityID, keyDescriptor, acsLocation)
+
+	c.Data(http.StatusOK, "application/samlmetadata+xml", []byte(metadataXML))
+}
+
+// HandleMetadata renders SAML 2.0 metadata with role parameter dispatch:
+// ?role=idp -> downstream IdP metadata for ITA
+// ?role=sp  -> upstream SP metadata for Entra ID
+// default   -> combined EntityDescriptor containing both IDPSSODescriptor and SPSSODescriptor
+func (h *SAMLHandler) HandleMetadata(c *gin.Context) {
+	role := strings.ToLower(strings.TrimSpace(c.Query("role")))
+	if role == "idp" {
+		h.HandleIdPMetadata(c)
+		return
+	}
+	if role == "sp" {
+		h.HandleSPMetadata(c)
+		return
+	}
+
+	keyDescriptor := h.getKeyDescriptorXML()
+	acsLocation := h.getACSLocation()
+
+	metadataXML := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" entityID="%s">
+  <md:IDPSSODescriptor WantAuthnRequestsSigned="false" protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+%s    <md:NameIDFormat>urn:oasis:names:tc:SAML:2.0:nameid-format:persistent</md:NameIDFormat>
+    <md:NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified</md:NameIDFormat>
+    <md:NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress</md:NameIDFormat>
+    <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="%s"/>
+    <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="%s"/>
+  </md:IDPSSODescriptor>
+  <md:SPSSODescriptor AuthnRequestsSigned="false" WantAssertionsSigned="true" protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+%s    <md:NameIDFormat>urn:oasis:names:tc:SAML:2.0:nameid-format:persistent</md:NameIDFormat>
+    <md:NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified</md:NameIDFormat>
+    <md:NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress</md:NameIDFormat>
+    <md:AssertionConsumerService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="%s" index="0" isDefault="true"/>
+  </md:SPSSODescriptor>
+</md:EntityDescriptor>`, h.cfg.SAML.EntityID, keyDescriptor, h.cfg.SAML.SSOURL, h.cfg.SAML.SSOURL, keyDescriptor, acsLocation)
+
+	c.Data(http.StatusOK, "application/samlmetadata+xml", []byte(metadataXML))
 }
 
 func maskEmail(email string) string {

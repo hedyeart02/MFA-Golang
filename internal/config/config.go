@@ -366,6 +366,17 @@ func Load(paths ...string) (*Config, error) {
 		return nil, fmt.Errorf("unmarshaling config: %w", err)
 	}
 
+	// Backwards compatibility for legacy configs with server.tls_enabled / server.tls_cert_file / server.tls_key_file
+	if v.GetBool("server.tls_enabled") && !cfg.TLS.Enabled {
+		cfg.TLS.Enabled = true
+		if cfg.TLS.CertFile == "" {
+			cfg.TLS.CertFile = v.GetString("server.tls_cert_file")
+		}
+		if cfg.TLS.KeyFile == "" {
+			cfg.TLS.KeyFile = v.GetString("server.tls_key_file")
+		}
+	}
+
 	// Apply limit fallbacks if set to <= 0
 	if cfg.MaximumRequestSize <= 0 {
 		cfg.MaximumRequestSize = 256 * 1024
