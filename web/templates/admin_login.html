@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAMLGuard - Administrator Sign In</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: #0b0f19;
+            color: #e2e8f0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 1.5rem;
+        }
+        .card {
+            background: #111827;
+            border: 1px solid #1f2937;
+            border-radius: 16px;
+            padding: 2.5rem;
+            max-width: 440px;
+            width: 100%;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            text-align: center;
+        }
+        .brand-icon {
+            font-size: 2.5rem;
+            margin-bottom: 0.75rem;
+        }
+        h1 {
+            font-size: 1.45rem;
+            font-weight: 700;
+            color: #f8fafc;
+            margin-bottom: 0.4rem;
+        }
+        .subtitle {
+            font-size: 0.85rem;
+            color: #94a3b8;
+            margin-bottom: 1.5rem;
+            line-height: 1.4;
+        }
+        .alert {
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            margin-bottom: 1.25rem;
+            text-align: left;
+        }
+        .alert-danger {
+            background: #450a0a;
+            border: 1px solid #b91c1c;
+            color: #fecaca;
+        }
+        .form-group {
+            margin-bottom: 1.25rem;
+            text-align: left;
+        }
+        label {
+            display: block;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #cbd5e1;
+            margin-bottom: 0.4rem;
+        }
+        input[type="text"], input[type="password"] {
+            width: 100%;
+            background: #0b0f19;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 0.75rem 0.9rem;
+            color: #f8fafc;
+            font-size: 0.95rem;
+            transition: all 0.2s;
+        }
+        input:focus {
+            outline: none;
+            border-color: #38bdf8;
+            box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+        }
+        .btn-submit {
+            width: 100%;
+            padding: 0.8rem;
+            border: none;
+            border-radius: 8px;
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            color: #ffffff;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 0.5rem;
+        }
+        .btn-submit:hover {
+            background: #1d4ed8;
+            box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
+        }
+        .default-hint {
+            margin-top: 1.25rem;
+            padding: 0.75rem;
+            background: #0f172a;
+            border: 1px solid #1e293b;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            color: #94a3b8;
+            line-height: 1.5;
+        }
+        .default-hint code {
+            color: #38bdf8;
+            background: #1e293b;
+            padding: 0.15rem 0.35rem;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        .footer {
+            margin-top: 1.5rem;
+            font-size: 0.75rem;
+            color: #64748b;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="brand-icon">🛡️</div>
+        <h1>SAMLGuard Admin Console</h1>
+        <p class="subtitle">Enter administrative credentials to access gateway settings</p>
+
+        {{if .ErrorMessage}}
+        <div class="alert alert-danger">
+            ⚠️ {{.ErrorMessage}}
+        </div>
+        {{end}}
+
+        <form method="POST" action="/admin/login">
+            <div class="form-group">
+                <label for="username">Administrator Username</label>
+                <input type="text" id="username" name="username" value="{{.Username}}" placeholder="e.g. admin" required autofocus autocomplete="username">
+            </div>
+
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" placeholder="••••••••" required autocomplete="current-password">
+            </div>
+
+            <button type="submit" class="btn-submit">Sign In to Admin Console &rarr;</button>
+        </form>
+
+        <div class="default-hint">
+            💡 <strong>Initial Setup:</strong> Default login is <code>admin</code> / <code>admin</code>.<br>
+            First-time logon strictly requires setting a new password.
+        </div>
+
+        <div class="footer">SAMLGuard Enterprise MFA Gateway</div>
+    </div>
+</body>
+</html>

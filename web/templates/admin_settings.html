@@ -385,6 +385,11 @@
                 <span class="badge badge-success">● Active</span>
                 <span class="badge badge-info">HTTPS :{{.Port}}</span>
                 <span class="badge badge-warning" id="serverClock">🕒 UTC: {{.ServerTimeUTC}}</span>
+                {{if .AdminUsername}}
+                <span class="badge badge-info" style="background: #1e293b; border-color: #38bdf8; color: #f8fafc;">👤 {{.AdminUsername}}</span>
+                <a href="/admin/change-password" class="btn-link" style="color: #cbd5e1;">🔑 Password</a>
+                <a href="/admin/logout" class="btn-link" style="color: #f87171; border-color: #7f1d1d;">🚪 Sign Out</a>
+                {{end}}
                 <a href="/login" class="btn-link" target="_blank">↗ Test Login Screen</a>
                 <a href="/health" class="btn-link" target="_blank">Health Check</a>
             </div>

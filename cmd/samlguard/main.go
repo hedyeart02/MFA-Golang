@@ -197,14 +197,25 @@ func SetupAppWithCleanup(cfg *config.Config, appLogger *logger.Logger) (*gin.Eng
 	r.POST("/mfa/re-enroll", samlHandler.HandleMFAReEnroll)
 	r.POST("/mock-idp/submit", samlHandler.HandleMockIDPSubmit)
 
-	// Dedicated Admin Settings & Management routes
-	r.GET("/admin/settings", samlHandler.HandleAdminSettingsGet)
-	r.POST("/admin/settings", samlHandler.HandleAdminSettingsPost)
-	r.POST("/admin/settings/test-email", samlHandler.HandleAdminTestEmailPost)
-	r.POST("/admin/ita/sync", samlHandler.HandleAdminITASyncPost)
-	r.POST("/admin/users/add", samlHandler.HandleAdminUserAddPost)
-	r.POST("/admin/users/delete", samlHandler.HandleAdminUserDeletePost)
-	r.GET("/admin/cert/download", samlHandler.HandleAdminCertDownload)
+	// Admin Console Authentication & Password Management routes
+	r.GET("/admin/login", samlHandler.HandleAdminLoginGet)
+	r.POST("/admin/login", samlHandler.HandleAdminLoginPost)
+	r.GET("/admin/change-password", samlHandler.HandleAdminChangePasswordGet)
+	r.POST("/admin/change-password", samlHandler.HandleAdminChangePasswordPost)
+	r.GET("/admin/logout", samlHandler.HandleAdminLogout)
+
+	// Protected Admin Settings & Management routes (requires authenticated admin session)
+	adminProtected := r.Group("/admin", samlHandler.RequireAdminAuth())
+	{
+		adminProtected.GET("/settings", samlHandler.HandleAdminSettingsGet)
+		adminProtected.POST("/settings", samlHandler.HandleAdminSettingsPost)
+		adminProtected.POST("/settings/test-email", samlHandler.HandleAdminTestEmailPost)
+		adminProtected.POST("/ita/sync", samlHandler.HandleAdminITASyncPost)
+		adminProtected.POST("/users/add", samlHandler.HandleAdminUserAddPost)
+		adminProtected.POST("/users/delete", samlHandler.HandleAdminUserDeletePost)
+		adminProtected.GET("/cert/download", samlHandler.HandleAdminCertDownload)
+	}
+
 	r.GET("/admin", func(c *gin.Context) {
 		c.Redirect(http.StatusTemporaryRedirect, "/admin/settings")
 	})

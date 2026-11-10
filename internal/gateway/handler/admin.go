@@ -2,9 +2,13 @@ package handler
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -22,6 +26,15 @@ import (
 	"go.uber.org/zap"
 )
 
+const adminSessionCookie = "samlguard_admin_session"
+
+// AdminSessionData holds deserialized session data stored inside the signed cookie.
+type AdminSessionData struct {
+	Username           string
+	MustChangePassword bool
+	ExpiresAt          int64
+}
+
 // CertDetails holds parsed metadata about a certificate.
 type CertDetails struct {
 	Subject   string
@@ -35,6 +48,7 @@ type CertDetails struct {
 
 // AdminSettingsViewModel models the view data passed to admin_settings.html.
 type AdminSettingsViewModel struct {
+	AdminUsername       string
 	Settings            *config.AdminSettingsPayload
 	Port                int
 	AllowedAudiencesStr string
@@ -46,14 +60,302 @@ type AdminSettingsViewModel struct {
 	ErrorMessage        string
 }
 
+// --- Session & Security Helpers ---
+
+func (h *SAMLHandler) getAdminSessionSecret() []byte {
+	if h.cfg.Security.CSRFSecret != "" {
+		return []byte(h.cfg.Security.CSRFSecret)
+	}
+	if h.cfg.MFA.EncryptionKey != "" {
+		return []byte(h.cfg.MFA.EncryptionKey)
+	}
+	return []byte("samlguard-admin-secure-auth-secret-key-2026")
+}
+
+func (h *SAMLHandler) createAdminSessionToken(username string, mustChange bool) string {
+	exp := time.Now().Add(8 * time.Hour).Unix()
+	mustChangeStr := "0"
+	if mustChange {
+		mustChangeStr = "1"
+	}
+	payload := fmt.Sprintf("%s:%s:%d", username, mustChangeStr, exp)
+	encoded := base64.RawURLEncoding.EncodeToString([]byte(payload))
+
+	mac := hmac.New(sha256.New, h.getAdminSessionSecret())
+	mac.Write([]byte(encoded))
+	sig := hex.EncodeToString(mac.Sum(nil))
+
+	return encoded + "." + sig
+}
+
+func (h *SAMLHandler) verifyAdminSessionToken(token string) (*AdminSessionData, error) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 2 {
+		return nil, errors.New("invalid session token structure")
+	}
+
+	encodedPayload, sigHex := parts[0], parts[1]
+	expectedSig, err := hex.DecodeString(sigHex)
+	if err != nil {
+		return nil, errors.New("invalid session signature format")
+	}
+
+	mac := hmac.New(sha256.New, h.getAdminSessionSecret())
+	mac.Write([]byte(encodedPayload))
+	computedSig := mac.Sum(nil)
+
+	if !hmac.Equal(computedSig, expectedSig) {
+		return nil, errors.New("invalid session signature")
+	}
+
+	payloadBytes, err := base64.RawURLEncoding.DecodeString(encodedPayload)
+	if err != nil {
+		return nil, errors.New("invalid session payload encoding")
+	}
+
+	fields := strings.Split(string(payloadBytes), ":")
+	if len(fields) != 3 {
+		return nil, errors.New("corrupted session payload")
+	}
+
+	username := fields[0]
+	mustChange := fields[1] == "1"
+	exp, err := strconv.ParseInt(fields[2], 10, 64)
+	if err != nil {
+		return nil, errors.New("invalid session expiry")
+	}
+
+	if time.Now().Unix() > exp {
+		return nil, errors.New("session expired")
+	}
+
+	return &AdminSessionData{
+		Username:           username,
+		MustChangePassword: mustChange,
+		ExpiresAt:          exp,
+	}, nil
+}
+
+func (h *SAMLHandler) setAdminSessionCookie(c *gin.Context, token string) {
+	secure := c.Request.TLS != nil || h.cfg.TLS.Enabled || c.GetHeader("X-Forwarded-Proto") == "https"
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     adminSessionCookie,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   8 * 3600,
+	})
+}
+
+func (h *SAMLHandler) clearAdminSessionCookie(c *gin.Context) {
+	secure := c.Request.TLS != nil || h.cfg.TLS.Enabled || c.GetHeader("X-Forwarded-Proto") == "https"
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     adminSessionCookie,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+	})
+}
+
+func (h *SAMLHandler) getAdminSession(c *gin.Context) *AdminSessionData {
+	cookie, err := c.Cookie(adminSessionCookie)
+	if err != nil || strings.TrimSpace(cookie) == "" {
+		return nil
+	}
+	session, err := h.verifyAdminSessionToken(cookie)
+	if err != nil {
+		return nil
+	}
+	return session
+}
+
+func isJSONAdminRequest(c *gin.Context) bool {
+	accept := c.GetHeader("Accept")
+	contentType := c.GetHeader("Content-Type")
+	path := c.Request.URL.Path
+	return strings.Contains(accept, "application/json") ||
+		strings.Contains(contentType, "application/json") ||
+		strings.HasPrefix(path, "/admin/ita/") ||
+		strings.HasPrefix(path, "/admin/users/") ||
+		strings.HasPrefix(path, "/admin/settings/test-email")
+}
+
+// RequireAdminAuth is a middleware that enforces valid administrator session.
+// If the user has must_change_password enabled, it strictly redirects them to /admin/change-password.
+func (h *SAMLHandler) RequireAdminAuth() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		session := h.getAdminSession(c)
+		if session == nil {
+			if isJSONAdminRequest(c) {
+				c.JSON(http.StatusUnauthorized, gin.H{
+					"success": false,
+					"error":   "Unauthorized: Please sign in to the SAMLGuard Admin Console.",
+				})
+				c.Abort()
+				return
+			}
+			c.Redirect(http.StatusSeeOther, "/admin/login")
+			c.Abort()
+			return
+		}
+
+		if session.MustChangePassword {
+			path := c.Request.URL.Path
+			if path != "/admin/change-password" && path != "/admin/logout" {
+				if isJSONAdminRequest(c) {
+					c.JSON(http.StatusForbidden, gin.H{
+						"success": false,
+						"error":   "Password change required before accessing administration features.",
+					})
+					c.Abort()
+					return
+				}
+				c.Redirect(http.StatusSeeOther, "/admin/change-password")
+				c.Abort()
+				return
+			}
+		}
+
+		c.Set("admin_username", session.Username)
+		c.Set("admin_must_change_password", session.MustChangePassword)
+		c.Next()
+	}
+}
+
+// --- Admin Authentication Handlers ---
+
+// HandleAdminLoginGet renders the administrative login view.
+func (h *SAMLHandler) HandleAdminLoginGet(c *gin.Context) {
+	if session := h.getAdminSession(c); session != nil {
+		if session.MustChangePassword {
+			c.Redirect(http.StatusSeeOther, "/admin/change-password")
+			return
+		}
+		c.Redirect(http.StatusSeeOther, "/admin/settings")
+		return
+	}
+	h.renderAdminLogin(c, "", "")
+}
+
+// HandleAdminLoginPost authenticates administrator credentials.
+func (h *SAMLHandler) HandleAdminLoginPost(c *gin.Context) {
+	username := strings.TrimSpace(c.PostForm("username"))
+	password := c.PostForm("password")
+
+	if username == "" || password == "" {
+		h.renderAdminLogin(c, username, "Username and password are required.")
+		return
+	}
+
+	if h.mfaService == nil || h.mfaService.Storage() == nil {
+		h.renderAdminLogin(c, username, "Database storage service is temporarily unavailable.")
+		return
+	}
+
+	adminUser, err := h.mfaService.Storage().AuthenticateAdmin(c.Request.Context(), username, password)
+	if err != nil {
+		h.logger.Warn("admin login attempt failed", zap.String("username", username), zap.Error(err))
+		h.renderAdminLogin(c, username, err.Error())
+		return
+	}
+
+	token := h.createAdminSessionToken(adminUser.Username, adminUser.MustChangePassword)
+	h.setAdminSessionCookie(c, token)
+
+	h.logger.Info("admin signed in successfully",
+		zap.String("username", adminUser.Username),
+		zap.Bool("must_change_password", adminUser.MustChangePassword),
+	)
+
+	if adminUser.MustChangePassword {
+		c.Redirect(http.StatusSeeOther, "/admin/change-password")
+		return
+	}
+
+	c.Redirect(http.StatusSeeOther, "/admin/settings")
+}
+
+// HandleAdminChangePasswordGet renders the forced password change form.
+func (h *SAMLHandler) HandleAdminChangePasswordGet(c *gin.Context) {
+	session := h.getAdminSession(c)
+	if session == nil {
+		c.Redirect(http.StatusSeeOther, "/admin/login")
+		return
+	}
+	h.renderAdminChangePassword(c, session.Username, "")
+}
+
+// HandleAdminChangePasswordPost processes new password submission and updates SQLite.
+func (h *SAMLHandler) HandleAdminChangePasswordPost(c *gin.Context) {
+	session := h.getAdminSession(c)
+	if session == nil {
+		c.Redirect(http.StatusSeeOther, "/admin/login")
+		return
+	}
+
+	newPassword := c.PostForm("new_password")
+	confirmPassword := c.PostForm("confirm_password")
+
+	if newPassword != confirmPassword {
+		h.renderAdminChangePassword(c, session.Username, "Passwords do not match. Please verify and retype.")
+		return
+	}
+
+	if len(newPassword) < 8 {
+		h.renderAdminChangePassword(c, session.Username, "New password must be at least 8 characters long.")
+		return
+	}
+
+	if newPassword == "admin" || newPassword == "admin123" {
+		h.renderAdminChangePassword(c, session.Username, "New password cannot be the default password ('admin' or 'admin123').")
+		return
+	}
+
+	if h.mfaService == nil || h.mfaService.Storage() == nil {
+		h.renderAdminChangePassword(c, session.Username, "Storage service unavailable.")
+		return
+	}
+
+	if err := h.mfaService.Storage().UpdateAdminPassword(c.Request.Context(), session.Username, newPassword); err != nil {
+		h.renderAdminChangePassword(c, session.Username, err.Error())
+		return
+	}
+
+	// Password changed successfully; update session cookie with MustChangePassword = false
+	newToken := h.createAdminSessionToken(session.Username, false)
+	h.setAdminSessionCookie(c, newToken)
+
+	h.logger.Info("administrator updated password successfully", zap.String("username", session.Username))
+	c.Redirect(http.StatusSeeOther, "/admin/settings?msg=Administrator+password+successfully+updated!")
+}
+
+// HandleAdminLogout ends the administrator session.
+func (h *SAMLHandler) HandleAdminLogout(c *gin.Context) {
+	h.clearAdminSessionCookie(c)
+	c.Redirect(http.StatusSeeOther, "/admin/login")
+}
+
+// --- Admin Settings Dashboard Handlers ---
+
 // HandleAdminSettingsGet renders the dedicated settings admin panel.
 func (h *SAMLHandler) HandleAdminSettingsGet(c *gin.Context) {
-	vm := h.buildAdminViewModel("", "")
+	adminUser, _ := c.Get("admin_username")
+	adminUsername, _ := adminUser.(string)
+	successMsg := c.Query("msg")
+	vm := h.buildAdminViewModel(adminUsername, successMsg, "")
 	h.renderAdminSettings(c, vm)
 }
 
 // HandleAdminSettingsPost processes form submissions from the admin panel and persists to YAML.
 func (cHandler *SAMLHandler) HandleAdminSettingsPost(c *gin.Context) {
+	adminUser, _ := c.Get("admin_username")
+	adminUsername, _ := adminUser.(string)
+
 	var payload config.AdminSettingsPayload
 
 	// Upstream IdP
@@ -128,7 +430,7 @@ func (cHandler *SAMLHandler) HandleAdminSettingsPost(c *gin.Context) {
 	configPath := "configs/config.yaml"
 	if err := config.SaveConfig(configPath, cHandler.cfg, &payload); err != nil {
 		cHandler.logger.Error("failed saving config file", zap.Error(err))
-		vm := cHandler.buildAdminViewModel("", fmt.Sprintf("Failed to save configuration: %v", err))
+		vm := cHandler.buildAdminViewModel(adminUsername, "", fmt.Sprintf("Failed to save configuration: %v", err))
 		cHandler.renderAdminSettings(c, vm)
 		return
 	}
@@ -153,7 +455,7 @@ func (cHandler *SAMLHandler) HandleAdminSettingsPost(c *gin.Context) {
 		zap.Bool("enforce_whitelist", cHandler.cfg.ITA.EnforceUserWhitelist),
 	)
 
-	vm := cHandler.buildAdminViewModel("Configuration updated successfully and saved to "+configPath, "")
+	vm := cHandler.buildAdminViewModel(adminUsername, "Configuration updated successfully and saved to "+configPath, "")
 	cHandler.renderAdminSettings(c, vm)
 }
 
@@ -346,7 +648,7 @@ func (h *SAMLHandler) HandleAdminCertDownload(c *gin.Context) {
 	c.File(filePath)
 }
 
-func (h *SAMLHandler) buildAdminViewModel(successMsg, errorMsg string) *AdminSettingsViewModel {
+func (h *SAMLHandler) buildAdminViewModel(adminUsername, successMsg, errorMsg string) *AdminSettingsViewModel {
 	payload := &config.AdminSettingsPayload{
 		IdPEntityID:           h.cfg.SAML.IdPEntityID,
 		IdPSSOURL:             h.cfg.SAML.IdPSSOURL,
@@ -387,6 +689,7 @@ func (h *SAMLHandler) buildAdminViewModel(successMsg, errorMsg string) *AdminSet
 	}
 
 	return &AdminSettingsViewModel{
+		AdminUsername:       adminUsername,
 		Settings:            payload,
 		Port:                h.cfg.Server.Port,
 		AllowedAudiencesStr: strings.Join(h.cfg.SAML.AllowedAudiences, ", "),
@@ -413,6 +716,40 @@ func (h *SAMLHandler) renderAdminSettings(c *gin.Context, vm *AdminSettingsViewM
 	if err := tmpl.Execute(c.Writer, vm); err != nil {
 		h.logger.Error("failed executing admin settings template", zap.Error(err))
 	}
+}
+
+func (h *SAMLHandler) renderAdminLogin(c *gin.Context, username, errMsg string) {
+	tmplPath := filepath.Join("web", "templates", "admin_login.html")
+	tmpl, err := template.ParseFiles(tmplPath)
+	if err != nil {
+		tmpl, err = web.ParseAdminLoginTemplate()
+	}
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Failed to load admin login template: %v", err)
+		return
+	}
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	_ = tmpl.Execute(c.Writer, gin.H{
+		"Username":     username,
+		"ErrorMessage": errMsg,
+	})
+}
+
+func (h *SAMLHandler) renderAdminChangePassword(c *gin.Context, username, errMsg string) {
+	tmplPath := filepath.Join("web", "templates", "admin_change_password.html")
+	tmpl, err := template.ParseFiles(tmplPath)
+	if err != nil {
+		tmpl, err = web.ParseAdminChangePasswordTemplate()
+	}
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Failed to load change password template: %v", err)
+		return
+	}
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	_ = tmpl.Execute(c.Writer, gin.H{
+		"Username":     username,
+		"ErrorMessage": errMsg,
+	})
 }
 
 func parseCertDetails(certPath string) CertDetails {

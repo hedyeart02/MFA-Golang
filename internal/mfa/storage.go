@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
 )
 
@@ -52,6 +53,18 @@ type AuthorizedUser struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// AdminUser represents an administrator account for accessing the SAMLGuard Admin Console.
+type AdminUser struct {
+	ID                 int64      `json:"id"`
+	Username           string     `json:"username"`
+	PasswordHash       string     `json:"-"`
+	MustChangePassword bool       `json:"must_change_password"`
+	FailedAttempts     int        `json:"failed_attempts"`
+	LockedUntil        *time.Time `json:"locked_until"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+}
+
 type Storage interface {
 	Init(ctx context.Context) error
 	Close() error
@@ -76,6 +89,11 @@ type Storage interface {
 	ListAuthorizedUsers(ctx context.Context) ([]AuthorizedUser, error)
 	AddAuthorizedUser(ctx context.Context, user AuthorizedUser) error
 	DeleteAuthorizedUser(ctx context.Context, username string) error
+
+	// Admin Authentication methods
+	GetAdminUser(ctx context.Context, username string) (*AdminUser, error)
+	AuthenticateAdmin(ctx context.Context, username, password string) (*AdminUser, error)
+	UpdateAdminPassword(ctx context.Context, username, newPassword string) error
 }
 
 type SQLiteStorage struct {
@@ -226,6 +244,18 @@ func (s *SQLiteStorage) Init(ctx context.Context) error {
 	);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_authorized_users_username ON authorized_users(username);
 	CREATE INDEX IF NOT EXISTS idx_authorized_users_email ON authorized_users(email);
+
+	CREATE TABLE IF NOT EXISTS admin_users (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+		password_hash TEXT NOT NULL,
+		must_change_password BOOLEAN NOT NULL DEFAULT 1,
+		failed_attempts INTEGER NOT NULL DEFAULT 0,
+		locked_until DATETIME,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_users_username ON admin_users(username);
 	`
 
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
@@ -247,6 +277,19 @@ func (s *SQLiteStorage) Init(ctx context.Context) error {
 			('apc', 'apc@samlguard.local', 'Default APC Administrator', 'system_default', ?, ?),
 			('itaadmin', 'itaadmin@samlguard.local', 'ITA Administrator', 'system_default', ?, ?)
 		`, now, now, now, now)
+	}
+
+	// Seed default admin account (username: admin, password: admin, must_change_password: 1) if table is empty
+	var adminCount int
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM admin_users;").Scan(&adminCount); err == nil && adminCount == 0 {
+		defaultHash, err := bcrypt.GenerateFromPassword([]byte("admin"), bcrypt.DefaultCost)
+		if err == nil {
+			now := time.Now()
+			_, _ = s.db.ExecContext(ctx, `
+				INSERT OR IGNORE INTO admin_users (username, password_hash, must_change_password, created_at, updated_at)
+				VALUES ('admin', ?, 1, ?, ?)
+			`, string(defaultHash), now, now)
+		}
 	}
 
 	return nil
@@ -650,4 +693,104 @@ func (s *SQLiteStorage) DeleteAuthorizedUser(ctx context.Context, username strin
 	}
 	_, err := s.db.ExecContext(ctx, `DELETE FROM authorized_users WHERE LOWER(username) = LOWER(?)`, trimmed)
 	return err
+}
+
+// GetAdminUser fetches an admin user record by username.
+func (s *SQLiteStorage) GetAdminUser(ctx context.Context, username string) (*AdminUser, error) {
+	trimmed := strings.ToLower(strings.TrimSpace(username))
+	if trimmed == "" {
+		return nil, errors.New("username cannot be empty")
+	}
+
+	var u AdminUser
+	var lockedUntil sql.NullTime
+	query := `SELECT id, username, password_hash, must_change_password, failed_attempts, locked_until, created_at, updated_at FROM admin_users WHERE LOWER(username) = ?`
+	err := s.db.QueryRowContext(ctx, query, trimmed).Scan(
+		&u.ID, &u.Username, &u.PasswordHash, &u.MustChangePassword, &u.FailedAttempts, &lockedUntil, &u.CreatedAt, &u.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if lockedUntil.Valid {
+		u.LockedUntil = &lockedUntil.Time
+	}
+	return &u, nil
+}
+
+// AuthenticateAdmin verifies credentials for the admin user, checking lockout and password hash.
+func (s *SQLiteStorage) AuthenticateAdmin(ctx context.Context, username, password string) (*AdminUser, error) {
+	trimmed := strings.ToLower(strings.TrimSpace(username))
+	if trimmed == "" || password == "" {
+		return nil, errors.New("username and password are required")
+	}
+
+	var u AdminUser
+	var lockedUntil sql.NullTime
+	query := `SELECT id, username, password_hash, must_change_password, failed_attempts, locked_until, created_at, updated_at FROM admin_users WHERE LOWER(username) = ?`
+	err := s.db.QueryRowContext(ctx, query, trimmed).Scan(
+		&u.ID, &u.Username, &u.PasswordHash, &u.MustChangePassword, &u.FailedAttempts, &lockedUntil, &u.CreatedAt, &u.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.New("invalid administrator credentials")
+		}
+		return nil, err
+	}
+
+	now := time.Now()
+	if lockedUntil.Valid && now.Before(lockedUntil.Time) {
+		remaining := time.Until(lockedUntil.Time).Round(time.Second)
+		return nil, fmt.Errorf("account temporarily locked due to multiple failed attempts. Try again in %v", remaining)
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)); err != nil {
+		s.mu.Lock()
+		_, _ = s.db.ExecContext(ctx, `UPDATE admin_users SET failed_attempts = failed_attempts + 1, updated_at = ? WHERE id = ?`, now, u.ID)
+		if u.FailedAttempts+1 >= 5 {
+			lockTime := now.Add(15 * time.Minute)
+			_, _ = s.db.ExecContext(ctx, `UPDATE admin_users SET locked_until = ? WHERE id = ?`, lockTime, u.ID)
+		}
+		s.mu.Unlock()
+		return nil, errors.New("invalid administrator credentials")
+	}
+
+	// Reset failure count on success
+	s.mu.Lock()
+	_, _ = s.db.ExecContext(ctx, `UPDATE admin_users SET failed_attempts = 0, locked_until = NULL, updated_at = ? WHERE id = ?`, now, u.ID)
+	s.mu.Unlock()
+
+	return &u, nil
+}
+
+// UpdateAdminPassword updates the administrator password, sets must_change_password to false, and resets failures.
+func (s *SQLiteStorage) UpdateAdminPassword(ctx context.Context, username, newPassword string) error {
+	trimmed := strings.ToLower(strings.TrimSpace(username))
+	if len(newPassword) < 8 {
+		return errors.New("new password must be at least 8 characters long")
+	}
+	if newPassword == "admin" || newPassword == "admin123" {
+		return errors.New("new password cannot be the default password ('admin' or 'admin123')")
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("hashing password: %w", err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	res, err := s.db.ExecContext(ctx, `UPDATE admin_users SET password_hash = ?, must_change_password = 0, failed_attempts = 0, locked_until = NULL, updated_at = ? WHERE LOWER(username) = ?`, string(hash), now, trimmed)
+	if err != nil {
+		return err
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return errors.New("administrator user not found")
+	}
+	return nil
 }

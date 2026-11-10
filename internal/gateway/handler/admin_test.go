@@ -272,3 +272,183 @@ func TestAdminSettings_WhitelistEnforcement(t *testing.T) {
 		t.Fatalf("expected random email to be BLOCKED, got auth=%v", randomAuth)
 	}
 }
+
+func setupAdminAuthEngine(h *SAMLHandler) *gin.Engine {
+	r := gin.New()
+	r.GET("/admin/login", h.HandleAdminLoginGet)
+	r.POST("/admin/login", h.HandleAdminLoginPost)
+	r.GET("/admin/change-password", h.HandleAdminChangePasswordGet)
+	r.POST("/admin/change-password", h.HandleAdminChangePasswordPost)
+	r.GET("/admin/logout", h.HandleAdminLogout)
+
+	adminProtected := r.Group("/admin", h.RequireAdminAuth())
+	{
+		adminProtected.GET("/settings", h.HandleAdminSettingsGet)
+		adminProtected.POST("/settings", h.HandleAdminSettingsPost)
+		adminProtected.POST("/users/add", h.HandleAdminUserAddPost)
+	}
+	return r
+}
+
+func TestAdminAuth_CompleteLifecycle(t *testing.T) {
+	_, h, _ := setupTestAdminHandler(t)
+	r := setupAdminAuthEngine(h)
+
+	// 1. Unauthenticated access to /admin/settings should redirect to /admin/login
+	req := httptest.NewRequest("GET", "/admin/settings", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/admin/login" {
+		t.Fatalf("expected 303 redirect to /admin/login, got code=%d location=%s", w.Code, w.Header().Get("Location"))
+	}
+
+	// 2. Unauthenticated JSON request should return 401 Unauthorized
+	reqJSON := httptest.NewRequest("POST", "/admin/users/add", strings.NewReader(`{"username":"test"}`))
+	reqJSON.Header.Set("Accept", "application/json")
+	wJSON := httptest.NewRecorder()
+	r.ServeHTTP(wJSON, reqJSON)
+	if wJSON.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized for JSON request, got %d", wJSON.Code)
+	}
+
+	// 3. Login GET renders login page
+	reqLoginGet := httptest.NewRequest("GET", "/admin/login", nil)
+	wLoginGet := httptest.NewRecorder()
+	r.ServeHTTP(wLoginGet, reqLoginGet)
+	if wLoginGet.Code != http.StatusOK || !strings.Contains(wLoginGet.Body.String(), "SAMLGuard Admin Console") {
+		t.Fatalf("expected 200 OK with admin login form, got %d", wLoginGet.Code)
+	}
+
+	// 4. Invalid credentials should fail
+	badLoginForm := url.Values{
+		"username": {"admin"},
+		"password": {"wrongpass123"},
+	}
+	reqBadLogin := httptest.NewRequest("POST", "/admin/login", strings.NewReader(badLoginForm.Encode()))
+	reqBadLogin.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	wBadLogin := httptest.NewRecorder()
+	r.ServeHTTP(wBadLogin, reqBadLogin)
+	if wBadLogin.Code != http.StatusOK || !strings.Contains(wBadLogin.Body.String(), "invalid administrator credentials") {
+		t.Fatalf("expected login error banner, got code=%d body=%s", wBadLogin.Code, wBadLogin.Body.String())
+	}
+
+	// 5. Valid default credentials (admin / admin) -> should redirect to /admin/change-password
+	validLoginForm := url.Values{
+		"username": {"admin"},
+		"password": {"admin"},
+	}
+	reqLogin := httptest.NewRequest("POST", "/admin/login", strings.NewReader(validLoginForm.Encode()))
+	reqLogin.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	wLogin := httptest.NewRecorder()
+	r.ServeHTTP(wLogin, reqLogin)
+
+	if wLogin.Code != http.StatusSeeOther || wLogin.Header().Get("Location") != "/admin/change-password" {
+		t.Fatalf("expected 303 redirect to /admin/change-password, got code=%d location=%s", wLogin.Code, wLogin.Header().Get("Location"))
+	}
+
+	// Extract session cookie
+	sessionCookie := ""
+	for _, cookie := range wLogin.Result().Cookies() {
+		if cookie.Name == "samlguard_admin_session" {
+			sessionCookie = cookie.Value
+			break
+		}
+	}
+	if sessionCookie == "" {
+		t.Fatalf("expected samlguard_admin_session cookie to be set")
+	}
+
+	// 6. Accessing /admin/settings before changing default password MUST be blocked and redirected to /admin/change-password
+	reqBlockedSettings := httptest.NewRequest("GET", "/admin/settings", nil)
+	reqBlockedSettings.AddCookie(&http.Cookie{Name: "samlguard_admin_session", Value: sessionCookie})
+	wBlockedSettings := httptest.NewRecorder()
+	r.ServeHTTP(wBlockedSettings, reqBlockedSettings)
+
+	if wBlockedSettings.Code != http.StatusSeeOther || wBlockedSettings.Header().Get("Location") != "/admin/change-password" {
+		t.Fatalf("expected redirect to /admin/change-password when must_change_password=1, got code=%d loc=%s", wBlockedSettings.Code, wBlockedSettings.Header().Get("Location"))
+	}
+
+	// 7. GET /admin/change-password with session works
+	reqChangePwdGet := httptest.NewRequest("GET", "/admin/change-password", nil)
+	reqChangePwdGet.AddCookie(&http.Cookie{Name: "samlguard_admin_session", Value: sessionCookie})
+	wChangePwdGet := httptest.NewRecorder()
+	r.ServeHTTP(wChangePwdGet, reqChangePwdGet)
+	if wChangePwdGet.Code != http.StatusOK || !strings.Contains(wChangePwdGet.Body.String(), "Change Administrator Password") {
+		t.Fatalf("expected change password page, got %d", wChangePwdGet.Code)
+	}
+
+	// 8. Attempting to set password shorter than 8 chars should fail
+	shortPwdForm := url.Values{
+		"new_password":     {"short"},
+		"confirm_password": {"short"},
+	}
+	reqShortPwd := httptest.NewRequest("POST", "/admin/change-password", strings.NewReader(shortPwdForm.Encode()))
+	reqShortPwd.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqShortPwd.AddCookie(&http.Cookie{Name: "samlguard_admin_session", Value: sessionCookie})
+	wShortPwd := httptest.NewRecorder()
+	r.ServeHTTP(wShortPwd, reqShortPwd)
+	if !strings.Contains(wShortPwd.Body.String(), "at least 8 characters long") {
+		t.Fatalf("expected minimum length validation error, got: %s", wShortPwd.Body.String())
+	}
+
+	// 9. Attempting to reuse default password should fail
+	defaultPwdForm := url.Values{
+		"new_password":     {"admin123"},
+		"confirm_password": {"admin123"},
+	}
+	reqDefaultPwd := httptest.NewRequest("POST", "/admin/change-password", strings.NewReader(defaultPwdForm.Encode()))
+	reqDefaultPwd.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqDefaultPwd.AddCookie(&http.Cookie{Name: "samlguard_admin_session", Value: sessionCookie})
+	wDefaultPwd := httptest.NewRecorder()
+	r.ServeHTTP(wDefaultPwd, reqDefaultPwd)
+	if !strings.Contains(wDefaultPwd.Body.String(), "cannot be the default password") {
+		t.Fatalf("expected default password rejection error, got: %s", wDefaultPwd.Body.String())
+	}
+
+	// 10. Valid new password change
+	validPwdForm := url.Values{
+		"new_password":     {"Admin@SecurePass2026!"},
+		"confirm_password": {"Admin@SecurePass2026!"},
+	}
+	reqValidPwd := httptest.NewRequest("POST", "/admin/change-password", strings.NewReader(validPwdForm.Encode()))
+	reqValidPwd.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqValidPwd.AddCookie(&http.Cookie{Name: "samlguard_admin_session", Value: sessionCookie})
+	wValidPwd := httptest.NewRecorder()
+	r.ServeHTTP(wValidPwd, reqValidPwd)
+
+	if wValidPwd.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 redirect after successful password change, got %d", wValidPwd.Code)
+	}
+
+	// Get updated session cookie
+	updatedCookie := ""
+	for _, cookie := range wValidPwd.Result().Cookies() {
+		if cookie.Name == "samlguard_admin_session" {
+			updatedCookie = cookie.Value
+			break
+		}
+	}
+	if updatedCookie == "" {
+		t.Fatalf("expected updated session cookie after password change")
+	}
+
+	// 11. Now /admin/settings is accessible!
+	reqAllowedSettings := httptest.NewRequest("GET", "/admin/settings", nil)
+	reqAllowedSettings.AddCookie(&http.Cookie{Name: "samlguard_admin_session", Value: updatedCookie})
+	wAllowedSettings := httptest.NewRecorder()
+	r.ServeHTTP(wAllowedSettings, reqAllowedSettings)
+	if wAllowedSettings.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK after password change, got %d: %s", wAllowedSettings.Code, wAllowedSettings.Body.String())
+	}
+	if !strings.Contains(wAllowedSettings.Body.String(), "👤 admin") {
+		t.Errorf("expected admin username badge in settings header")
+	}
+
+	// 12. Logout
+	reqLogout := httptest.NewRequest("GET", "/admin/logout", nil)
+	wLogout := httptest.NewRecorder()
+	r.ServeHTTP(wLogout, reqLogout)
+	if wLogout.Code != http.StatusSeeOther || wLogout.Header().Get("Location") != "/admin/login" {
+		t.Fatalf("expected redirect to /admin/login after logout, got %d", wLogout.Code)
+	}
+}
