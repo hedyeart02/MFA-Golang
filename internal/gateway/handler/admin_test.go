@@ -34,15 +34,15 @@ func setupTestAdminHandler(t *testing.T) (*gin.Engine, *SAMLHandler, string) {
   host: "0.0.0.0"
   port: 18080
 saml:
-  entity_id: "https://192.168.0.178:18080"
-  acs_url: "https://192.168.0.119/callback"
-  sso_url: "https://192.168.0.178:18080/login"
-  slo_url: "https://192.168.0.178:18080/logout"
+  entity_id: "https://samlguard.example.com:8443"
+  acs_url: "https://ita.example.com/callback"
+  sso_url: "https://samlguard.example.com:8443/login"
+  slo_url: "https://samlguard.example.com:8443/logout"
   cert_file: "` + strings.ReplaceAll(dummyCert, "\\", "/") + `"
-  idp_entity_id: "https://192.168.0.178:18080"
-  idp_sso_url: "https://192.168.0.178:18080/mock-idp-login"
+  idp_entity_id: "https://samlguard.example.com:8443"
+  idp_sso_url: "https://samlguard.example.com:8443/mock-idp-login"
   allowed_audiences:
-    - "https://192.168.0.119"
+    - "https://ita.example.com"
 mfa:
   default_provider: "totp"
   issuer: "SAMLGuard"
@@ -124,11 +124,11 @@ func TestAdminSettings_Post(t *testing.T) {
 		"idp_entity_id":         {"https://sts.windows.net/tenant-xyz/"},
 		"idp_sso_url":           {"https://login.microsoftonline.com/tenant-xyz/saml2"},
 		"idp_metadata_url":      {"https://login.microsoftonline.com/tenant-xyz/federationmetadata.xml"},
-		"entity_id":             {"https://192.168.0.178:18080"},
-		"acs_url":               {"https://192.168.0.119/api/current/authentication/saml2-callback"},
-		"sso_url":               {"https://192.168.0.178:18080/login"},
-		"slo_url":               {"https://192.168.0.178:18080/logout"},
-		"allowed_audiences_str": {"https://192.168.0.119, https://192.168.0.178:18080"},
+		"entity_id":             {"https://samlguard.example.com:8443"},
+		"acs_url":               {"https://ita.example.com/api/current/authentication/saml2-callback"},
+		"sso_url":               {"https://samlguard.example.com:8443/login"},
+		"slo_url":               {"https://samlguard.example.com:8443/logout"},
+		"allowed_audiences_str": {"https://ita.example.com, https://samlguard.example.com:8443"},
 		"group_map_key[]":       {"ita-admins"},
 		"group_map_val[]":       {"Admin"},
 		"mfa_default_provider":  {"email"},
@@ -272,7 +272,7 @@ func TestAdminSettings_WhitelistEnforcement(t *testing.T) {
 	}
 
 	// Unknown random email should be strictly BLOCKED!
-	randomAuth, err := h.mfaService.IsUserAuthorized(ctx, "realchromatic@gmail.com")
+	randomAuth, err := h.mfaService.IsUserAuthorized(ctx, "unauthorized@example.com")
 	if err != nil || randomAuth {
 		t.Fatalf("expected random email to be BLOCKED, got auth=%v", randomAuth)
 	}

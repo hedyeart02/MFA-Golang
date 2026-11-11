@@ -43,9 +43,9 @@ smtp:
 	payload := &AdminSettingsPayload{
 		IdPEntityID:        "https://sts.windows.net/tenant-123/",
 		IdPSSOURL:          "https://login.microsoftonline.com/tenant-123/saml2",
-		EntityID:           "https://192.168.0.178:18080",
-		ACSURL:             "https://192.168.0.119/api/current/authentication/saml2-callback",
-		AllowedAudiences:   []string{"https://192.168.0.119", "https://192.168.0.178:18080"},
+		EntityID:           "https://samlguard.example.com:8443",
+		ACSURL:             "https://ita.example.com/api/current/authentication/saml2-callback",
+		AllowedAudiences:   []string{"https://ita.example.com", "https://samlguard.example.com:8443"},
 		GroupMapping:       map[string]string{"ita-admins": "Admin", "ita-viewers": "Viewer"},
 		MFADefaultProvider: "email",
 		OTPExpiry:          10 * time.Minute,
@@ -68,7 +68,7 @@ smtp:
 	if cfg.SAML.IdPEntityID != "https://sts.windows.net/tenant-123/" {
 		t.Errorf("expected IdPEntityID updated, got %s", cfg.SAML.IdPEntityID)
 	}
-	if cfg.SAML.ACSURL != "https://192.168.0.119/api/current/authentication/saml2-callback" {
+	if cfg.SAML.ACSURL != "https://ita.example.com/api/current/authentication/saml2-callback" {
 		t.Errorf("expected ACSURL updated, got %s", cfg.SAML.ACSURL)
 	}
 	if cfg.MFA.DefaultProvider != "email" {

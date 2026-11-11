@@ -1537,7 +1537,7 @@
 
                             <div class="form-group">
                                 <label for="acs_url">Downstream ITA ACS Callback URL</label>
-                                <input type="text" id="acs_url" name="acs_url" value="{{.Settings.ACSURL}}" placeholder="https://192.168.0.119/api/current/authentication/saml2-callback" required>
+                                <input type="text" id="acs_url" name="acs_url" value="{{.Settings.ACSURL}}" placeholder="https://ita.example.com/api/current/authentication/saml2-callback" required>
                                 <p class="help-text">Exact callback endpoint on Schneider ITA where the signed assertion is POSTed.</p>
                             </div>
                         </div>
@@ -1546,7 +1546,7 @@
                             <div class="form-group">
                                 <label for="sso_url">Gateway Single Sign-On (SSO) URL</label>
                                 <input type="text" id="sso_url" name="sso_url" value="{{.Settings.SSOURL}}" required>
-                                <p class="help-text">Entry point where ITA sends AuthnRequests (e.g. https://192.168.0.178:18080/login).</p>
+                                <p class="help-text">Entry point where ITA sends AuthnRequests (e.g. https://samlguard.example.com:8443/login).</p>
                             </div>
 
                             <div class="form-group">
@@ -1558,7 +1558,7 @@
 
                         <div class="form-group">
                             <label for="allowed_audiences">Allowed SAML Audiences (Comma-Separated)</label>
-                            <input type="text" id="allowed_audiences" name="allowed_audiences_str" value="{{.AllowedAudiencesStr}}" placeholder="https://192.168.0.119, https://192.168.0.178:18080">
+                            <input type="text" id="allowed_audiences" name="allowed_audiences_str" value="{{.AllowedAudiencesStr}}" placeholder="https://ita.example.com, https://samlguard.example.com:8443">
                             <p class="help-text">Permitted SAML AudienceRestriction URIs accepted by the gateway and generated in assertions.</p>
                         </div>
 
@@ -1598,7 +1598,7 @@
                         <div class="guide-box">
                             <h3>🏢 Schneider Electric EcoStruxure IT Advisor (ITA) Setup Guide</h3>
                             <ol style="font-size: 0.85rem; color: var(--text-secondary); padding-left: 1.25rem; line-height: 1.8;">
-                                <li>Log in to ITA Web Client (<code>https://192.168.0.119</code>) as an administrator.</li>
+                                <li>Log in to ITA Web Client (<code>https://ita.example.com</code>) as an administrator.</li>
                                 <li>Navigate to <strong>Administration</strong> &gt; <strong>External Authentication</strong> &gt; <strong>SAML 2.0</strong>.</li>
                                 <li>Set <strong>IdP Entity ID</strong>: <code id="itaGuideIdPEntityID">{{.Settings.EntityID}}</code> <button type="button" class="btn btn-sm btn-secondary" style="padding: 0.15rem 0.4rem; font-size: 0.7rem;" onclick="copyText('itaGuideIdPEntityID')">Copy</button></li>
                                 <li>Set <strong>Single Sign-On Service URL</strong>: <code id="itaGuideSSO">{{.Settings.SSOURL}}</code> <button type="button" class="btn btn-sm btn-secondary" style="padding: 0.15rem 0.4rem; font-size: 0.7rem;" onclick="copyText('itaGuideSSO')">Copy</button></li>
@@ -1637,7 +1637,7 @@
                         <div class="grid-2">
                             <div class="form-group">
                                 <label for="ita_api_url">ITA REST API Base URL</label>
-                                <input type="text" id="ita_api_url" name="ita_api_url" value="{{.Settings.ITAAPIURL}}" placeholder="https://192.168.0.119/api/current">
+                                <input type="text" id="ita_api_url" name="ita_api_url" value="{{.Settings.ITAAPIURL}}" placeholder="https://ita.example.com/api/current">
                                 <p class="help-text">ITA REST API endpoint to retrieve authorized users.</p>
                             </div>
 

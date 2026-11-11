@@ -135,11 +135,7 @@ func (g *ResponseGenerator) GenerateResponse(req SAMLResponseRequest) (*SAMLResp
 	}
 	audience := req.Audience
 	if audience == "" {
-		if len(g.cfg.SAML.AllowedAudiences) > 0 {
-			audience = g.cfg.SAML.AllowedAudiences[0]
-		} else {
-			audience = "https://192.168.0.119" // Standard ITA SP Entity ID (F-06)
-		}
+		audience = g.cfg.ResolveDownstreamSPEntityID()
 	}
 
 	nameIDFormat := req.SubjectNameIDFormat

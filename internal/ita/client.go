@@ -44,7 +44,7 @@ func NewClient(timeout time.Duration) *Client {
 func (c *Client) FetchUsers(ctx context.Context, apiURL, username, password string) ([]mfa.AuthorizedUser, error) {
 	cleanURL := strings.TrimRight(strings.TrimSpace(apiURL), "/")
 	if cleanURL == "" {
-		cleanURL = "https://192.168.0.119/api/current"
+		return nil, errors.New("ITA API URL is required")
 	}
 	if username == "" {
 		return nil, errors.New("ITA API username is required")

@@ -133,7 +133,7 @@ smtp:
 ### `ita` (EcoStruxure IT Advisor Integration)
 ```yaml
 ita:
-  api_url: "https://192.168.0.119/api/current"
+  api_url: "https://ita.example.com/api/current"
   api_username: "apc"
   api_password: "YOUR_ITA_API_PASSWORD"
   enforce_user_whitelist: true
@@ -186,3 +186,4 @@ When `env: "production"` (or `SAMLGUARD_ENV=production` / `APP_ENV=production`),
 | YAML Config | `C:\ProgramData\SAMLGuard\config.yaml` | `/etc/samlguard/config.yaml` |
 | Certificates | `C:\ProgramData\SAMLGuard\cert\` | `/etc/samlguard/cert/` |
 | SQLite Database | `C:\ProgramData\SAMLGuard\data\samlguard.db` | `/var/lib/samlguard/samlguard.db` |
+

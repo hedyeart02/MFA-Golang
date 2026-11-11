@@ -38,6 +38,7 @@ func testConfig(t *testing.T) *config.Config {
 			IdPEntityID:          "https://mock-idp.samlguard.local",
 			ACSURL:               "http://localhost:8080/saml/acs",
 			MetadataURL:          "../../testdata/ita/metadata.xml",
+			AllowedAudiences:     []string{"https://ita.example.com"},
 			CertFile:             "../../cert/saml-signing.crt",
 			KeyFile:              "../../cert/saml-signing.key",
 			AuthnContextClassRef: "",
@@ -426,7 +427,7 @@ func TestSetupApp_StaticLogosAndLoginAssets(t *testing.T) {
 		}
 	}
 
-	rawCorpReqXML := `<samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_corp_ui_test_1" Version="2.0" IssueInstant="2026-11-04T12:00:00Z" Destination="http://localhost:8080/saml/sso" AssertionConsumerServiceURL="https://192.168.0.119/api/current/authentication/saml2-callback"><saml:Issuer>https://192.168.0.119</saml:Issuer></samlp:AuthnRequest>`
+	rawCorpReqXML := `<samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_corp_ui_test_1" Version="2.0" IssueInstant="2026-11-04T12:00:00Z" Destination="http://localhost:8080/saml/sso" AssertionConsumerServiceURL="https://ita.example.com/api/current/authentication/saml2-callback"><saml:Issuer>https://ita.example.com</saml:Issuer></samlp:AuthnRequest>`
 	encodedCorpReq, err := encodeSAMLRequest(rawCorpReqXML)
 	if err != nil {
 		t.Fatalf("failed to encode SAMLRequest for /login: %v", err)

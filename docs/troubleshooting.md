@@ -112,3 +112,4 @@ Get-EventLog -LogName Application -Newest 50 | Where-Object { $_.Message -like "
 Stop-Service -Name SAMLGuard
 & "C:\Program Files\SAMLGuard\samlguard.exe" -config "C:\ProgramData\SAMLGuard\config.yaml"
 ```
+

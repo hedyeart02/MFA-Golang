@@ -145,3 +145,4 @@ Managed by `internal/mfa/storage.go` using pure-Go `modernc.org/sqlite`:
 - **Windows (`service_windows.go`)**: Detects `svc.IsWindowsService()`. Under Windows SCM, binds the TCP listener synchronously before reporting `RUNNING`, loads TLS certificates up front, and handles `Stop`/`Shutdown` controls with graceful HTTP server drain. Interactive console mode listens for `os.Interrupt` / `SIGTERM`.
 - **Linux & Other POSIX (`service_other.go`)**: `isWindowsService()` returns `false`; runs `runInteractive` under `systemd` (`Type=simple`) or terminal foreground, handling `SIGINT`/`SIGTERM` cleanly with configurable `server.shutdown_timeout`.
 - **Linux Webmin Integration**: Five Webmin CGI modules (`samlguard_about`, `samlguard_certs`, `samlguard_logs`, `samlguard_setup`, `samlguard_status`) under Webmin's `SAMLGuard` sidebar category control `systemd`, certificates, config inspection, logs, and zero-SSH binary upgrades.
+

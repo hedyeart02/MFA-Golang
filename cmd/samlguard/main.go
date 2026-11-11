@@ -96,12 +96,11 @@ func SetupAppWithCleanup(cfg *config.Config, appLogger *logger.Logger) (*gin.Eng
 		MaxCompressRatio: cfg.MaximumCompressionRatio,
 	}
 
+	spOrigins := cfg.DownstreamSPOrigins()
 	metadataSources := make(map[string]string)
 	if cfg.SAML.MetadataURL != "" {
-		metadataSources[cfg.SAML.EntityID] = cfg.SAML.MetadataURL
-		metadataSources["https://192.168.0.119"] = cfg.SAML.MetadataURL
-		for _, aud := range cfg.SAML.AllowedAudiences {
-			metadataSources[aud] = cfg.SAML.MetadataURL
+		for _, id := range spOrigins {
+			metadataSources[id] = cfg.SAML.MetadataURL
 		}
 	}
 	metadataResolver := resolver.NewDefaultMetadataResolver(
@@ -112,12 +111,8 @@ func SetupAppWithCleanup(cfg *config.Config, appLogger *logger.Logger) (*gin.Eng
 	)
 
 	configuredProviders := make(map[string]string)
-	if cfg.SAML.EntityID != "" {
-		configuredProviders[cfg.SAML.EntityID] = "generic"
-	}
-	configuredProviders["https://192.168.0.119"] = "generic"
-	for _, aud := range cfg.SAML.AllowedAudiences {
-		configuredProviders[aud] = "generic"
+	for _, id := range spOrigins {
+		configuredProviders[id] = "generic"
 	}
 	providerResolver := resolver.NewDefaultProviderResolver(adapterRegistry, configuredProviders)
 

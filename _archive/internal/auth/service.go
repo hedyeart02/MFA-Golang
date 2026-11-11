@@ -52,7 +52,7 @@ func (s *Service) ValidateSAMLResponse(ctx context.Context, req ValidateRequest)
 		Email:       "apc@example.com",
 		DisplayName: "APC Admin",
 		NameID:      "apc",
-		IdPEntityID: "https://192.168.0.178:18080",
+		IdPEntityID: "https://samlguard.example.com:8443",
 	}, nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -231,7 +232,7 @@ func SetDefaults(v *viper.Viper) {
 	v.SetDefault("smtp.port", 587)
 	v.SetDefault("smtp.encryption", "starttls")
 
-	v.SetDefault("ita.api_url", "https://192.168.0.119/api/current")
+	v.SetDefault("ita.api_url", "https://ita.example.com/api/current")
 	v.SetDefault("ita.api_username", "apc")
 	v.SetDefault("ita.enforce_user_whitelist", true)
 	v.SetDefault("ita.auto_sync_interval", 30*time.Minute)
@@ -542,4 +543,65 @@ func fileExists(path string) bool {
 		return false
 	}
 	return !info.IsDir()
+}
+
+// ResolveDownstreamSPEntityID determines the canonical downstream Service Provider
+// EntityID/origin from configured SAML or ITA URLs without relying on hardcoded host IPs.
+func (c *Config) ResolveDownstreamSPEntityID() string {
+	if c == nil {
+		return "https://ita.example.com"
+	}
+	if sp := strings.TrimSpace(c.SAML.SPEntityID); sp != "" {
+		return sp
+	}
+	if len(c.SAML.AllowedAudiences) > 0 {
+		if aud := strings.TrimSpace(c.SAML.AllowedAudiences[0]); aud != "" {
+			return aud
+		}
+	}
+	for _, rawURL := range []string{c.SAML.ACSURL, c.ITA.APIURL} {
+		if origin := extractURLOrigin(rawURL); origin != "" {
+			return origin
+		}
+	}
+	return "https://ita.example.com"
+}
+
+// DownstreamSPOrigins returns all known downstream SP entity IDs and origins
+// derived from configuration for metadata and provider resolution.
+func (c *Config) DownstreamSPOrigins() []string {
+	if c == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	var out []string
+	add := func(val string) {
+		val = strings.TrimSpace(val)
+		if val == "" {
+			return
+		}
+		if _, ok := seen[val]; !ok {
+			seen[val] = struct{}{}
+			out = append(out, val)
+		}
+	}
+	add(c.SAML.EntityID)
+	add(c.SAML.SPEntityID)
+	for _, aud := range c.SAML.AllowedAudiences {
+		add(aud)
+	}
+	add(extractURLOrigin(c.SAML.ACSURL))
+	add(extractURLOrigin(c.ITA.APIURL))
+	return out
+}
+
+func extractURLOrigin(rawURL string) string {
+	trimmed := strings.TrimSpace(rawURL)
+	if trimmed == "" {
+		return ""
+	}
+	if u, err := url.Parse(trimmed); err == nil && u.Scheme != "" && u.Host != "" {
+		return u.Scheme + "://" + u.Host
+	}
+	return ""
 }

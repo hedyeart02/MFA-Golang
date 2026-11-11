@@ -191,3 +191,4 @@ See [Webmin Module Guide](../scripts/webmin/README.md) for detailed Webmin opera
 4. Under **System Settings**, configure SMTP and click **Send Test Email** to verify Email OTP delivery.
 5. Under **Customers / Authorized Users**, synchronize EcoStruxure IT Advisor users (`Sync Users`) or add accounts manually.
 6. Import `https://<server>:8443/saml/metadata/idp` into IT Advisor, and `https://<server>:8443/saml/metadata/sp` into Entra ID / Okta / Keycloak.
+

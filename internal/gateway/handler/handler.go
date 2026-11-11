@@ -687,15 +687,8 @@ func (h *SAMLHandler) HandleMFAVerify(c *gin.Context) {
 	// Determine AuthnContextClassRef: Email OTP can NEVER claim TimeSyncToken
 	authnContext := DetermineAuthnContextClassRef(method, h.cfg.SAML.AuthnContextClassRef)
 
-	// Determine Audience (ITA SP Entity ID)
-	audience := h.cfg.SAML.SPEntityID
-	if audience == "" {
-		if len(h.cfg.SAML.AllowedAudiences) > 0 {
-			audience = h.cfg.SAML.AllowedAudiences[0]
-		} else {
-			audience = "https://192.168.0.119" // Standard ITA SP Entity ID
-		}
-	}
+	// Determine Audience (Downstream SP Entity ID)
+	audience := h.cfg.ResolveDownstreamSPEntityID()
 
 	// Generate signed SAML Response targeting downstream ITA ACS
 	samlReq := gateway.SAMLResponseRequest{
@@ -863,7 +856,7 @@ func (h *SAMLHandler) renderMockUpstreamLogin(c *gin.Context, sessionID, outboun
 	}
 	mockAudience := h.cfg.SAML.EntityID
 	if mockAudience == "" {
-		mockAudience = "https://192.168.0.178:18080"
+		mockAudience = "urn:samlguard:idp"
 	}
 
 	mockReq := gateway.SAMLResponseRequest{
@@ -950,7 +943,7 @@ func (h *SAMLHandler) HandleMockIDPSubmit(c *gin.Context) {
 	}
 	mockAudience := h.cfg.SAML.EntityID
 	if mockAudience == "" {
-		mockAudience = "https://192.168.0.178:18080"
+		mockAudience = "urn:samlguard:idp"
 	}
 
 	nameID := rawUser

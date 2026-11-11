@@ -95,7 +95,7 @@ func TestFetchUsers_MockTransport(t *testing.T) {
 	}
 
 	client := &Client{httpClient: mockClient}
-	users, err := client.FetchUsers(context.Background(), "https://192.168.0.119/api/current", "apc", "password123")
+	users, err := client.FetchUsers(context.Background(), "https://ita.example.com/api/current", "apc", "password123")
 	if err != nil {
 		t.Fatalf("FetchUsers failed: %v", err)
 	}

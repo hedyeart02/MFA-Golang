@@ -19,8 +19,8 @@ import (
 func TestSAMLResponseGenerator(t *testing.T) {
 	cfg := &config.Config{
 		SAML: config.SAMLConfig{
-			EntityID:             "https://192.168.0.178:18080",
-			ACSURL:               "https://192.168.0.119/api/current/authentication/saml2-callback",
+			EntityID:             "https://samlguard.example.com:8443",
+			ACSURL:               "https://ita.example.com/api/current/authentication/saml2-callback",
 			CertFile:             "../../cert/saml-signing.crt",
 			KeyFile:              "../../cert/saml-signing.key",
 			AuthnContextClassRef: "urn:oasis:names:tc:SAML:2.0:ac:classes:TimeSyncToken",
@@ -39,10 +39,10 @@ func TestSAMLResponseGenerator(t *testing.T) {
 
 	req := SAMLResponseRequest{
 		InResponseTo:        "ITA-REQ-98765",
-		Destination:         "https://192.168.0.119/api/current/authentication/saml2-callback",
+		Destination:         "https://ita.example.com/api/current/authentication/saml2-callback",
 		RelayState:          "custom-relay-state-value",
-		Audience:            "https://192.168.0.119",
-		Issuer:              "https://192.168.0.178:18080",
+		Audience:            "https://ita.example.com",
+		Issuer:              "https://samlguard.example.com:8443",
 		SubjectNameID:       "apc-admin-user",
 		SubjectNameIDFormat: "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent",
 		Email:               "apc@example.com",
@@ -73,7 +73,7 @@ func TestSAMLResponseGenerator(t *testing.T) {
 	if !strings.Contains(xmlStr, `InResponseTo="ITA-REQ-98765"`) {
 		t.Error("missing InResponseTo attribute in SAML response")
 	}
-	if !strings.Contains(xmlStr, `Destination="https://192.168.0.119/api/current/authentication/saml2-callback"`) {
+	if !strings.Contains(xmlStr, `Destination="https://ita.example.com/api/current/authentication/saml2-callback"`) {
 		t.Error("missing Destination attribute in SAML response")
 	}
 	if !strings.Contains(xmlStr, `<saml:NameID Format="urn:oasis:names:tc:SAML:2.0:nameid-format:persistent">apc-admin-user</saml:NameID>`) {
@@ -98,8 +98,8 @@ func TestSAMLResponseGenerator(t *testing.T) {
 func TestSAMLResponseNoDefaultAdminGroup(t *testing.T) {
 	cfg := &config.Config{
 		SAML: config.SAMLConfig{
-			EntityID:      "https://192.168.0.178:18080",
-			ACSURL:        "https://192.168.0.119/api/current/authentication/saml2-callback",
+			EntityID:      "https://samlguard.example.com:8443",
+			ACSURL:        "https://ita.example.com/api/current/authentication/saml2-callback",
 			CertFile:      "../../cert/saml-signing.crt",
 			KeyFile:       "../../cert/saml-signing.key",
 			GroupMapping:  map[string]string{},
@@ -151,8 +151,8 @@ func TestSAMLResponse_IndependentXMLDSigVerification(t *testing.T) {
 
 	cfg := &config.Config{
 		SAML: config.SAMLConfig{
-			EntityID:             "https://192.168.0.178:18080",
-			ACSURL:               "https://192.168.0.119/api/current/authentication/saml2-callback",
+			EntityID:             "https://samlguard.example.com:8443",
+			ACSURL:               "https://ita.example.com/api/current/authentication/saml2-callback",
 			CertFile:             certFile,
 			KeyFile:              keyFile,
 			AuthnContextClassRef: "urn:oasis:names:tc:SAML:2.0:ac:classes:TimeSyncToken",
@@ -169,9 +169,9 @@ func TestSAMLResponse_IndependentXMLDSigVerification(t *testing.T) {
 
 	req := SAMLResponseRequest{
 		InResponseTo:        "ITA-CORR-12345",
-		Destination:         "https://192.168.0.119/api/current/authentication/saml2-callback",
-		Audience:            "https://192.168.0.119",
-		Issuer:              "https://192.168.0.178:18080",
+		Destination:         "https://ita.example.com/api/current/authentication/saml2-callback",
+		Audience:            "https://ita.example.com",
+		Issuer:              "https://samlguard.example.com:8443",
 		SubjectNameID:       "apc-legit-user",
 		SubjectNameIDFormat: "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent",
 		Email:               "apc@example.com",

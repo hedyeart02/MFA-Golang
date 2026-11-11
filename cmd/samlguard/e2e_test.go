@@ -105,8 +105,8 @@ func TestE2E_FullFlow_DummyOTP(t *testing.T) {
                     Version="2.0"
                     IssueInstant="2026-11-04T12:00:00Z"
                     Destination="http://localhost:8080/saml/sso"
-                    AssertionConsumerServiceURL="https://192.168.0.119/api/current/authentication/saml2-callback">
-    <saml:Issuer>https://192.168.0.119</saml:Issuer>
+                    AssertionConsumerServiceURL="https://ita.example.com/api/current/authentication/saml2-callback">
+    <saml:Issuer>https://ita.example.com</saml:Issuer>
 </samlp:AuthnRequest>`
 
 	encodedReq, err := encodeSAMLRequest(rawReqXML)
@@ -189,7 +189,7 @@ func TestE2E_FullFlow_DummyOTP(t *testing.T) {
 	}
 
 	bodyVerify := wVerify.Body.String()
-	if !strings.Contains(bodyVerify, `action="https://192.168.0.119/api/current/authentication/saml2-callback"`) {
+	if !strings.Contains(bodyVerify, `action="https://ita.example.com/api/current/authentication/saml2-callback"`) {
 		t.Errorf("expected downstream form target to be ITA ACS URL, got: %s", bodyVerify)
 	}
 	if !strings.Contains(bodyVerify, `name="RelayState" value="ita-relay-dummy"`) {
@@ -251,8 +251,8 @@ func TestE2E_FullFlow_TOTP_EnrollmentAndVerification(t *testing.T) {
                     Version="2.0"
                     IssueInstant="2026-11-04T12:00:00Z"
                     Destination="http://localhost:8080/saml/sso"
-                    AssertionConsumerServiceURL="https://192.168.0.119/api/current/authentication/saml2-callback">
-    <saml:Issuer>https://192.168.0.119</saml:Issuer>
+                    AssertionConsumerServiceURL="https://ita.example.com/api/current/authentication/saml2-callback">
+    <saml:Issuer>https://ita.example.com</saml:Issuer>
 </samlp:AuthnRequest>`
 
 	encodedReq, err := encodeSAMLRequest(rawReqXML)
@@ -407,8 +407,8 @@ func TestE2E_Negative_TamperedUpstreamSignature(t *testing.T) {
                     Version="2.0"
                     IssueInstant="2026-11-04T12:00:00Z"
                     Destination="http://localhost:8080/saml/sso"
-                    AssertionConsumerServiceURL="https://192.168.0.119/api/current/authentication/saml2-callback">
-    <saml:Issuer>https://192.168.0.119</saml:Issuer>
+                    AssertionConsumerServiceURL="https://ita.example.com/api/current/authentication/saml2-callback">
+    <saml:Issuer>https://ita.example.com</saml:Issuer>
 </samlp:AuthnRequest>`
 
 	encodedReq, _ := encodeSAMLRequest(rawReqXML)
@@ -518,8 +518,8 @@ func TestE2E_Negative_MissingOrInvalidCSRFToken(t *testing.T) {
                     xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
                     ID="_ita_req_csrf" Version="2.0" IssueInstant="2026-11-04T12:00:00Z"
                     Destination="http://localhost:8080/saml/sso"
-                    AssertionConsumerServiceURL="https://192.168.0.119/api/current/authentication/saml2-callback">
-        <saml:Issuer>https://192.168.0.119</saml:Issuer>
+                    AssertionConsumerServiceURL="https://ita.example.com/api/current/authentication/saml2-callback">
+        <saml:Issuer>https://ita.example.com</saml:Issuer>
     </samlp:AuthnRequest>`
 
 	encodedReq, _ := encodeSAMLRequest(rawReqXML)
@@ -592,8 +592,8 @@ func TestE2E_Negative_TOTPBruteForceLockout(t *testing.T) {
                     xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
                     ID="_ita_req_lockout" Version="2.0" IssueInstant="2026-11-04T12:00:00Z"
                     Destination="http://localhost:8080/saml/sso"
-                    AssertionConsumerServiceURL="https://192.168.0.119/api/current/authentication/saml2-callback">
-        <saml:Issuer>https://192.168.0.119</saml:Issuer>
+                    AssertionConsumerServiceURL="https://ita.example.com/api/current/authentication/saml2-callback">
+        <saml:Issuer>https://ita.example.com</saml:Issuer>
     </samlp:AuthnRequest>`
 
 	encodedReq, _ := encodeSAMLRequest(rawReqXML)
@@ -659,8 +659,8 @@ func TestE2E_SafeTOTPReEnrollment(t *testing.T) {
                     xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
                     ID="_ita_req_re1" Version="2.0" IssueInstant="2026-11-04T12:00:00Z"
                     Destination="http://localhost:8080/saml/sso"
-                    AssertionConsumerServiceURL="https://192.168.0.119/api/current/authentication/saml2-callback">
-        <saml:Issuer>https://192.168.0.119</saml:Issuer>
+                    AssertionConsumerServiceURL="https://ita.example.com/api/current/authentication/saml2-callback">
+        <saml:Issuer>https://ita.example.com</saml:Issuer>
     </samlp:AuthnRequest>`
 
 	encodedReq, _ := encodeSAMLRequest(rawReqXML)
@@ -712,8 +712,8 @@ func TestE2E_SafeTOTPReEnrollment(t *testing.T) {
                     xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
                     ID="_ita_req_re2" Version="2.0" IssueInstant="2026-11-04T12:00:00Z"
                     Destination="http://localhost:8080/saml/sso"
-                    AssertionConsumerServiceURL="https://192.168.0.119/api/current/authentication/saml2-callback">
-        <saml:Issuer>https://192.168.0.119</saml:Issuer>
+                    AssertionConsumerServiceURL="https://ita.example.com/api/current/authentication/saml2-callback">
+        <saml:Issuer>https://ita.example.com</saml:Issuer>
     </samlp:AuthnRequest>`
 	encodedReq2, _ := encodeSAMLRequest(rawReqXML2)
 
@@ -839,8 +839,8 @@ func TestE2E_Negative_UpstreamMissingOrMismatchedIssuer(t *testing.T) {
                     xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
                     ID="_ita_req_issuer_neg" Version="2.0" IssueInstant="2026-11-04T12:00:00Z"
                     Destination="http://localhost:8080/saml/sso"
-                    AssertionConsumerServiceURL="https://192.168.0.119/api/current/authentication/saml2-callback">
-        <saml:Issuer>https://192.168.0.119</saml:Issuer>
+                    AssertionConsumerServiceURL="https://ita.example.com/api/current/authentication/saml2-callback">
+        <saml:Issuer>https://ita.example.com</saml:Issuer>
     </samlp:AuthnRequest>`
 
 	encodedReq, _ := encodeSAMLRequest(rawReqXML)
@@ -898,8 +898,8 @@ func TestE2E_Negative_UpstreamMissingOrMismatchedRecipient(t *testing.T) {
                     xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
                     ID="_ita_req_recip_neg" Version="2.0" IssueInstant="2026-11-04T12:00:00Z"
                     Destination="http://localhost:8080/saml/sso"
-                    AssertionConsumerServiceURL="https://192.168.0.119/api/current/authentication/saml2-callback">
-        <saml:Issuer>https://192.168.0.119</saml:Issuer>
+                    AssertionConsumerServiceURL="https://ita.example.com/api/current/authentication/saml2-callback">
+        <saml:Issuer>https://ita.example.com</saml:Issuer>
     </samlp:AuthnRequest>`
 
 	encodedReq, _ := encodeSAMLRequest(rawReqXML)
@@ -959,8 +959,8 @@ func TestE2E_AuthnContext_EmailOTPNeverClaimsTimeSyncToken(t *testing.T) {
                     xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
                     ID="_ita_req_email_authn" Version="2.0" IssueInstant="2026-11-04T12:00:00Z"
                     Destination="http://localhost:8080/saml/sso"
-                    AssertionConsumerServiceURL="https://192.168.0.119/api/current/authentication/saml2-callback">
-        <saml:Issuer>https://192.168.0.119</saml:Issuer>
+                    AssertionConsumerServiceURL="https://ita.example.com/api/current/authentication/saml2-callback">
+        <saml:Issuer>https://ita.example.com</saml:Issuer>
     </samlp:AuthnRequest>`
 
 	encodedReq, _ := encodeSAMLRequest(rawReqXML)

@@ -112,3 +112,4 @@ All routes below require a valid authenticated `samlguard_admin_session` cookie 
 | `GET` | `/favicon.ico` | `image/x-icon` | Embedded SAMLGuard shield icon (`Cache-Control: public, max-age=86400`) |
 | `GET` | `/static/*` | Various | Embedded static assets (`img/favicon.svg`, `img/ecostruxure-*.png`, `js/theme.js`, etc.) |
 | `GET` | `/assets/*` | `image/png` | Embedded background assets (`backgrounds/bg-login-*.png`, `bg-console-*.png`) |
+

@@ -50,9 +50,9 @@ func (m *mockPipeline) Validate() error {
 func setupTestHandler(t *testing.T, p pipeline.AuthnPipeline) (*SAMLHandler, *config.Config) {
 	cfg := &config.Config{
 		SAML: config.SAMLConfig{
-			EntityID:  "https://192.168.0.178:18080",
-			SSOURL:    "https://192.168.0.178:18080/saml/sso",
-			ACSURL:    "https://192.168.0.178:18080/saml/acs",
+			EntityID:  "https://samlguard.example.com:8443",
+			SSOURL:    "https://samlguard.example.com:8443/saml/sso",
+			ACSURL:    "https://samlguard.example.com:8443/saml/acs",
 			IdPSSOURL: "https://mock-idp.samlguard.local/sso",
 			CertFile:  "../../../cert/saml-signing.crt",
 			KeyFile:   "../../../cert/saml-signing.key",
@@ -286,7 +286,7 @@ func buildSignedUpstreamResponse(t *testing.T, respGen *gateway.ResponseGenerato
 	req := gateway.SAMLResponseRequest{
 		InResponseTo:        inResponseTo,
 		Destination:         recipient,
-		Audience:            "https://192.168.0.178:18080",
+		Audience:            "https://samlguard.example.com:8443",
 		Issuer:              issuer,
 		SubjectNameID:       "test-user",
 		SubjectNameIDFormat: "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent",
@@ -459,9 +459,9 @@ func TestHandler_EmbeddedTemplateFallbackOutsideRepo(t *testing.T) {
 
 	cfg := &config.Config{
 		SAML: config.SAMLConfig{
-			EntityID:  "https://192.168.0.178:18080",
-			SSOURL:    "https://192.168.0.178:18080/saml/sso",
-			ACSURL:    "https://192.168.0.178:18080/saml/acs",
+			EntityID:  "https://samlguard.example.com:8443",
+			SSOURL:    "https://samlguard.example.com:8443/saml/sso",
+			ACSURL:    "https://samlguard.example.com:8443/saml/acs",
 			IdPSSOURL: "https://mock-idp.samlguard.local/sso",
 			CertFile:  absCert,
 			KeyFile:   absKey,
@@ -509,9 +509,9 @@ func TestNewSAMLHandler_IdPCertificateRolloverBundle(t *testing.T) {
 	absKey, _ := filepath.Abs("../../../cert/saml-signing.key")
 	cfg := &config.Config{
 		SAML: config.SAMLConfig{
-			EntityID:    "https://192.168.0.178:18080",
-			SSOURL:      "https://192.168.0.178:18080/saml/sso",
-			ACSURL:      "https://192.168.0.178:18080/saml/acs",
+			EntityID:    "https://samlguard.example.com:8443",
+			SSOURL:      "https://samlguard.example.com:8443/saml/sso",
+			ACSURL:      "https://samlguard.example.com:8443/saml/acs",
 			IdPSSOURL:   "https://idp.example.com/sso",
 			IdPEntityID: "https://idp.example.com",
 			IdPCertFile: certBundlePath,
