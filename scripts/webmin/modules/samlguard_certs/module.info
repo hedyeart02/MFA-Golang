@@ -1,0 +1,6 @@
+name=SAMLGuard Certificates
+desc=Certificates
+category=samlguard
+depends=samlguard_status
+version=1.0.0
+longdesc=Inspect and upload TLS, SAML signing, and upstream IdP certificates for SAMLGuard.

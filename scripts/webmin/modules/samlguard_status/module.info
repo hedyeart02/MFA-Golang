@@ -1,0 +1,5 @@
+name=SAMLGuard Status
+desc=Status
+category=samlguard
+version=1.0.0
+longdesc=View SAMLGuard service status, health checks, and start/stop/restart the daemon.

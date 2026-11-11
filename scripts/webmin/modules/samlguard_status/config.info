@@ -1,0 +1,6 @@
+service_name=Systemd service name,0
+binary_path=SAMLGuard binary path,0
+config_path=SAMLGuard YAML config path,0
+cert_dir=Certificate directory,0
+data_dir=Data directory,0
+unit_path=Systemd unit file path,0

@@ -1,0 +1,6 @@
+service_name=samlguard
+binary_path=/usr/local/bin/samlguard
+config_path=/etc/samlguard/config.yaml
+cert_dir=/etc/samlguard/cert
+data_dir=/var/lib/samlguard
+unit_path=/etc/systemd/system/samlguard.service
