@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag version (e.g. v1.0.2)'
+        required: true
+        default: 'v1.0.2'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Run tests & vet
+        run: |
+          go vet ./...
+          go test -count=1 ./...
+
+      - name: Build multi-platform release packages & Webmin module
+        env:
+          VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          mkdir -p dist/staging
+          OUT_DIST="$(pwd)/dist"
+
+          build_target() {
+            local os="$1"
+            local arch="$2"
+            local bin_name="$3"
+            local archive_type="$4"
+            local pkg_name="samlguard-${VERSION}-${os}-${arch}"
+            local stage_dir="dist/staging/${pkg_name}"
+
+            echo "==> Building ${pkg_name}..."
+            mkdir -p "${stage_dir}/bin" "${stage_dir}/configs" "${stage_dir}/cert" "${stage_dir}/data" "${stage_dir}/scripts"
+
+            CGO_ENABLED=0 GOOS="${os}" GOARCH="${arch}" go build \
+              -ldflags="-s -w -X main.Version=${VERSION}" \
+              -o "${stage_dir}/bin/${bin_name}" ./cmd/samlguard
+
+            cp configs/config.yaml.example "${stage_dir}/configs/config.yaml.example"
+            if [[ -f configs/default.yaml ]]; then
+              cp configs/default.yaml "${stage_dir}/configs/default.yaml"
+            fi
+
+            touch "${stage_dir}/cert/.gitkeep" "${stage_dir}/data/.gitkeep"
+
+            if [[ "${os}" == "windows" ]]; then
+              mkdir -p "${stage_dir}/scripts/windows"
+              cp scripts/windows/* "${stage_dir}/scripts/windows/"
+            else
+              mkdir -p "${stage_dir}/scripts/linux"
+              cp scripts/linux/* "${stage_dir}/scripts/linux/"
+              chmod +x "${stage_dir}/scripts/linux/"*.sh || true
+            fi
+
+            {
+              echo "# SAMLGuard ${VERSION} (${os}-${arch})"
+              echo ""
+              echo "Standalone pure-Go SAML 2.0 MFA Reverse Proxy Gateway."
+              echo ""
+              echo "## Quick Start"
+              echo "1. Copy configs/config.yaml.example to configs/config.yaml and edit your settings."
+              echo "2. Run ./bin/${bin_name} -config ./configs/config.yaml."
+              echo "3. Service installation:"
+              echo "   - Linux: sudo ./scripts/linux/install.sh ./bin/${bin_name}"
+              echo "   - Windows: .\\scripts\\windows\\install-service.ps1 -BinarySource .\\bin\\${bin_name}"
+            } > "${stage_dir}/README.md"
+
+            if [[ "${archive_type}" == "zip" ]]; then
+              (cd "${stage_dir}" && zip -r "${OUT_DIST}/${pkg_name}.zip" .)
+            else
+              tar -czf "${OUT_DIST}/${pkg_name}.tar.gz" -C dist/staging "${pkg_name}"
+            fi
+          }
+
+          build_target "windows" "amd64" "samlguard.exe" "zip"
+          build_target "linux" "amd64" "samlguard" "tar.gz"
+          build_target "linux" "arm64" "samlguard" "tar.gz"
+
+          rm -rf dist/staging
+
+          echo "==> Building Webmin module bundle..."
+          go run ./scripts/webmin/build-wbm.go -src scripts/webmin/modules -out dist/samlguard-webmin.wbm.gz
+
+          echo "==> Generating SHA-256 checksums..."
+          (cd dist && sha256sum samlguard-*.zip samlguard-*.tar.gz samlguard-webmin.wbm.gz > checksums.txt)
+          ls -lh dist/
+          cat dist/checksums.txt
+
+      - name: Create GitHub Release and attach packages
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          name: SAMLGuard ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/samlguard-*-windows-amd64.zip
+            dist/samlguard-*-linux-amd64.tar.gz
+            dist/samlguard-*-linux-arm64.tar.gz
+            dist/samlguard-webmin.wbm.gz
+            dist/checksums.txt
