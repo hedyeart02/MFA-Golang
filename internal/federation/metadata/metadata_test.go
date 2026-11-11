@@ -2,11 +2,14 @@ package metadata
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -654,5 +657,31 @@ func TestCompositeValidator(t *testing.T) {
 
 	if err := composite.Validate(invalidMD); err == nil {
 		t.Errorf("composite validator should fail when child validator fails")
+	}
+}
+
+func TestSmartLoader_EnforcesTLSVerificationAndStatusCheck(t *testing.T) {
+	// Start local TLS server with an untrusted test certificate
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(sampleValidEntraXML))
+	}))
+	defer srv.Close()
+
+	loader := &SmartLoader{}
+	// Default SmartLoader must enforce TLS certificate verification and reject untrusted cert
+	if _, err := loader.Load(context.Background(), srv.URL); err == nil {
+		t.Fatal("expected SmartLoader to reject untrusted TLS certificate instead of skipping verification")
+	}
+
+	// When given a trusted client (e.g., server's test CA), HTTP 500 should also fail cleanly
+	errSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer errSrv.Close()
+
+	trustedLoader := &SmartLoader{HTTPClient: errSrv.Client()}
+	if _, err := trustedLoader.Load(context.Background(), errSrv.URL); err == nil {
+		t.Fatal("expected SmartLoader to return error on HTTP 500 response")
 	}
 }

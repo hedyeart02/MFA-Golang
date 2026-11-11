@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
@@ -58,21 +59,42 @@ type AdminSettingsViewModel struct {
 	ServerTimeLocal     string
 	SuccessMessage      string
 	ErrorMessage        string
+	CSRFToken           string
 }
 
 // --- Session & Security Helpers ---
 
 func (h *SAMLHandler) getAdminSessionSecret() []byte {
-	if h.cfg.Security.CSRFSecret != "" {
-		return []byte(h.cfg.Security.CSRFSecret)
+	if h.cfg != nil {
+		if h.cfg.Security.CSRFSecret != "" {
+			return []byte(h.cfg.Security.CSRFSecret)
+		}
+		if h.cfg.MFA.EncryptionKey != "" {
+			return []byte(h.cfg.MFA.EncryptionKey)
+		}
+		if h.cfg.IsProduction() {
+			return nil
+		}
 	}
-	if h.cfg.MFA.EncryptionKey != "" {
-		return []byte(h.cfg.MFA.EncryptionKey)
+
+	h.adminSecretMu.Lock()
+	defer h.adminSecretMu.Unlock()
+	if len(h.ephemeralAdminSecret) == 0 {
+		secret := make([]byte, 32)
+		if _, err := rand.Read(secret); err != nil {
+			return nil
+		}
+		h.ephemeralAdminSecret = secret
 	}
-	return []byte("samlguard-admin-secure-auth-secret-key-2026")
+	return h.ephemeralAdminSecret
 }
 
 func (h *SAMLHandler) createAdminSessionToken(username string, mustChange bool) string {
+	secret := h.getAdminSessionSecret()
+	if len(secret) == 0 {
+		return ""
+	}
+
 	exp := time.Now().Add(8 * time.Hour).Unix()
 	mustChangeStr := "0"
 	if mustChange {
@@ -81,7 +103,7 @@ func (h *SAMLHandler) createAdminSessionToken(username string, mustChange bool) 
 	payload := fmt.Sprintf("%s:%s:%d", username, mustChangeStr, exp)
 	encoded := base64.RawURLEncoding.EncodeToString([]byte(payload))
 
-	mac := hmac.New(sha256.New, h.getAdminSessionSecret())
+	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(encoded))
 	sig := hex.EncodeToString(mac.Sum(nil))
 
@@ -89,6 +111,11 @@ func (h *SAMLHandler) createAdminSessionToken(username string, mustChange bool) 
 }
 
 func (h *SAMLHandler) verifyAdminSessionToken(token string) (*AdminSessionData, error) {
+	secret := h.getAdminSessionSecret()
+	if len(secret) == 0 {
+		return nil, errors.New("admin session signing secret is not configured")
+	}
+
 	parts := strings.Split(token, ".")
 	if len(parts) != 2 {
 		return nil, errors.New("invalid session token structure")
@@ -100,7 +127,7 @@ func (h *SAMLHandler) verifyAdminSessionToken(token string) (*AdminSessionData, 
 		return nil, errors.New("invalid session signature format")
 	}
 
-	mac := hmac.New(sha256.New, h.getAdminSessionSecret())
+	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(encodedPayload))
 	computedSig := mac.Sum(nil)
 
@@ -137,7 +164,7 @@ func (h *SAMLHandler) verifyAdminSessionToken(token string) (*AdminSessionData, 
 }
 
 func (h *SAMLHandler) setAdminSessionCookie(c *gin.Context, token string) {
-	secure := c.Request.TLS != nil || h.cfg.TLS.Enabled || c.GetHeader("X-Forwarded-Proto") == "https"
+	secure := h.isHTTPSRequest(c)
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     adminSessionCookie,
 		Value:    token,
@@ -150,7 +177,7 @@ func (h *SAMLHandler) setAdminSessionCookie(c *gin.Context, token string) {
 }
 
 func (h *SAMLHandler) clearAdminSessionCookie(c *gin.Context) {
-	secure := c.Request.TLS != nil || h.cfg.TLS.Enabled || c.GetHeader("X-Forwarded-Proto") == "https"
+	secure := h.isHTTPSRequest(c)
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     adminSessionCookie,
 		Value:    "",
@@ -183,6 +210,77 @@ func isJSONAdminRequest(c *gin.Context) bool {
 		strings.HasPrefix(path, "/admin/ita/") ||
 		strings.HasPrefix(path, "/admin/users/") ||
 		strings.HasPrefix(path, "/admin/settings/test-email")
+}
+
+func (h *SAMLHandler) computeAdminCSRFToken(sessionToken string) string {
+	secret := h.getAdminSessionSecret()
+	if len(secret) == 0 || strings.TrimSpace(sessionToken) == "" {
+		return ""
+	}
+	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte("admin-csrf:" + sessionToken))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func (h *SAMLHandler) getAdminCSRFToken(c *gin.Context) string {
+	cookie, err := c.Cookie(adminSessionCookie)
+	if err != nil || strings.TrimSpace(cookie) == "" {
+		return ""
+	}
+	return h.computeAdminCSRFToken(cookie)
+}
+
+func (h *SAMLHandler) verifyAdminCSRFRequest(c *gin.Context) bool {
+	cookie, err := c.Cookie(adminSessionCookie)
+	if err != nil || strings.TrimSpace(cookie) == "" {
+		return false
+	}
+	expected := h.computeAdminCSRFToken(cookie)
+	if expected == "" {
+		return false
+	}
+
+	provided := strings.TrimSpace(c.GetHeader("X-CSRF-Token"))
+	if provided == "" {
+		provided = strings.TrimSpace(c.PostForm("csrf_token"))
+	}
+	if provided == "" {
+		return false
+	}
+	return hmac.Equal([]byte(provided), []byte(expected))
+}
+
+func rejectAdminCSRF(c *gin.Context) {
+	if isJSONAdminRequest(c) {
+		c.JSON(http.StatusForbidden, gin.H{
+			"success": false,
+			"error":   "Invalid or missing CSRF token.",
+		})
+	} else {
+		c.String(http.StatusForbidden, "Invalid or missing CSRF token. Please refresh the page and try again.")
+	}
+	c.Abort()
+}
+
+// RequireAdminCSRF validates CSRF tokens on state-changing Admin Console requests.
+func (h *SAMLHandler) RequireAdminCSRF() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		switch c.Request.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			c.Next()
+			return
+		}
+		if !h.verifyAdminCSRFRequest(c) {
+			h.logger.Warn("blocked admin request due to invalid CSRF token",
+				zap.String("method", c.Request.Method),
+				zap.String("path", c.Request.URL.Path),
+				zap.String("client_ip", c.ClientIP()),
+			)
+			rejectAdminCSRF(c)
+			return
+		}
+		c.Next()
+	}
 }
 
 // RequireAdminAuth is a middleware that enforces valid administrator session.
@@ -265,6 +363,11 @@ func (h *SAMLHandler) HandleAdminLoginPost(c *gin.Context) {
 	}
 
 	token := h.createAdminSessionToken(adminUser.Username, adminUser.MustChangePassword)
+	if token == "" {
+		h.logger.Error("failed to issue admin session token: missing admin signing secret")
+		h.renderAdminLogin(c, username, "Administrator session secret is not configured.")
+		return
+	}
 	h.setAdminSessionCookie(c, token)
 
 	h.logger.Info("admin signed in successfully",
@@ -295,6 +398,10 @@ func (h *SAMLHandler) HandleAdminChangePasswordPost(c *gin.Context) {
 	session := h.getAdminSession(c)
 	if session == nil {
 		c.Redirect(http.StatusSeeOther, "/admin/login")
+		return
+	}
+	if !h.verifyAdminCSRFRequest(c) {
+		rejectAdminCSRF(c)
 		return
 	}
 
@@ -336,6 +443,12 @@ func (h *SAMLHandler) HandleAdminChangePasswordPost(c *gin.Context) {
 
 // HandleAdminLogout ends the administrator session.
 func (h *SAMLHandler) HandleAdminLogout(c *gin.Context) {
+	if cookie, err := c.Cookie(adminSessionCookie); err == nil && strings.TrimSpace(cookie) != "" {
+		if !h.verifyAdminCSRFRequest(c) {
+			rejectAdminCSRF(c)
+			return
+		}
+	}
 	h.clearAdminSessionCookie(c)
 	c.Redirect(http.StatusSeeOther, "/admin/login")
 }
@@ -440,6 +553,16 @@ func (cHandler *SAMLHandler) HandleAdminSettingsPost(c *gin.Context) {
 	if cHandler.mfaService == nil || cHandler.mfaService.Storage() == nil {
 		cHandler.logger.Error("failed saving gateway settings: database storage is unavailable")
 		vm := cHandler.buildAdminViewModel(adminUsername, "", "Failed to save configuration: database storage is unavailable")
+		cHandler.renderAdminSettings(c, vm)
+		return
+	}
+
+	// Validate proposed settings against a copy of runtime config before persisting
+	cfgCopy := *cHandler.cfg
+	config.ApplyAdminSettings(&cfgCopy, &payload)
+	if err := cfgCopy.Validate(); err != nil {
+		cHandler.logger.Warn("rejected invalid admin settings submission", zap.Error(err))
+		vm := cHandler.buildAdminViewModel(adminUsername, "", fmt.Sprintf("Invalid configuration: %v", err))
 		cHandler.renderAdminSettings(c, vm)
 		return
 	}
@@ -583,6 +706,41 @@ func (h *SAMLHandler) HandleAdminUserDeletePost(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": fmt.Sprintf("User '%s' has been removed.", req.Username)})
 }
 
+// HandleAdminUserResetMFAPost revokes active and pending TOTP secrets for a user so they must re-enroll cleanly.
+func (h *SAMLHandler) HandleAdminUserResetMFAPost(c *gin.Context) {
+	var req struct {
+		Username string `json:"username"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Username) == "" {
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": "Username is required"})
+		return
+	}
+
+	if h.mfaService == nil || h.mfaService.Storage() == nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": "Database storage unavailable"})
+		return
+	}
+
+	deleted, err := h.mfaService.Storage().DeleteUserTOTPSecrets(c.Request.Context(), strings.TrimSpace(req.Username))
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	adminUser, _ := c.Get("admin_username")
+	adminUsername, _ := adminUser.(string)
+	h.logger.Info("administrator reset user MFA enrollment",
+		zap.String("admin", adminUsername),
+		zap.String("target_user", strings.TrimSpace(req.Username)),
+		zap.Int64("records_removed", deleted),
+	)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": fmt.Sprintf("TOTP enrollment cleared for '%s' (%d secret record(s) removed). User will be prompted to enroll a fresh authenticator on next login.", strings.TrimSpace(req.Username), deleted),
+	})
+}
+
 // HandleAdminTestEmailPost executes a real-time SMTP test and returns JSON status.
 func (h *SAMLHandler) HandleAdminTestEmailPost(c *gin.Context) {
 	var req struct {
@@ -721,6 +879,9 @@ func (h *SAMLHandler) buildAdminViewModel(adminUsername, successMsg, errorMsg st
 }
 
 func (h *SAMLHandler) renderAdminSettings(c *gin.Context, vm *AdminSettingsViewModel) {
+	if vm != nil && vm.CSRFToken == "" {
+		vm.CSRFToken = h.getAdminCSRFToken(c)
+	}
 	tmplPath := filepath.Join("web", "templates", "admin_settings.html")
 	tmpl, err := template.ParseFiles(tmplPath)
 	if err != nil {
@@ -750,6 +911,7 @@ func (h *SAMLHandler) renderAdminLogin(c *gin.Context, username, errMsg string) 
 	_ = tmpl.Execute(c.Writer, gin.H{
 		"Username":     username,
 		"ErrorMessage": errMsg,
+		"CSRFToken":    h.getAdminCSRFToken(c),
 	})
 }
 
@@ -767,6 +929,7 @@ func (h *SAMLHandler) renderAdminChangePassword(c *gin.Context, username, errMsg
 	_ = tmpl.Execute(c.Writer, gin.H{
 		"Username":     username,
 		"ErrorMessage": errMsg,
+		"CSRFToken":    h.getAdminCSRFToken(c),
 	})
 }
 

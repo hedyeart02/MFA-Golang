@@ -732,15 +732,56 @@ func TestE2E_SafeTOTPReEnrollment(t *testing.T) {
 	reqACS2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	reqACS2.AddCookie(authCookie2)
 	app.ServeHTTP(wACS2, reqACS2)
-	reqACS2.AddCookie(authCookie2)
-	app.ServeHTTP(wACS2, reqACS2)
 
 	csrfToken2 := reCSRF.FindStringSubmatch(wACS2.Body.String())[1]
 
-	// Request Re-Enrollment via POST /mfa/re-enroll
+	// 1. Unauthenticated GET ?re_enroll=true must NOT generate or leak a new TOTP secret
+	wACSGetReEnroll := httptest.NewRecorder()
+	reqACSGetReEnroll, _ := http.NewRequest(http.MethodGet, "/saml/acs?method=totp&re_enroll=true&session_id="+url.QueryEscape(authCookie2.Value), nil)
+	reqACSGetReEnroll.AddCookie(authCookie2)
+	app.ServeHTTP(wACSGetReEnroll, reqACSGetReEnroll)
+	if len(reKey.FindStringSubmatch(wACSGetReEnroll.Body.String())) >= 2 {
+		t.Fatal("SECURITY ERROR: GET /saml/acs?re_enroll=true leaked a new TOTP key without verifying an active factor")
+	}
+
+	// 2. Direct POST /mfa/verify with is_pending=true when !ReEnrollAuthorized must be rejected with 403
+	pendingBypassForm := url.Values{}
+	pendingBypassForm.Set("session_id", authCookie2.Value)
+	pendingBypassForm.Set("csrf_token", csrfToken2)
+	pendingBypassForm.Set("method", "totp")
+	pendingBypassForm.Set("code", "000000")
+	pendingBypassForm.Set("is_pending", "true")
+	wBypass := httptest.NewRecorder()
+	reqBypass, _ := http.NewRequest(http.MethodPost, "/mfa/verify", strings.NewReader(pendingBypassForm.Encode()))
+	reqBypass.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqBypass.AddCookie(authCookie2)
+	app.ServeHTTP(wBypass, reqBypass)
+	if wBypass.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 blocking unauthorized is_pending=true verify, got %d", wBypass.Code)
+	}
+
+	// 3. POST /mfa/re-enroll without current_code must be rejected with 403
+	reEnrollNoCodeForm := url.Values{}
+	reEnrollNoCodeForm.Set("session_id", authCookie2.Value)
+	reEnrollNoCodeForm.Set("csrf_token", csrfToken2)
+
+	wReEnrollDenied := httptest.NewRecorder()
+	reqReEnrollDenied, _ := http.NewRequest(http.MethodPost, "/mfa/re-enroll", strings.NewReader(reEnrollNoCodeForm.Encode()))
+	reqReEnrollDenied.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqReEnrollDenied.AddCookie(authCookie2)
+	app.ServeHTTP(wReEnrollDenied, reqReEnrollDenied)
+	if wReEnrollDenied.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 on /mfa/re-enroll without current_code, got %d", wReEnrollDenied.Code)
+	}
+
+	// 4. Request Re-Enrollment via POST /mfa/re-enroll WITH valid current TOTP code
+	// Use next 30s step (within TOTPSkew=1) so TOTP replay protection accepts a fresh step after initial activation.
+	currentCode, _ := computeTOTP(initialSecret, (time.Now().UTC().Unix()/30)+1)
 	reEnrollForm := url.Values{}
 	reEnrollForm.Set("session_id", authCookie2.Value)
 	reEnrollForm.Set("csrf_token", csrfToken2)
+	reEnrollForm.Set("verify_method", "totp")
+	reEnrollForm.Set("current_code", currentCode)
 
 	wReEnroll := httptest.NewRecorder()
 	reqReEnroll, _ := http.NewRequest(http.MethodPost, "/mfa/re-enroll", strings.NewReader(reEnrollForm.Encode()))
@@ -749,7 +790,7 @@ func TestE2E_SafeTOTPReEnrollment(t *testing.T) {
 	app.ServeHTTP(wReEnroll, reqReEnroll)
 
 	if wReEnroll.Code != http.StatusOK {
-		t.Fatalf("expected 200 on /mfa/re-enroll, got %d", wReEnroll.Code)
+		t.Fatalf("expected 200 on /mfa/re-enroll with valid current_code, got %d: %s", wReEnroll.Code, wReEnroll.Body.String())
 	}
 
 	// Re-enrollment page must present a new secret key
@@ -760,6 +801,37 @@ func TestE2E_SafeTOTPReEnrollment(t *testing.T) {
 	newSecret := newKeyMatches[1]
 	if newSecret == initialSecret {
 		t.Error("new secret key must be different from initial secret")
+	}
+}
+
+func TestE2E_RejectsUntrustedAssertionConsumerServiceURL(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Database.Path = ":memory:"
+
+	app, err := SetupApp(cfg, testLogger())
+	if err != nil {
+		t.Fatalf("setup app: %v", err)
+	}
+
+	rawReqXML := `<samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+                    xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+                    ID="_ita_req_evil_acs" Version="2.0" IssueInstant="2026-11-04T12:00:00Z"
+                    Destination="http://localhost:8080/saml/sso"
+                    AssertionConsumerServiceURL="https://evil.attacker.example/steal-saml">
+        <saml:Issuer>https://ita.example.com</saml:Issuer>
+    </samlp:AuthnRequest>`
+
+	encodedReq, err := encodeSAMLRequest(rawReqXML)
+	if err != nil {
+		t.Fatalf("encode SAML request: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/saml/sso?SAMLRequest="+url.QueryEscape(encodedReq)+"&RelayState=test-relay", nil)
+	app.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for untrusted AssertionConsumerServiceURL, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

@@ -525,7 +525,15 @@
 
             {{if and (not .EnrollmentRequired) (eq .Method "totp")}}
             <div class="resend-section">
-                <a href="?method=totp&re_enroll=true&session_id={{.SessionID}}" class="resend-btn">Scan New QR Code / Re-enroll</a>
+                <form action="/mfa/re-enroll" method="POST" style="display:flex; flex-direction:column; gap:0.5rem; align-items:center;">
+                    <input type="hidden" name="session_id" value="{{.SessionID}}">
+                    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+                    <input type="hidden" name="verify_method" value="totp">
+                    <div style="display:flex; gap:0.5rem; align-items:center; justify-content:center; flex-wrap:wrap;">
+                        <input type="text" name="current_code" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="one-time-code" placeholder="Current TOTP code" required style="width:160px; padding:0.45rem 0.65rem; border-radius:6px; border:1px solid #334155; background:#0f172a; color:#f8fafc; font-size:0.85rem; text-align:center;">
+                        <button type="submit" class="resend-btn">Re-enroll Authenticator</button>
+                    </div>
+                </form>
             </div>
             {{end}}
 

@@ -312,3 +312,44 @@ func TestCertificatePrivateKeyConsistency(t *testing.T) {
 		})
 	}
 }
+
+func TestGenerateResponse_EscapesHTMLPostForm(t *testing.T) {
+	cfg := &config.Config{
+		SAML: config.SAMLConfig{
+			ACSURL:   "https://ita.example.com/callback",
+			EntityID: "https://samlguard.example.com",
+			CertFile: "../../cert/saml-signing.crt",
+			KeyFile:  "../../cert/saml-signing.key",
+		},
+	}
+
+	gen, err := NewResponseGenerator(cfg)
+	if err != nil {
+		t.Fatalf("NewResponseGenerator failed: %v", err)
+	}
+
+	evilDestination := `https://ita.example.com/callback"><script>alert(1)</script>`
+	evilRelayState := `" onsubmit="alert(2)`
+
+	res, err := gen.GenerateResponse(SAMLResponseRequest{
+		InResponseTo:  "_req_xss",
+		Destination:   evilDestination,
+		RelayState:    evilRelayState,
+		Audience:      "https://ita.example.com",
+		Issuer:        "https://samlguard.example.com",
+		SubjectNameID: "alice@example.com",
+	})
+	if err != nil {
+		t.Fatalf("GenerateResponse failed: %v", err)
+	}
+
+	if strings.Contains(res.PostFormHTML, `<script>alert(1)</script>`) {
+		t.Fatal("PostFormHTML must HTML-escape Destination attribute")
+	}
+	if strings.Contains(res.PostFormHTML, `" onsubmit="alert(2)`) {
+		t.Fatal("PostFormHTML must HTML-escape RelayState attribute")
+	}
+	if !strings.Contains(res.PostFormHTML, `&lt;script&gt;alert(1)&lt;/script&gt;`) {
+		t.Fatalf("expected escaped Destination payload in PostFormHTML, got: %s", res.PostFormHTML)
+	}
+}

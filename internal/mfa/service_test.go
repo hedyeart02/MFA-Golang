@@ -6,6 +6,7 @@ import (
 	"encoding/base32"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -329,5 +330,56 @@ func TestSQLiteStorage_AdminSettingsPersistence(t *testing.T) {
 	}
 	if loaded.EntityID != second.EntityID || loaded.SMTPHost != "smtp2.local" || loaded.SMTPPassword != "secret2" || !loaded.ITAEnforceWhitelist {
 		t.Fatalf("unexpected loaded settings: %+v", loaded)
+	}
+}
+
+func TestSQLiteStorage_AdminSettingsEncryptedAtRest(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "encrypted_settings.db")
+	storage, err := NewSQLiteStorage(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStorage failed: %v", err)
+	}
+	defer storage.Close()
+
+	hexKey := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	if err := storage.SetEncryptionKeyFromHex(hexKey); err != nil {
+		t.Fatalf("SetEncryptionKeyFromHex failed: %v", err)
+	}
+
+	ctx := context.Background()
+	payload := &config.AdminSettingsPayload{
+		EntityID:       "https://samlguard.local:8443",
+		ACSURL:         "https://ita.local/callback",
+		SMTPPassword:   "super-secret-smtp-pass",
+		ITAAPIPassword: "super-secret-ita-pass",
+	}
+	if err := storage.SaveAdminSettings(ctx, payload); err != nil {
+		t.Fatalf("SaveAdminSettings failed: %v", err)
+	}
+
+	// Read raw JSON persisted in SQLite gateway_settings to verify secrets are encrypted at rest
+	rawDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open raw db failed: %v", err)
+	}
+	defer rawDB.Close()
+
+	var rawJSON string
+	if err := rawDB.QueryRow(`SELECT settings_json FROM gateway_settings WHERE id = 1`).Scan(&rawJSON); err != nil {
+		t.Fatalf("query raw gateway_settings failed: %v", err)
+	}
+	if strings.Contains(rawJSON, "super-secret-smtp-pass") || strings.Contains(rawJSON, "super-secret-ita-pass") {
+		t.Fatalf("expected passwords in gateway_settings to be encrypted at rest, got plaintext in: %s", rawJSON)
+	}
+	if !strings.Contains(rawJSON, "enc:v1:") {
+		t.Fatalf("expected enc:v1: encrypted prefix in persisted settings JSON: %s", rawJSON)
+	}
+
+	loaded, err := storage.GetAdminSettings(ctx)
+	if err != nil {
+		t.Fatalf("GetAdminSettings failed: %v", err)
+	}
+	if loaded.SMTPPassword != "super-secret-smtp-pass" || loaded.ITAAPIPassword != "super-secret-ita-pass" {
+		t.Fatalf("expected decrypted passwords on GetAdminSettings, got smtp=%q ita=%q", loaded.SMTPPassword, loaded.ITAAPIPassword)
 	}
 }

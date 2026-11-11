@@ -25,10 +25,12 @@ import (
 )
 
 type Service struct {
-	storage    Storage
-	smtpSender *SMTPSender
-	cfg        *config.Config
-	logger     *zap.Logger
+	storage         Storage
+	smtpSender      *SMTPSender
+	cfg             *config.Config
+	logger          *zap.Logger
+	ephemeralEncKey []byte
+	ephemeralPepper []byte
 }
 
 type EnrollmentData struct {
@@ -39,12 +41,33 @@ type EnrollmentData struct {
 }
 
 func NewService(storage Storage, smtpSender *SMTPSender, cfg *config.Config, logger *zap.Logger) *Service {
-	return &Service{
+	svc := &Service{
 		storage:    storage,
 		smtpSender: smtpSender,
 		cfg:        cfg,
 		logger:     logger,
 	}
+
+	isProd := cfg != nil && cfg.IsProduction()
+	if !isProd {
+		if cfg == nil || strings.TrimSpace(cfg.MFA.EncryptionKey) == "" {
+			key := make([]byte, 32)
+			if _, err := io.ReadFull(rand.Reader, key); err == nil {
+				svc.ephemeralEncKey = key
+				if logger != nil {
+					logger.Warn("mfa.encryption_key is not configured; generated ephemeral development encryption key (not persisted across restarts)")
+				}
+			}
+		}
+		if cfg == nil || strings.TrimSpace(cfg.MFA.ServerPepper) == "" {
+			pepper := make([]byte, 32)
+			if _, err := io.ReadFull(rand.Reader, pepper); err == nil {
+				svc.ephemeralPepper = pepper
+			}
+		}
+	}
+
+	return svc
 }
 
 // SMTPSender returns the active SMTPSender instance.
@@ -386,9 +409,9 @@ func (s *Service) GenerateAndSendEmailOTP(ctx context.Context, userKey, recipien
 	}
 
 	// 3. Digest code with HMAC-SHA256 using server pepper
-	pepper := s.cfg.MFA.ServerPepper
-	if pepper == "" {
-		pepper = "samlguard-default-server-pepper-secret-key"
+	pepper, err := s.getServerPepper()
+	if err != nil {
+		return err
 	}
 
 	mac := hmac.New(sha256.New, []byte(pepper))
@@ -427,9 +450,9 @@ func (s *Service) VerifyEmailOTP(ctx context.Context, userKey, code string) (boo
 		return bypass, err
 	}
 
-	pepper := s.cfg.MFA.ServerPepper
-	if pepper == "" {
-		pepper = "samlguard-default-server-pepper-secret-key"
+	pepper, err := s.getServerPepper()
+	if err != nil {
+		return false, err
 	}
 
 	maxRetries := s.cfg.MFA.MaxRetries
@@ -438,6 +461,21 @@ func (s *Service) VerifyEmailOTP(ctx context.Context, userKey, code string) (boo
 	}
 
 	return s.storage.VerifyAndConsumeEmailOTP(ctx, userKey, code, pepper, maxRetries)
+}
+
+func (s *Service) getServerPepper() (string, error) {
+	if s.cfg != nil {
+		if pepper := strings.TrimSpace(s.cfg.MFA.ServerPepper); pepper != "" {
+			return pepper, nil
+		}
+		if s.cfg.IsProduction() {
+			return "", errors.New("production security violation: mfa.server_pepper must be configured")
+		}
+	}
+	if len(s.ephemeralPepper) > 0 {
+		return hex.EncodeToString(s.ephemeralPepper), nil
+	}
+	return "", errors.New("mfa server pepper is not initialized")
 }
 
 func generateSecureNumericOTP(length int) (string, error) {
@@ -509,16 +547,20 @@ func (s *Service) decrypt(ciphertext []byte) ([]byte, error) {
 }
 
 func (s *Service) getEncryptionKey() ([]byte, error) {
-	hexKey := strings.TrimSpace(s.cfg.MFA.EncryptionKey)
-	if hexKey != "" {
-		if b, err := hex.DecodeString(hexKey); err == nil && len(b) == 32 {
-			return b, nil
+	if s.cfg != nil {
+		hexKey := strings.TrimSpace(s.cfg.MFA.EncryptionKey)
+		if hexKey != "" {
+			if b, err := hex.DecodeString(hexKey); err == nil && len(b) == 32 {
+				return b, nil
+			}
+			return nil, errors.New("invalid mfa.encryption_key: must be a 64-character hex string")
+		}
+		if s.cfg.IsProduction() {
+			return nil, errors.New("production security violation: mfa.encryption_key must be configured with a 32-byte hex key")
 		}
 	}
-	if s.cfg.IsProduction() {
-		return nil, errors.New("production security violation: mfa.encryption_key must be configured with a 32-byte hex key")
+	if len(s.ephemeralEncKey) == 32 {
+		return s.ephemeralEncKey, nil
 	}
-	// In non-production testing mode if key not provided: derive deterministic dev key
-	devKey := sha256.Sum256([]byte("samlguard-development-only-encryption-key-not-for-production"))
-	return devKey[:], nil
+	return nil, errors.New("mfa encryption key is not initialized")
 }

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -284,15 +285,30 @@ func setupAdminAuthEngine(h *SAMLHandler) *gin.Engine {
 	r.POST("/admin/login", h.HandleAdminLoginPost)
 	r.GET("/admin/change-password", h.HandleAdminChangePasswordGet)
 	r.POST("/admin/change-password", h.HandleAdminChangePasswordPost)
-	r.GET("/admin/logout", h.HandleAdminLogout)
+	r.POST("/admin/logout", h.HandleAdminLogout)
 
-	adminProtected := r.Group("/admin", h.RequireAdminAuth())
+	adminProtected := r.Group("/admin", h.RequireAdminAuth(), h.RequireAdminCSRF())
 	{
 		adminProtected.GET("/settings", h.HandleAdminSettingsGet)
 		adminProtected.POST("/settings", h.HandleAdminSettingsPost)
 		adminProtected.POST("/users/add", h.HandleAdminUserAddPost)
+		adminProtected.POST("/users/reset-mfa", h.HandleAdminUserResetMFAPost)
 	}
 	return r
+}
+
+func extractAdminCSRF(t *testing.T, body string) string {
+	t.Helper()
+	reMeta := regexp.MustCompile(`<meta name="csrf-token" content="([^"]+)"`)
+	if m := reMeta.FindStringSubmatch(body); len(m) >= 2 && m[1] != "" {
+		return m[1]
+	}
+	reInput := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`)
+	if m := reInput.FindStringSubmatch(body); len(m) >= 2 && m[1] != "" {
+		return m[1]
+	}
+	t.Fatalf("expected CSRF token in HTML response")
+	return ""
 }
 
 func TestAdminAuth_CompleteLifecycle(t *testing.T) {
@@ -373,7 +389,7 @@ func TestAdminAuth_CompleteLifecycle(t *testing.T) {
 		t.Fatalf("expected redirect to /admin/change-password when must_change_password=1, got code=%d loc=%s", wBlockedSettings.Code, wBlockedSettings.Header().Get("Location"))
 	}
 
-	// 7. GET /admin/change-password with session works
+	// 7. GET /admin/change-password with session works and includes a CSRF token
 	reqChangePwdGet := httptest.NewRequest("GET", "/admin/change-password", nil)
 	reqChangePwdGet.AddCookie(&http.Cookie{Name: "samlguard_admin_session", Value: sessionCookie})
 	wChangePwdGet := httptest.NewRecorder()
@@ -381,9 +397,24 @@ func TestAdminAuth_CompleteLifecycle(t *testing.T) {
 	if wChangePwdGet.Code != http.StatusOK || !strings.Contains(wChangePwdGet.Body.String(), "Change Administrator Password") {
 		t.Fatalf("expected change password page, got %d", wChangePwdGet.Code)
 	}
+	changePwdCSRF := extractAdminCSRF(t, wChangePwdGet.Body.String())
+
+	// 7b. Missing CSRF token on POST /admin/change-password must be blocked with 403
+	reqNoCSRF := httptest.NewRequest("POST", "/admin/change-password", strings.NewReader(url.Values{
+		"new_password":     {"Admin@SecurePass2026!"},
+		"confirm_password": {"Admin@SecurePass2026!"},
+	}.Encode()))
+	reqNoCSRF.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqNoCSRF.AddCookie(&http.Cookie{Name: "samlguard_admin_session", Value: sessionCookie})
+	wNoCSRF := httptest.NewRecorder()
+	r.ServeHTTP(wNoCSRF, reqNoCSRF)
+	if wNoCSRF.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden without CSRF token on /admin/change-password, got %d", wNoCSRF.Code)
+	}
 
 	// 8. Attempting to set password shorter than 8 chars should fail
 	shortPwdForm := url.Values{
+		"csrf_token":       {changePwdCSRF},
 		"new_password":     {"short"},
 		"confirm_password": {"short"},
 	}
@@ -398,6 +429,7 @@ func TestAdminAuth_CompleteLifecycle(t *testing.T) {
 
 	// 9. Attempting to reuse default password should fail
 	defaultPwdForm := url.Values{
+		"csrf_token":       {changePwdCSRF},
 		"new_password":     {"admin123"},
 		"confirm_password": {"admin123"},
 	}
@@ -412,6 +444,7 @@ func TestAdminAuth_CompleteLifecycle(t *testing.T) {
 
 	// 10. Valid new password change
 	validPwdForm := url.Values{
+		"csrf_token":       {changePwdCSRF},
 		"new_password":     {"Admin@SecurePass2026!"},
 		"confirm_password": {"Admin@SecurePass2026!"},
 	}
@@ -448,9 +481,42 @@ func TestAdminAuth_CompleteLifecycle(t *testing.T) {
 	if !strings.Contains(wAllowedSettings.Body.String(), "👤 admin") {
 		t.Errorf("expected admin username badge in settings header")
 	}
+	settingsCSRF := extractAdminCSRF(t, wAllowedSettings.Body.String())
 
-	// 12. Logout
-	reqLogout := httptest.NewRequest("GET", "/admin/logout", nil)
+	// 11b. Protected JSON route without X-CSRF-Token must be blocked with 403
+	reqResetNoCSRF := httptest.NewRequest("POST", "/admin/users/reset-mfa", strings.NewReader(`{"username":"apc"}`))
+	reqResetNoCSRF.Header.Set("Content-Type", "application/json")
+	reqResetNoCSRF.AddCookie(&http.Cookie{Name: "samlguard_admin_session", Value: updatedCookie})
+	wResetNoCSRF := httptest.NewRecorder()
+	r.ServeHTTP(wResetNoCSRF, reqResetNoCSRF)
+	if wResetNoCSRF.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden without X-CSRF-Token, got %d", wResetNoCSRF.Code)
+	}
+
+	// 11c. Protected JSON route with valid X-CSRF-Token succeeds
+	reqResetOK := httptest.NewRequest("POST", "/admin/users/reset-mfa", strings.NewReader(`{"username":"apc"}`))
+	reqResetOK.Header.Set("Content-Type", "application/json")
+	reqResetOK.Header.Set("X-CSRF-Token", settingsCSRF)
+	reqResetOK.AddCookie(&http.Cookie{Name: "samlguard_admin_session", Value: updatedCookie})
+	wResetOK := httptest.NewRecorder()
+	r.ServeHTTP(wResetOK, reqResetOK)
+	if wResetOK.Code != http.StatusOK || !strings.Contains(wResetOK.Body.String(), `"success":true`) {
+		t.Fatalf("expected 200 success from /admin/users/reset-mfa, got %d: %s", wResetOK.Code, wResetOK.Body.String())
+	}
+
+	// 12. Logout requires valid CSRF token when session is present
+	reqLogoutNoCSRF := httptest.NewRequest("POST", "/admin/logout", nil)
+	reqLogoutNoCSRF.AddCookie(&http.Cookie{Name: "samlguard_admin_session", Value: updatedCookie})
+	wLogoutNoCSRF := httptest.NewRecorder()
+	r.ServeHTTP(wLogoutNoCSRF, reqLogoutNoCSRF)
+	if wLogoutNoCSRF.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden on /admin/logout without CSRF, got %d", wLogoutNoCSRF.Code)
+	}
+
+	logoutForm := url.Values{"csrf_token": {settingsCSRF}}
+	reqLogout := httptest.NewRequest("POST", "/admin/logout", strings.NewReader(logoutForm.Encode()))
+	reqLogout.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqLogout.AddCookie(&http.Cookie{Name: "samlguard_admin_session", Value: updatedCookie})
 	wLogout := httptest.NewRecorder()
 	r.ServeHTTP(wLogout, reqLogout)
 	if wLogout.Code != http.StatusSeeOther || wLogout.Header().Get("Location") != "/admin/login" {

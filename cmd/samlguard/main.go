@@ -30,6 +30,7 @@ import (
 	"github.com/hidayat-SE/samlguard/internal/mfa"
 	"github.com/hidayat-SE/samlguard/pkg/logger"
 	"github.com/hidayat-SE/samlguard/pkg/middleware"
+	"github.com/hidayat-SE/samlguard/pkg/ratelimiter"
 	"github.com/hidayat-SE/samlguard/pkg/response"
 	"github.com/hidayat-SE/samlguard/public"
 	"github.com/hidayat-SE/samlguard/web"
@@ -51,13 +52,44 @@ func SetupAppWithCleanup(cfg *config.Config, appLogger *logger.Logger) (*gin.Eng
 		return nil, nil, fmt.Errorf("invalid runtime configuration: %w", err)
 	}
 
-	r := gin.Default()
+	r := gin.New()
 
-	// Set up router with middleware chain: Recovery -> RequestID/Context -> Logger -> SecurityHeaders -> Identity
+	if len(cfg.Security.TrustedProxies) > 0 {
+		if proxyErr := r.SetTrustedProxies(cfg.Security.TrustedProxies); proxyErr != nil {
+			return nil, nil, fmt.Errorf("invalid trusted proxies configuration: %w", proxyErr)
+		}
+	} else {
+		_ = r.SetTrustedProxies(nil)
+	}
+
+	maxBodyBytes := int64(cfg.MaximumRequestSize) * 2
+	if maxBodyBytes < 1<<20 {
+		maxBodyBytes = 1 << 20
+	}
+
+	globalRateLimit := cfg.Security.RateLimit
+	if globalRateLimit <= 0 {
+		globalRateLimit = 100
+	}
+	authRateLimit := cfg.Security.AuthRateLimit
+	if authRateLimit <= 0 {
+		authRateLimit = 20
+	}
+	globalLimiter := ratelimiter.NewMemoryRateLimiter(globalRateLimit, time.Minute)
+	authLimiter := ratelimiter.NewMemoryRateLimiter(authRateLimit, time.Minute)
+	globalRateMW := middleware.RateLimitMiddleware(globalLimiter, "global", appLogger.System())
+	authRateMW := middleware.RateLimitMiddleware(authLimiter, "auth", appLogger.System())
+
+	// Set up router with middleware chain: Recovery -> MaxBodyBytes -> RequestID/Context -> Logger -> SecurityHeaders -> Identity
 	r.Use(middleware.Recovery())
+	r.Use(middleware.MaxBodyBytesMiddleware(maxBodyBytes))
 	r.Use(middleware.ContextInject(appLogger))
 	r.Use(middleware.Logger())
-	r.Use(middleware.SecurityHeaders())
+	r.Use(middleware.SecurityHeadersWithConfig(middleware.SecurityHeadersOptions{
+		TLSEnabled:      cfg.TLS.Enabled,
+		TrustProxyProto: len(cfg.Security.TrustedProxies) > 0,
+		FormActionFunc:  cfg.AllowedCSPFormAction,
+	}))
 	r.Use(middleware.IdentityMiddleware())
 
 	// 0. Initialize persistent SQLite storage early and overlay any Admin Console settings
@@ -73,6 +105,13 @@ func SetupAppWithCleanup(cfg *config.Config, appLogger *logger.Logger) (*gin.Eng
 			} else {
 				appLogger.System().Info("database storage closed successfully")
 			}
+		}
+	}
+
+	if cfg.MFA.EncryptionKey != "" {
+		if keyErr := mfaStorage.SetEncryptionKeyFromHex(cfg.MFA.EncryptionKey); keyErr != nil {
+			cleanup()
+			return nil, nil, fmt.Errorf("failed to configure storage encryption key: %w", keyErr)
 		}
 	}
 
@@ -205,39 +244,39 @@ func SetupAppWithCleanup(cfg *config.Config, appLogger *logger.Logger) (*gin.Eng
 	}
 
 	// Register SAML and MFA routes
-	samlGroup := r.Group("/saml")
+	samlGroup := r.Group("/saml", globalRateMW)
 	{
 		samlGroup.GET("/sso", samlHandler.HandleSSO)
-		samlGroup.POST("/acs", samlHandler.HandleACS)
+		samlGroup.POST("/acs", authRateMW, samlHandler.HandleACS)
 		samlGroup.GET("/acs", samlHandler.HandleACSGet)
 		samlGroup.GET("/metadata", samlHandler.HandleMetadata)
 		samlGroup.GET("/metadata/idp", samlHandler.HandleIdPMetadata)
 		samlGroup.GET("/metadata/sp", samlHandler.HandleSPMetadata)
-		samlGroup.POST("/re-enroll", samlHandler.HandleMFAReEnroll)
+		samlGroup.POST("/re-enroll", authRateMW, samlHandler.HandleMFAReEnroll)
 	}
 
 	// Additional direct routes for compatibility with ITA and web browser forms
-	r.GET("/login", samlHandler.HandleSSO)
-	r.POST("/login", samlHandler.HandleSSO)
-	r.POST("/acs", samlHandler.HandleACS)
-	r.GET("/acs", samlHandler.HandleACSGet)
-	r.GET("/metadata", samlHandler.HandleMetadata)
-	r.GET("/metadata/idp", samlHandler.HandleIdPMetadata)
-	r.GET("/metadata/sp", samlHandler.HandleSPMetadata)
-	r.POST("/mfa/verify", samlHandler.HandleMFAVerify)
-	r.POST("/mfa/resend", samlHandler.HandleMFAResend)
-	r.POST("/mfa/re-enroll", samlHandler.HandleMFAReEnroll)
-	r.POST("/mock-idp/submit", samlHandler.HandleMockIDPSubmit)
+	r.GET("/login", globalRateMW, samlHandler.HandleSSO)
+	r.POST("/login", globalRateMW, samlHandler.HandleSSO)
+	r.POST("/acs", globalRateMW, authRateMW, samlHandler.HandleACS)
+	r.GET("/acs", globalRateMW, samlHandler.HandleACSGet)
+	r.GET("/metadata", globalRateMW, samlHandler.HandleMetadata)
+	r.GET("/metadata/idp", globalRateMW, samlHandler.HandleIdPMetadata)
+	r.GET("/metadata/sp", globalRateMW, samlHandler.HandleSPMetadata)
+	r.POST("/mfa/verify", globalRateMW, authRateMW, samlHandler.HandleMFAVerify)
+	r.POST("/mfa/resend", globalRateMW, authRateMW, samlHandler.HandleMFAResend)
+	r.POST("/mfa/re-enroll", globalRateMW, authRateMW, samlHandler.HandleMFAReEnroll)
+	r.POST("/mock-idp/submit", globalRateMW, authRateMW, samlHandler.HandleMockIDPSubmit)
 
 	// Admin Console Authentication & Password Management routes
-	r.GET("/admin/login", samlHandler.HandleAdminLoginGet)
-	r.POST("/admin/login", samlHandler.HandleAdminLoginPost)
-	r.GET("/admin/change-password", samlHandler.HandleAdminChangePasswordGet)
-	r.POST("/admin/change-password", samlHandler.HandleAdminChangePasswordPost)
-	r.GET("/admin/logout", samlHandler.HandleAdminLogout)
+	r.GET("/admin/login", globalRateMW, samlHandler.HandleAdminLoginGet)
+	r.POST("/admin/login", globalRateMW, authRateMW, samlHandler.HandleAdminLoginPost)
+	r.GET("/admin/change-password", globalRateMW, samlHandler.HandleAdminChangePasswordGet)
+	r.POST("/admin/change-password", globalRateMW, samlHandler.HandleAdminChangePasswordPost)
+	r.POST("/admin/logout", globalRateMW, samlHandler.HandleAdminLogout)
 
-	// Protected Admin Settings & Management routes (requires authenticated admin session)
-	adminProtected := r.Group("/admin", samlHandler.RequireAdminAuth())
+	// Protected Admin Settings & Management routes (requires authenticated admin session + CSRF token)
+	adminProtected := r.Group("/admin", globalRateMW, samlHandler.RequireAdminAuth(), samlHandler.RequireAdminCSRF())
 	{
 		adminProtected.GET("/settings", samlHandler.HandleAdminSettingsGet)
 		adminProtected.POST("/settings", samlHandler.HandleAdminSettingsPost)
@@ -245,6 +284,7 @@ func SetupAppWithCleanup(cfg *config.Config, appLogger *logger.Logger) (*gin.Eng
 		adminProtected.POST("/ita/sync", samlHandler.HandleAdminITASyncPost)
 		adminProtected.POST("/users/add", samlHandler.HandleAdminUserAddPost)
 		adminProtected.POST("/users/delete", samlHandler.HandleAdminUserDeletePost)
+		adminProtected.POST("/users/reset-mfa", samlHandler.HandleAdminUserResetMFAPost)
 		adminProtected.GET("/cert/download", samlHandler.HandleAdminCertDownload)
 	}
 
@@ -338,13 +378,28 @@ func main() {
 		appLogger.System().Fatal("application startup failed during dependency wiring", zap.Error(err))
 	}
 
-	// 4. Construct HTTP server with configured timeouts and host/port
+	// 4. Construct HTTP server with configured timeouts, Slowloris guard, and hardened TLS profile
 	serverAddr := cfg.Server.Address()
 	srv := &http.Server{
-		Addr:         serverAddr,
-		Handler:      engine,
-		ReadTimeout:  cfg.Server.ReadTimeout,
-		WriteTimeout: cfg.Server.WriteTimeout,
+		Addr:              serverAddr,
+		Handler:           engine,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       cfg.Server.ReadTimeout,
+		WriteTimeout:      cfg.Server.WriteTimeout,
+		IdleTimeout:       60 * time.Second,
+	}
+	if cfg.TLS.Enabled {
+		srv.TLSConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			CipherSuites: []uint16{
+				tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+				tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+				tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+			},
+		}
 	}
 
 	// 5. Windows Service Control Manager or interactive console execution

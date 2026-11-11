@@ -6,6 +6,8 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +18,7 @@ import (
 	"time"
 
 	"github.com/hidayat-SE/samlguard/internal/config"
+	pkgcrypto "github.com/hidayat-SE/samlguard/pkg/crypto"
 	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
 )
@@ -79,6 +82,7 @@ type Storage interface {
 	RecordTOTPTimestep(ctx context.Context, userKey string, timestep int64) error
 	IncrementTOTPFailure(ctx context.Context, userKey string, maxAttempts int, lockDuration time.Duration) (bool, error)
 	ResetTOTPFailure(ctx context.Context, userKey string) error
+	DeleteUserTOTPSecrets(ctx context.Context, identifier string) (int64, error)
 
 	// Email OTP methods
 	SaveEmailOTP(ctx context.Context, userKey string, hmacDigest []byte, expiresAt, resendAfter time.Time) error
@@ -103,8 +107,34 @@ type Storage interface {
 }
 
 type SQLiteStorage struct {
-	db *sql.DB
-	mu sync.Mutex // Mutex to serialize SQLite transaction writes safely
+	db            *sql.DB
+	mu            sync.Mutex // Mutex to serialize SQLite transaction writes safely
+	encryptionKey []byte     // Optional 32-byte AES key for encrypting admin settings secrets
+}
+
+// SetEncryptionKey configures the 32-byte key used to encrypt/decrypt persisted admin secrets.
+func (s *SQLiteStorage) SetEncryptionKey(key []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(key) == 32 {
+		s.encryptionKey = append([]byte(nil), key...)
+	} else {
+		s.encryptionKey = nil
+	}
+}
+
+// SetEncryptionKeyFromHex configures the encryption key from a 64-character hex string.
+func (s *SQLiteStorage) SetEncryptionKeyFromHex(hexKey string) error {
+	trimmed := strings.TrimSpace(hexKey)
+	if trimmed == "" {
+		return nil
+	}
+	b, err := hex.DecodeString(trimmed)
+	if err != nil || len(b) != 32 {
+		return errors.New("invalid 32-byte hex encryption key")
+	}
+	s.SetEncryptionKey(b)
+	return nil
 }
 
 func NewSQLiteStorage(dbPath string) (*SQLiteStorage, error) {
@@ -469,6 +499,28 @@ func (s *SQLiteStorage) ResetTOTPFailure(ctx context.Context, userKey string) er
 	return err
 }
 
+// DeleteUserTOTPSecrets removes all TOTP enrollments (active and pending) matching a userKey or username/email suffix.
+func (s *SQLiteStorage) DeleteUserTOTPSecrets(ctx context.Context, identifier string) (int64, error) {
+	trimmed := strings.TrimSpace(identifier)
+	if trimmed == "" {
+		return 0, errors.New("user identifier cannot be empty")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	res, err := s.db.ExecContext(ctx, `
+		DELETE FROM mfa_secrets
+		WHERE LOWER(user_key) = LOWER(?)
+		   OR LOWER(substr(user_key, instr(user_key, '|') + 1)) = LOWER(?)
+	`, trimmed, trimmed)
+	if err != nil {
+		return 0, fmt.Errorf("deleting user totp secrets: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	return rows, nil
+}
+
 func (s *SQLiteStorage) SaveEmailOTP(ctx context.Context, userKey string, hmacDigest []byte, expiresAt, resendAfter time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -807,19 +859,60 @@ func (s *SQLiteStorage) UpdateAdminPassword(ctx context.Context, username, newPa
 	return nil
 }
 
+const encryptedSecretPrefix = "enc:v1:"
+
+func (s *SQLiteStorage) encryptSettingSecret(plaintext string) (string, error) {
+	if plaintext == "" || strings.HasPrefix(plaintext, encryptedSecretPrefix) || len(s.encryptionKey) != 32 {
+		return plaintext, nil
+	}
+	cipherBytes, err := pkgcrypto.Encrypt(s.encryptionKey, []byte(plaintext))
+	if err != nil {
+		return "", err
+	}
+	return encryptedSecretPrefix + base64.StdEncoding.EncodeToString(cipherBytes), nil
+}
+
+func (s *SQLiteStorage) decryptSettingSecret(val string) (string, error) {
+	if !strings.HasPrefix(val, encryptedSecretPrefix) {
+		return val, nil
+	}
+	if len(s.encryptionKey) != 32 {
+		return "", errors.New("cannot decrypt persisted secret: encryption key not configured")
+	}
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(val, encryptedSecretPrefix))
+	if err != nil {
+		return "", fmt.Errorf("decoding encrypted setting secret: %w", err)
+	}
+	plain, err := pkgcrypto.Decrypt(s.encryptionKey, raw)
+	if err != nil {
+		return "", fmt.Errorf("decrypting setting secret: %w", err)
+	}
+	return string(plain), nil
+}
+
 // SaveAdminSettings persists the Admin Console gateway settings as JSON in SQLite.
+// Sensitive credentials (SMTPPassword, ITAAPIPassword) are encrypted at rest when an encryption key is configured.
 func (s *SQLiteStorage) SaveAdminSettings(ctx context.Context, settings *config.AdminSettingsPayload) error {
 	if settings == nil {
 		return errors.New("settings payload cannot be nil")
 	}
 
-	raw, err := json.Marshal(settings)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	toStore := *settings
+	var err error
+	if toStore.SMTPPassword, err = s.encryptSettingSecret(toStore.SMTPPassword); err != nil {
+		return fmt.Errorf("encrypting smtp password: %w", err)
+	}
+	if toStore.ITAAPIPassword, err = s.encryptSettingSecret(toStore.ITAAPIPassword); err != nil {
+		return fmt.Errorf("encrypting ita api password: %w", err)
+	}
+
+	raw, err := json.Marshal(&toStore)
 	if err != nil {
 		return fmt.Errorf("marshaling gateway settings: %w", err)
 	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	now := time.Now().UTC()
 	_, err = s.db.ExecContext(ctx, `
@@ -849,6 +942,13 @@ func (s *SQLiteStorage) GetAdminSettings(ctx context.Context) (*config.AdminSett
 	var settings config.AdminSettingsPayload
 	if err := json.Unmarshal([]byte(raw), &settings); err != nil {
 		return nil, fmt.Errorf("unmarshaling gateway settings: %w", err)
+	}
+
+	if settings.SMTPPassword, err = s.decryptSettingSecret(settings.SMTPPassword); err != nil {
+		return nil, err
+	}
+	if settings.ITAAPIPassword, err = s.decryptSettingSecret(settings.ITAAPIPassword); err != nil {
+		return nil, err
 	}
 	return &settings, nil
 }

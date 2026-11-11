@@ -406,3 +406,65 @@ saml:
 	}
 }
 
+func TestConfig_Production_RejectsPlaceholderServerPepper(t *testing.T) {
+	placeholders := []string{
+		"CHANGE_ME_GENERATE_HIGH_ENTROPY_SERVER_PEPPER",
+		"samlguard-default-server-pepper-secret-key",
+	}
+	for _, placeholder := range placeholders {
+		cfg := validProdConfig()
+		cfg.MFA.ServerPepper = placeholder
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("expected production config validation to reject placeholder ServerPepper %q", placeholder)
+		}
+	}
+}
+
+func TestConfig_IsAllowedDownstreamACSURL(t *testing.T) {
+	cfg := validProdConfig()
+	cfg.SAML.ACSURL = "https://ita.example.com/api/current/authentication/saml2-callback"
+	cfg.SAML.DownstreamACSURLs = []string{"https://ita-dr.example.com/api/current/authentication/saml2-callback"}
+
+	if !cfg.IsAllowedDownstreamACSURL("https://ita.example.com/api/current/authentication/saml2-callback") {
+		t.Error("expected configured SAML.ACSURL to be allowed")
+	}
+	if !cfg.IsAllowedDownstreamACSURL("https://ita-dr.example.com/api/current/authentication/saml2-callback") {
+		t.Error("expected configured DownstreamACSURLs entry to be allowed")
+	}
+	if !cfg.IsAllowedDownstreamACSURL("https://ita-meta.example.com/callback", "https://ita-meta.example.com/callback") {
+		t.Error("expected metadata endpoint to be allowed")
+	}
+	if cfg.IsAllowedDownstreamACSURL("https://evil.attacker.example/callback") {
+		t.Error("expected untrusted ACS URL to be rejected")
+	}
+	if cfg.IsAllowedDownstreamACSURL("") {
+		t.Error("expected empty candidate ACS URL to be rejected")
+	}
+}
+
+func TestConfig_TrustedProxiesAndCSPFormAction(t *testing.T) {
+	cfg := validProdConfig()
+	cfg.Security.TrustedProxies = []string{"10.0.0.1", "192.168.10.0/24"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected valid trusted proxies to pass, got: %v", err)
+	}
+
+	cfgBad := validProdConfig()
+	cfgBad.Security.TrustedProxies = []string{"not-an-ip-or-cidr"}
+	if err := cfgBad.Validate(); err == nil {
+		t.Fatal("expected invalid trusted proxy entry to fail validation")
+	}
+
+	cfg.SAML.ACSURL = "https://ita.example.com/api/current/authentication/saml2-callback"
+	cfg.SAML.IdPSSOURL = "https://login.microsoftonline.com/tenant/saml2"
+	csp := cfg.AllowedCSPFormAction()
+	if strings.Contains(csp, "*") {
+		t.Fatalf("AllowedCSPFormAction must not return wildcard '*': %s", csp)
+	}
+	if !strings.Contains(csp, "'self'") ||
+		!strings.Contains(csp, "https://ita.example.com") ||
+		!strings.Contains(csp, "https://login.microsoftonline.com") {
+		t.Fatalf("unexpected AllowedCSPFormAction output: %s", csp)
+	}
+}
+

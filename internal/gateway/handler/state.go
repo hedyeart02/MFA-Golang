@@ -9,9 +9,10 @@ import (
 )
 
 var (
-	ErrSessionExpired  = errors.New("authentication session expired")
-	ErrSessionConsumed = errors.New("authentication session already consumed (single-use enforced)")
-	ErrSessionNotFound = errors.New("authentication session not found")
+	ErrSessionExpired       = errors.New("authentication session expired")
+	ErrSessionConsumed      = errors.New("authentication session already consumed (single-use enforced)")
+	ErrSessionNotFound      = errors.New("authentication session not found")
+	ErrCorrelationStoreFull = errors.New("too many active authentication sessions; please retry shortly")
 )
 
 // AuthSessionState correlates downstream ITA and upstream IdP transactions
@@ -28,7 +29,9 @@ type AuthSessionState struct {
 	UserEmail           string
 	UserDisplayName     string
 	UserGroups          []string
+	AssertionConsumed   bool
 	MFAVerified         bool
+	ReEnrollAuthorized  bool
 	CSRFToken           string
 	CreatedAt           time.Time
 	ExpiresAt           time.Time
@@ -36,9 +39,10 @@ type AuthSessionState struct {
 }
 
 type CorrelationStore struct {
-	mu       sync.RWMutex
-	sessions map[string]*AuthSessionState
-	ttl      time.Duration
+	mu          sync.RWMutex
+	sessions    map[string]*AuthSessionState
+	ttl         time.Duration
+	maxSessions int
 }
 
 func NewCorrelationStore(ttl time.Duration) *CorrelationStore {
@@ -46,8 +50,9 @@ func NewCorrelationStore(ttl time.Duration) *CorrelationStore {
 		ttl = 10 * time.Minute
 	}
 	store := &CorrelationStore{
-		sessions: make(map[string]*AuthSessionState),
-		ttl:      ttl,
+		sessions:    make(map[string]*AuthSessionState),
+		ttl:         ttl,
+		maxSessions: 10000,
 	}
 	go store.cleanupExpired()
 	return store
@@ -56,6 +61,22 @@ func NewCorrelationStore(ttl time.Duration) *CorrelationStore {
 func (s *CorrelationStore) Create(state *AuthSessionState) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	maxCap := s.maxSessions
+	if maxCap <= 0 {
+		maxCap = 10000
+	}
+	now := time.Now().UTC()
+	if len(s.sessions) >= maxCap {
+		for id, st := range s.sessions {
+			if now.After(st.ExpiresAt) || st.Consumed {
+				delete(s.sessions, id)
+			}
+		}
+		if len(s.sessions) >= maxCap {
+			return "", ErrCorrelationStoreFull
+		}
+	}
 
 	tokenBytes := make([]byte, 24)
 	if _, err := rand.Read(tokenBytes); err != nil {
@@ -69,7 +90,6 @@ func (s *CorrelationStore) Create(state *AuthSessionState) (string, error) {
 	}
 	state.CSRFToken = hex.EncodeToString(csrfBytes)
 
-	now := time.Now().UTC()
 	state.SessionID = sessionID
 	state.CreatedAt = now
 	state.ExpiresAt = now.Add(s.ttl)

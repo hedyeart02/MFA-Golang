@@ -530,3 +530,57 @@ func TestSetupApp_LoadsPersistedAdminSettingsFromDB(t *testing.T) {
 		t.Errorf("expected persisted MFA provider 'email', got %q", cfg.MFA.DefaultProvider)
 	}
 }
+
+func TestSetupApp_Phase2SecurityHardening(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Security.AuthRateLimit = 2
+	cfg.Security.RateLimit = 50
+	cfg.SAML.ACSURL = "https://ita.example.com/api/current/authentication/saml2-callback"
+
+	app, cleanup, err := SetupAppWithCleanup(cfg, testLogger())
+	if err != nil {
+		t.Fatalf("SetupAppWithCleanup failed: %v", err)
+	}
+	defer cleanup()
+
+	// 1. Verify strict CSP (no wildcard form-action *), Cache-Control: no-store, and X-Frame-Options
+	wGet := httptest.NewRecorder()
+	reqGet := httptest.NewRequest(http.MethodGet, "/admin/login", nil)
+	app.ServeHTTP(wGet, reqGet)
+	if wGet.Code != http.StatusOK {
+		t.Fatalf("expected 200 on /admin/login, got %d", wGet.Code)
+	}
+	csp := wGet.Header().Get("Content-Security-Policy")
+	if strings.Contains(csp, "form-action *") {
+		t.Fatalf("expected CSP without wildcard form-action *, got: %s", csp)
+	}
+	if !strings.Contains(csp, "https://ita.example.com") {
+		t.Fatalf("expected downstream SP origin in CSP form-action, got: %s", csp)
+	}
+	if !strings.Contains(wGet.Header().Get("Cache-Control"), "no-store") {
+		t.Fatalf("expected no-store Cache-Control header, got: %s", wGet.Header().Get("Cache-Control"))
+	}
+
+	// 2. Spoofing X-Forwarded-For with default empty TrustedProxies must NOT bypass IP rate limiting
+	for i := 0; i < 2; i++ {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/admin/login", strings.NewReader("username=admin&password=wrong"))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("X-Forwarded-For", "198.51.100."+string(rune('1'+i)))
+		req.RemoteAddr = "203.0.113.5:12345"
+		app.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected attempt %d within limit to reach login handler (200), got %d", i+1, w.Code)
+		}
+	}
+
+	wLimited := httptest.NewRecorder()
+	reqLimited := httptest.NewRequest(http.MethodPost, "/admin/login", strings.NewReader("username=admin&password=wrong"))
+	reqLimited.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqLimited.Header.Set("X-Forwarded-For", "198.51.100.99") // spoofed IP should be ignored!
+	reqLimited.RemoteAddr = "203.0.113.5:12346"
+	app.ServeHTTP(wLimited, reqLimited)
+	if wLimited.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 Too Many Requests when X-Forwarded-For is untrusted and auth limit exceeded, got %d", wLimited.Code)
+	}
+}

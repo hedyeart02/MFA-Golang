@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/xml"
 	"errors"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewjam/saml"
 	"github.com/gin-gonic/gin"
@@ -544,4 +546,73 @@ func TestNewSAMLHandler_IdPCertificateRolloverBundle(t *testing.T) {
 	if len(h.idpCertStore.Roots) != 2 {
 		t.Fatalf("expected 2 certificates in idpCertStore.Roots for rollover bundle, got: %d", len(h.idpCertStore.Roots))
 	}
+}
+
+func TestValidateUpstreamSAMLResponse_HardenedChecks(t *testing.T) {
+	p := &mockPipeline{}
+	h, cfg := setupTestHandler(t, p)
+	cfg.SAML.IdPEntityID = "https://trusted-idp.example.com"
+
+	// 1. First valid response succeeds; replaying the exact same Assertion ID is blocked
+	b64 := buildSignedUpstreamResponse(t, h.responseGen, "https://trusted-idp.example.com", cfg.SAML.ACSURL, "outbound-replay-1")
+	if _, err := h.validateUpstreamSAMLResponse(b64, "outbound-replay-1"); err != nil {
+		t.Fatalf("expected first assertion validation to succeed, got: %v", err)
+	}
+	if _, err := h.validateUpstreamSAMLResponse(b64, "outbound-replay-1"); err == nil || !strings.Contains(err.Error(), "replay detected") {
+		t.Fatalf("expected SAML assertion replay error on second submission, got: %v", err)
+	}
+
+	// 2. Spoofed Destination containing "/acs" on a different host must be rejected
+	resSpoofDest, err := h.responseGen.GenerateResponse(gateway.SAMLResponseRequest{
+		InResponseTo:  "outbound-dest-1",
+		Destination:   "https://evil.attacker.example/acs",
+		Audience:      cfg.SAML.EntityID,
+		Issuer:        "https://trusted-idp.example.com",
+		SubjectNameID: "alice",
+		Email:         "alice@example.com",
+	})
+	if err != nil {
+		t.Fatalf("generate spoofed destination response: %v", err)
+	}
+	// Replace SubjectConfirmationData Recipient so it passes recipient check and hits Destination check
+	spoofDestB64 := b64WithModifiedDestination(t, resSpoofDest.PostFormHTML, h, "https://evil.attacker.example/acs", cfg.SAML.ACSURL)
+	if _, err := h.validateUpstreamSAMLResponse(spoofDestB64, "outbound-dest-1"); err == nil || !strings.Contains(err.Error(), "destination mismatch") {
+		t.Fatalf("expected destination mismatch for https://evil.attacker.example/acs, got: %v", err)
+	}
+
+	// 3. CorrelationStore respects maxSessions cap
+	store := NewCorrelationStore(5 * time.Minute)
+	store.maxSessions = 2
+	if _, err := store.Create(&AuthSessionState{OutboundRequestID: "1"}); err != nil {
+		t.Fatalf("create 1: %v", err)
+	}
+	if _, err := store.Create(&AuthSessionState{OutboundRequestID: "2"}); err != nil {
+		t.Fatalf("create 2: %v", err)
+	}
+	if _, err := store.Create(&AuthSessionState{OutboundRequestID: "3"}); !errors.Is(err, ErrCorrelationStoreFull) {
+		t.Fatalf("expected ErrCorrelationStoreFull when capacity reached, got: %v", err)
+	}
+}
+
+func b64WithModifiedDestination(t *testing.T, postFormHTML string, h *SAMLHandler, dest, recipient string) string {
+	t.Helper()
+	res, err := h.responseGen.GenerateResponse(gateway.SAMLResponseRequest{
+		InResponseTo:  "outbound-dest-1",
+		Destination:   recipient,
+		Audience:      h.cfg.SAML.EntityID,
+		Issuer:        "https://trusted-idp.example.com",
+		SubjectNameID: "alice",
+		Email:         "alice@example.com",
+	})
+	if err != nil {
+		t.Fatalf("generate base response: %v", err)
+	}
+	// Sign Response has Signature inside Assertion, so Response Destination can be edited for testing Destination check cleanly
+	_ = postFormHTML
+	rawXML, decErr := base64.StdEncoding.DecodeString(res.SAMLResponse)
+	if decErr != nil {
+		t.Fatalf("decode SAMLResponse: %v", decErr)
+	}
+	xmlStr := strings.Replace(string(rawXML), `Destination="`+recipient+`"`, `Destination="`+dest+`"`, 1)
+	return base64.StdEncoding.EncodeToString([]byte(xmlStr))
 }

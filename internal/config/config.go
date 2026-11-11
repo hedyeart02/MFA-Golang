@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -80,6 +81,7 @@ type SAMLConfig struct {
 	IdPSSOURL             string            `mapstructure:"idp_sso_url"`
 	IdPCertFile           string            `mapstructure:"idp_cert_file"`
 	AllowedAudiences      []string          `mapstructure:"allowed_audiences"`
+	DownstreamACSURLs     []string          `mapstructure:"downstream_acs_urls"`
 	GroupMapping          map[string]string `mapstructure:"group_mapping"`
 	DefaultGroups         []string          `mapstructure:"default_groups"`
 	AuthnContextClassRef  string            `mapstructure:"authn_context_class_ref"`
@@ -183,6 +185,8 @@ type SecurityConfig struct {
 	CSRFSecret         string   `mapstructure:"csrf_secret"`
 	CORSAllowedOrigins []string `mapstructure:"cors_allowed_origins"`
 	RateLimit          int      `mapstructure:"rate_limit"`
+	AuthRateLimit      int      `mapstructure:"auth_rate_limit"`
+	TrustedProxies     []string `mapstructure:"trusted_proxies"`
 }
 
 // SetDefaults configures sensible runtime defaults
@@ -252,6 +256,7 @@ func SetDefaults(v *viper.Viper) {
 
 	v.SetDefault("security.cors_allowed_origins", []string{"*"})
 	v.SetDefault("security.rate_limit", 100)
+	v.SetDefault("security.auth_rate_limit", 20)
 
 	// Gateway limits and defaults
 	v.SetDefault("maximumRequestSize", 256*1024)     // 256KB
@@ -444,6 +449,22 @@ func (c *Config) Validate() error {
 		return errors.New("database configuration is mandatory")
 	}
 
+	if c.Security.RateLimit < 0 || c.Security.AuthRateLimit < 0 {
+		return errors.New("security rate limits cannot be negative")
+	}
+
+	for _, proxy := range c.Security.TrustedProxies {
+		trimmed := strings.TrimSpace(proxy)
+		if trimmed == "" {
+			continue
+		}
+		if net.ParseIP(trimmed) == nil {
+			if _, _, err := net.ParseCIDR(trimmed); err != nil {
+				return fmt.Errorf("invalid security.trusted_proxies entry %q: must be an IP address or CIDR", proxy)
+			}
+		}
+	}
+
 	if c.IsProduction() {
 		if c.MFA.AllowDummyOTP {
 			return errors.New("security violation: mfa.allow_dummy_otp must be false in production mode")
@@ -456,8 +477,11 @@ func (c *Config) Validate() error {
 		if err != nil || len(keyBytes) != 32 {
 			return errors.New("security violation: mfa.encryption_key must be a valid 64-character (32-byte) hex-encoded key in production mode")
 		}
-		if strings.TrimSpace(c.MFA.ServerPepper) == "" {
-			return errors.New("security violation: mfa.server_pepper is mandatory in production mode")
+		trimmedPepper := strings.TrimSpace(c.MFA.ServerPepper)
+		if trimmedPepper == "" ||
+			trimmedPepper == "CHANGE_ME_GENERATE_HIGH_ENTROPY_SERVER_PEPPER" ||
+			trimmedPepper == "samlguard-default-server-pepper-secret-key" {
+			return errors.New("security violation: mfa.server_pepper must be configured with a unique high-entropy secret in production mode")
 		}
 		host := strings.TrimSpace(strings.ToLower(c.SMTP.Host))
 		if host == "" || host == "localhost" || host == "127.0.0.1" {
@@ -604,4 +628,128 @@ func extractURLOrigin(rawURL string) string {
 		return u.Scheme + "://" + u.Host
 	}
 	return ""
+}
+
+// IsAllowedDownstreamACSURL validates that an AssertionConsumerServiceURL supplied in an
+// inbound AuthnRequest belongs to a trusted downstream Service Provider rather than an
+// arbitrary external host (preventing SAML assertion exfiltration / open redirect).
+func (c *Config) IsAllowedDownstreamACSURL(candidate string, metadataEndpoints ...string) bool {
+	trimmed := strings.TrimSpace(candidate)
+	if trimmed == "" {
+		return false
+	}
+
+	u, err := url.Parse(trimmed)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return false
+	}
+
+	scheme := strings.ToLower(u.Scheme)
+	if c != nil && c.IsProduction() {
+		if scheme != "https" {
+			return false
+		}
+	} else if scheme != "http" && scheme != "https" {
+		return false
+	}
+
+	normCandidate := strings.TrimRight(trimmed, "/")
+	candidateOrigin := strings.ToLower(scheme + "://" + u.Host)
+
+	if c == nil {
+		return false
+	}
+
+	// 1. Exact URL allowlist matches
+	for _, allowed := range c.SAML.DownstreamACSURLs {
+		if a := strings.TrimRight(strings.TrimSpace(allowed), "/"); a != "" && a == normCandidate {
+			return true
+		}
+	}
+	for _, ep := range metadataEndpoints {
+		if e := strings.TrimRight(strings.TrimSpace(ep), "/"); e != "" && e == normCandidate {
+			return true
+		}
+	}
+	if acs := strings.TrimRight(strings.TrimSpace(c.SAML.ACSURL), "/"); acs != "" && acs == normCandidate {
+		return true
+	}
+
+	// 2. Trusted downstream SP origin matches
+	allowedOrigins := make(map[string]struct{})
+	addOrigin := func(raw string) {
+		if origin := extractURLOrigin(raw); origin != "" {
+			allowedOrigins[strings.ToLower(origin)] = struct{}{}
+		}
+	}
+
+	addOrigin(c.SAML.SPEntityID)
+	for _, aud := range c.SAML.AllowedAudiences {
+		addOrigin(aud)
+	}
+	for _, acs := range c.SAML.DownstreamACSURLs {
+		addOrigin(acs)
+	}
+	for _, ep := range metadataEndpoints {
+		addOrigin(ep)
+	}
+	addOrigin(c.ITA.APIURL)
+
+	// Include SAML.ACSURL origin only when it is configured as the downstream SP callback
+	// (distinct from SAMLGuard's own SSO origin), or if no other downstream origins are set.
+	ssoOrigin := strings.ToLower(extractURLOrigin(c.SAML.SSOURL))
+	acsOrigin := strings.ToLower(extractURLOrigin(c.SAML.ACSURL))
+	if acsOrigin != "" && (acsOrigin != ssoOrigin || len(allowedOrigins) == 0) {
+		allowedOrigins[acsOrigin] = struct{}{}
+	}
+
+	_, ok := allowedOrigins[candidateOrigin]
+	return ok
+}
+
+// AllowedCSPFormAction constructs the Content-Security-Policy form-action directive value
+// restricted to 'self' and configured trusted SAML IdP / downstream SP origins (no wildcard '*').
+func (c *Config) AllowedCSPFormAction() string {
+	directives := []string{"'self'"}
+	if c == nil {
+		return "'self'"
+	}
+
+	seen := make(map[string]struct{})
+	addOrigin := func(raw string) {
+		origin := extractURLOrigin(raw)
+		if origin == "" {
+			return
+		}
+		u, err := url.Parse(origin)
+		if err != nil {
+			return
+		}
+		scheme := strings.ToLower(u.Scheme)
+		if scheme != "http" && scheme != "https" {
+			return
+		}
+		// Prevent CSP directive injection via unexpected delimiters or whitespace
+		if strings.ContainsAny(origin, "; \t\r\n") {
+			return
+		}
+		norm := strings.ToLower(origin)
+		if _, exists := seen[norm]; !exists {
+			seen[norm] = struct{}{}
+			directives = append(directives, norm)
+		}
+	}
+
+	addOrigin(c.SAML.ACSURL)
+	addOrigin(c.SAML.IdPSSOURL)
+	addOrigin(c.SAML.SPEntityID)
+	addOrigin(c.ITA.APIURL)
+	for _, aud := range c.SAML.AllowedAudiences {
+		addOrigin(aud)
+	}
+	for _, acs := range c.SAML.DownstreamACSURLs {
+		addOrigin(acs)
+	}
+
+	return strings.Join(directives, " ")
 }

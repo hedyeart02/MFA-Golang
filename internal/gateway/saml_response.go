@@ -7,6 +7,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"html"
 	"os"
 	"strings"
 	"time"
@@ -281,7 +282,7 @@ func (g *ResponseGenerator) GenerateResponse(req SAMLResponseRequest) (*SAMLResp
 <input type="hidden" name="SAMLResponse" value="%s"/>
 <input type="hidden" name="RelayState" value="%s"/>
 <noscript><button type="submit">Continue to ITA</button></noscript>
-</form></body></html>`, destination, samlResponseB64, req.RelayState)
+</form></body></html>`, html.EscapeString(destination), html.EscapeString(samlResponseB64), html.EscapeString(req.RelayState))
 
 	return &SAMLResponseResult{
 		SAMLResponse: samlResponseB64,

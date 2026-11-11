@@ -1,17 +1,21 @@
 package handler
 
 import (
+	"crypto/rand"
 	"crypto/subtle"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"html"
 	"html/template"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/beevik/etree"
@@ -19,24 +23,30 @@ import (
 	"github.com/google/uuid"
 	goxmldsig "github.com/russellhaering/goxmldsig"
 	"github.com/hidayat-SE/samlguard/internal/config"
+	fedmodel "github.com/hidayat-SE/samlguard/internal/federation/model"
 	"github.com/hidayat-SE/samlguard/internal/gateway"
 	"github.com/hidayat-SE/samlguard/internal/gateway/pipeline"
 	"github.com/hidayat-SE/samlguard/internal/mfa"
+	"github.com/hidayat-SE/samlguard/pkg/replay"
 	"github.com/hidayat-SE/samlguard/pkg/response"
 	"github.com/hidayat-SE/samlguard/web"
 	"go.uber.org/zap"
 )
 
 type SAMLHandler struct {
-	pipeline           pipeline.AuthnPipeline
-	mfaService         *mfa.Service
-	responseGen        *gateway.ResponseGenerator
-	correlationStore   *CorrelationStore
-	idpCertStore       *goxmldsig.MemoryX509CertificateStore
-	cfg                *config.Config
-	templates          *template.Template
-	corporateLoginTmpl *template.Template
-	logger             *zap.Logger
+	pipeline             pipeline.AuthnPipeline
+	mfaService           *mfa.Service
+	responseGen          *gateway.ResponseGenerator
+	correlationStore     *CorrelationStore
+	idpCertStore         *goxmldsig.MemoryX509CertificateStore
+	cfg                  *config.Config
+	templates            *template.Template
+	corporateLoginTmpl   *template.Template
+	logger               *zap.Logger
+	adminSecretMu        sync.Mutex
+	ephemeralAdminSecret []byte
+	assertionReplayMu    sync.Mutex
+	assertionReplay      *replay.MemoryReplayDetector
 }
 
 type CorporateLoginViewModel struct {
@@ -128,17 +138,51 @@ func NewSAMLHandler(
 		}
 	}
 
+	var ephemeralSecret []byte
+	if cfg == nil || !cfg.IsProduction() {
+		ephemeralSecret = make([]byte, 32)
+		_, _ = rand.Read(ephemeralSecret)
+	}
+
 	return &SAMLHandler{
-		pipeline:           p,
-		mfaService:         mfaSvc,
-		responseGen:        respGen,
-		correlationStore:   NewCorrelationStore(15 * time.Minute),
-		idpCertStore:       idpCertStore,
-		cfg:                cfg,
-		templates:          tmpl,
-		corporateLoginTmpl: corpTmpl,
-		logger:             log,
+		pipeline:             p,
+		mfaService:           mfaSvc,
+		responseGen:          respGen,
+		correlationStore:     NewCorrelationStore(15 * time.Minute),
+		idpCertStore:         idpCertStore,
+		cfg:                  cfg,
+		templates:            tmpl,
+		corporateLoginTmpl:   corpTmpl,
+		logger:               log,
+		ephemeralAdminSecret: ephemeralSecret,
+		assertionReplay:      replay.NewMemoryReplayDetector(),
 	}, nil
+}
+
+func (h *SAMLHandler) getAssertionReplay() *replay.MemoryReplayDetector {
+	h.assertionReplayMu.Lock()
+	defer h.assertionReplayMu.Unlock()
+	if h.assertionReplay == nil {
+		h.assertionReplay = replay.NewMemoryReplayDetector()
+	}
+	return h.assertionReplay
+}
+
+// isHTTPSRequest reports whether Secure cookies should be set for the current request.
+// X-Forwarded-Proto is honored only when trusted proxies are explicitly configured.
+func (h *SAMLHandler) isHTTPSRequest(c *gin.Context) bool {
+	if h.cfg != nil {
+		if h.cfg.TLS.Enabled || strings.HasPrefix(strings.ToLower(strings.TrimSpace(h.cfg.SAML.SSOURL)), "https://") {
+			return true
+		}
+	}
+	if c != nil && c.Request != nil && c.Request.TLS != nil {
+		return true
+	}
+	if c != nil && h.cfg != nil && len(h.cfg.Security.TrustedProxies) > 0 {
+		return strings.EqualFold(strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")), "https")
+	}
+	return false
 }
 
 // DetermineAuthnContextClassRef resolves the appropriate AuthnContextClassRef for the verified MFA method.
@@ -197,8 +241,27 @@ func (h *SAMLHandler) HandleSSO(c *gin.Context) {
 	if itaRelayState == "" {
 		itaRelayState = c.Query("RelayState")
 	}
-	itaACSURL := authCtx.AssertionConsumerServiceURL
-	if itaACSURL == "" {
+	itaACSURL := strings.TrimSpace(authCtx.AssertionConsumerServiceURL)
+	if itaACSURL != "" {
+		var metaEndpoints []string
+		if md, ok := authCtx.Metadata.(*fedmodel.MetadataDescriptor); ok && md != nil {
+			for _, ep := range md.SSOEndpoints {
+				if ep.Location != "" {
+					metaEndpoints = append(metaEndpoints, ep.Location)
+				}
+			}
+		}
+		if !h.cfg.IsAllowedDownstreamACSURL(itaACSURL, metaEndpoints...) {
+			if h.logger != nil {
+				h.logger.Warn("rejected untrusted AssertionConsumerServiceURL in inbound AuthnRequest",
+					zap.String("acs_url", itaACSURL),
+					zap.String("issuer", authCtx.Issuer),
+				)
+			}
+			response.Error(c, http.StatusBadRequest, errors.New("security violation: AssertionConsumerServiceURL is not in configured downstream allowlist"))
+			return
+		}
+	} else {
 		itaACSURL = h.cfg.SAML.ACSURL
 	}
 
@@ -214,11 +277,15 @@ func (h *SAMLHandler) HandleSSO(c *gin.Context) {
 
 	sessionID, err := h.correlationStore.Create(state)
 	if err != nil {
+		if errors.Is(err, ErrCorrelationStoreFull) {
+			response.Error(c, http.StatusServiceUnavailable, err)
+			return
+		}
 		response.Error(c, http.StatusInternalServerError, errors.New("failed to initialize auth correlation state"))
 		return
 	}
 
-	isSecure := h.cfg.TLS.Enabled || strings.HasPrefix(h.cfg.SAML.SSOURL, "https")
+	isSecure := h.isHTTPSRequest(c)
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie("samlguard_auth_state", sessionID, 900, "/", "", isSecure, true)
 
@@ -275,6 +342,10 @@ func (h *SAMLHandler) validateUpstreamSAMLResponse(rawB64 string, expectedOutbou
 		return nil, errors.New("missing Assertion element in SAMLResponse")
 	}
 	assertionEl := allAssertions[0]
+	assertionID := strings.TrimSpace(assertionEl.SelectAttrValue("ID", ""))
+	if h.cfg != nil && h.cfg.IsProduction() && assertionID == "" {
+		return nil, errors.New("upstream SAML validation failed: missing Assertion ID attribute")
+	}
 
 	// Reject duplicate XML ID attributes
 	idSet := make(map[string]bool)
@@ -378,10 +449,10 @@ func (h *SAMLHandler) validateUpstreamSAMLResponse(rawB64 string, expectedOutbou
 		return nil, fmt.Errorf("upstream SAML validation failed: SubjectConfirmationData Recipient mismatch: expected %s, got %s", expectedACS, recipient)
 	}
 
-	// Destination check
-	dest := root.SelectAttrValue("Destination", "")
+	// Destination check (strict match against expected ACS URL)
+	dest := strings.TrimSpace(root.SelectAttrValue("Destination", ""))
 	if dest != "" {
-		if dest != h.cfg.SAML.ACSURL && !strings.Contains(dest, "/saml/acs") && !strings.Contains(dest, "/acs") {
+		if !matchesExpectedDestination(dest, expectedACS, h.cfg != nil && h.cfg.IsProduction()) {
 			return nil, fmt.Errorf("destination mismatch: %s does not match SAMLGuard ACS", dest)
 		}
 	}
@@ -405,23 +476,59 @@ func (h *SAMLHandler) validateUpstreamSAMLResponse(rawB64 string, expectedOutbou
 		}
 	}
 
-	// Conditions validity check (with 5 minutes clock skew tolerance)
+	// Temporal bounds check on SubjectConfirmationData & Conditions (5 minutes clock skew tolerance)
+	now := time.Now().UTC()
+	skew := 5 * time.Minute
+	replayTTL := 15 * time.Minute
+
+	if nbStr := strings.TrimSpace(subjConfData.SelectAttrValue("NotBefore", "")); nbStr != "" {
+		nb, err := parseSAMLTimestamp(nbStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid SubjectConfirmationData NotBefore timestamp: %w", err)
+		}
+		if now.Add(skew).Before(nb) {
+			return nil, fmt.Errorf("SubjectConfirmationData NotBefore condition not met: %s", nbStr)
+		}
+	}
+	if noaStr := strings.TrimSpace(subjConfData.SelectAttrValue("NotOnOrAfter", "")); noaStr != "" {
+		noa, err := parseSAMLTimestamp(noaStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid SubjectConfirmationData NotOnOrAfter timestamp: %w", err)
+		}
+		if now.Add(-skew).After(noa) {
+			return nil, fmt.Errorf("SubjectConfirmationData expired: NotOnOrAfter %s", noaStr)
+		}
+		if rem := noa.Add(skew).Sub(now); rem > 0 {
+			replayTTL = rem
+		}
+	}
+
 	condEl := assertionEl.FindElement(".//Conditions")
 	if condEl != nil {
-		now := time.Now().UTC()
-		skew := 5 * time.Minute
-		if nbStr := condEl.SelectAttrValue("NotBefore", ""); nbStr != "" {
-			nb, err := time.Parse(time.RFC3339, nbStr)
-			if err == nil && now.Add(skew).Before(nb) {
+		if nbStr := strings.TrimSpace(condEl.SelectAttrValue("NotBefore", "")); nbStr != "" {
+			nb, err := parseSAMLTimestamp(nbStr)
+			if err != nil {
+				return nil, fmt.Errorf("invalid assertion NotBefore timestamp: %w", err)
+			}
+			if now.Add(skew).Before(nb) {
 				return nil, fmt.Errorf("assertion NotBefore condition not met: %s", nbStr)
 			}
 		}
-		if noaStr := condEl.SelectAttrValue("NotOnOrAfter", ""); noaStr != "" {
-			noa, err := time.Parse(time.RFC3339, noaStr)
-			if err == nil && now.Add(-skew).After(noa) {
+		if noaStr := strings.TrimSpace(condEl.SelectAttrValue("NotOnOrAfter", "")); noaStr != "" {
+			noa, err := parseSAMLTimestamp(noaStr)
+			if err != nil {
+				return nil, fmt.Errorf("invalid assertion NotOnOrAfter timestamp: %w", err)
+			}
+			if now.Add(-skew).After(noa) {
 				return nil, fmt.Errorf("assertion expired: NotOnOrAfter %s", noaStr)
 			}
+			if rem := noa.Add(skew).Sub(now); rem > replayTTL {
+				replayTTL = rem
+			}
 		}
+	}
+	if replayTTL > 30*time.Minute {
+		replayTTL = 30 * time.Minute
 	}
 
 	// Subject extraction
@@ -476,6 +583,13 @@ func (h *SAMLHandler) validateUpstreamSAMLResponse(rawB64 string, expectedOutbou
 		displayName = subjectNameID
 	}
 
+	// Enforce Assertion ID replay protection only after signature and claim validation pass
+	if assertionID != "" {
+		if h.getAssertionReplay().CheckAndMark("assertion:"+assertionID, replayTTL) {
+			return nil, fmt.Errorf("security violation: SAML assertion replay detected (ID %s)", assertionID)
+		}
+	}
+
 	return &UpstreamClaims{
 		SubjectNameID:       subjectNameID,
 		SubjectNameIDFormat: subjectFormat,
@@ -483,6 +597,35 @@ func (h *SAMLHandler) validateUpstreamSAMLResponse(rawB64 string, expectedOutbou
 		DisplayName:         displayName,
 		Groups:              groups,
 	}, nil
+}
+
+func parseSAMLTimestamp(raw string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+		return t, nil
+	}
+	return time.Parse(time.RFC3339, raw)
+}
+
+func matchesExpectedDestination(dest, expectedACS string, isProd bool) bool {
+	normDest := strings.TrimRight(strings.TrimSpace(dest), "/")
+	normExpected := strings.TrimRight(strings.TrimSpace(expectedACS), "/")
+	if normDest == "" {
+		return true
+	}
+	if normDest == normExpected {
+		return true
+	}
+	if strings.HasPrefix(strings.ToLower(normExpected), "https://") || strings.HasPrefix(strings.ToLower(normExpected), "http://") {
+		return false
+	}
+	// Non-production fallback when ACSURL is relative ("/saml/acs")
+	if !isProd && normExpected == "/saml/acs" {
+		if u, err := url.Parse(normDest); err == nil {
+			p := strings.TrimRight(u.Path, "/")
+			return p == "/saml/acs" || p == "/acs"
+		}
+	}
+	return false
 }
 
 // HandleACS accepts POST /saml/acs (HTTP-POST from Upstream IdP)
@@ -500,6 +643,11 @@ func (h *SAMLHandler) HandleACS(c *gin.Context) {
 	state, err := h.correlationStore.Get(sessionID)
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, fmt.Errorf("correlation state invalid: %w", err))
+		return
+	}
+
+	if state.AssertionConsumed {
+		response.Error(c, http.StatusConflict, errors.New("upstream SAML assertion already processed for this authentication session"))
 		return
 	}
 
@@ -541,7 +689,7 @@ func (h *SAMLHandler) HandleACS(c *gin.Context) {
 				zap.String("email", claims.Email),
 			)
 			c.Header("Content-Type", "text/html; charset=utf-8")
-			c.String(http.StatusForbidden, `<div style="font-family: sans-serif; padding: 2.5rem; background: #0f172a; color: #fecaca; min-height: 100vh; text-align: center;"><div style="max-width: 500px; margin: 3rem auto; background: #1e293b; padding: 2rem; border-radius: 12px; border: 1px solid #b91c1c;"><h2 style="color: #f87171; margin-top: 0;">⚠️ Access Denied</h2><p style="color: #e2e8f0; line-height: 1.6;">The account <strong>%s</strong> was not found in Schneider IT Advisor records. Please contact your system administrator for access invitation.</p></div></div>`, claims.SubjectNameID)
+			c.String(http.StatusForbidden, `<div style="font-family: sans-serif; padding: 2.5rem; background: #0f172a; color: #fecaca; min-height: 100vh; text-align: center;"><div style="max-width: 500px; margin: 3rem auto; background: #1e293b; padding: 2rem; border-radius: 12px; border: 1px solid #b91c1c;"><h2 style="color: #f87171; margin-top: 0;">⚠️ Access Denied</h2><p style="color: #e2e8f0; line-height: 1.6;">The account <strong>%s</strong> was not found in Schneider IT Advisor records. Please contact your system administrator for access invitation.</p></div></div>`, html.EscapeString(claims.SubjectNameID))
 			return
 		}
 	}
@@ -553,6 +701,7 @@ func (h *SAMLHandler) HandleACS(c *gin.Context) {
 	state.UserEmail = claims.Email
 	state.UserDisplayName = claims.DisplayName
 	state.UserGroups = claims.Groups
+	state.AssertionConsumed = true
 
 	_ = h.correlationStore.Update(sessionID, state)
 
@@ -581,33 +730,6 @@ func (h *SAMLHandler) HandleACSGet(c *gin.Context) {
 	method := c.DefaultQuery("method", "totp")
 	if method != "totp" && method != "email" {
 		method = "totp"
-	}
-
-	if c.Query("re_enroll") == "true" {
-		ctx := c.Request.Context()
-		enrollData, err := h.mfaService.StartTOTPEnrollmentForce(ctx, state.UserIdentityKey, state.UserEmail)
-		if err == nil && enrollData != nil {
-			vm := ChallengeViewModel{
-				SessionID:          state.SessionID,
-				CSRFToken:          state.CSRFToken,
-				Email:              state.UserEmail,
-				MaskedEmail:        maskEmail(state.UserEmail),
-				Method:             "totp",
-				EnrollmentRequired: true,
-				SecretKey:          enrollData.SecretKey,
-				QRCodeDataURI:      template.URL(enrollData.QRCodeDataURI),
-				Message:            "New authenticator key generated. Scan QR code and verify to activate.",
-				ResendCooldown:     60,
-			}
-			c.Header("Content-Type", "text/html; charset=utf-8")
-			if h.templates != nil {
-				if err := h.templates.Execute(c.Writer, vm); err == nil {
-					return
-				}
-			}
-			c.String(http.StatusOK, renderInlineMFAPage(vm))
-			return
-		}
 	}
 
 	h.renderMFAChallengeView(c, state, method, "")
@@ -645,6 +767,15 @@ func (h *SAMLHandler) HandleMFAVerify(c *gin.Context) {
 	if method == "totp" {
 		isPending := c.PostForm("is_pending") == "true"
 		if isPending {
+			if h.mfaService.HasActiveTOTP(ctx, state.UserIdentityKey) && !state.ReEnrollAuthorized {
+				if h.logger != nil {
+					h.logger.Warn("blocked unauthorized pending TOTP activation attempt",
+						zap.String("user_key", state.UserIdentityKey),
+					)
+				}
+				response.Error(c, http.StatusForbidden, errors.New("re-enrollment not authorized: verify current factor first"))
+				return
+			}
 			verified, err = h.mfaService.VerifyAndActivatePendingTOTP(ctx, state.UserIdentityKey, code)
 		} else {
 			verified, err = h.mfaService.VerifyTOTP(ctx, state.UserIdentityKey, code)
@@ -680,7 +811,7 @@ func (h *SAMLHandler) HandleMFAVerify(c *gin.Context) {
 	}
 
 	// Clear session cookie
-	isSecure := h.cfg.TLS.Enabled || strings.HasPrefix(h.cfg.SAML.SSOURL, "https")
+	isSecure := h.isHTTPSRequest(c)
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie("samlguard_auth_state", "", -1, "/", "", isSecure, true)
 
@@ -748,7 +879,8 @@ func (h *SAMLHandler) HandleMFAResend(c *gin.Context) {
 	h.renderMFAChallengeView(c, state, "email", "A new one-time code has been sent to your email.")
 }
 
-// HandleMFAReEnroll handles POST /mfa/re-enroll to generate a new TOTP enrollment without destroying existing active TOTP
+// HandleMFAReEnroll handles POST /mfa/re-enroll to generate a new TOTP enrollment without destroying existing active TOTP.
+// If the user already has an active TOTP enrollment, they MUST prove possession of an existing factor first.
 func (h *SAMLHandler) HandleMFAReEnroll(c *gin.Context) {
 	sessionID, _ := c.Cookie("samlguard_auth_state")
 	if sessionID == "" {
@@ -769,6 +901,47 @@ func (h *SAMLHandler) HandleMFAReEnroll(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
+	hasActiveTOTP := h.mfaService.HasActiveTOTP(ctx, state.UserIdentityKey)
+	if hasActiveTOTP && !state.ReEnrollAuthorized {
+		currentCode := strings.TrimSpace(c.PostForm("current_code"))
+		verifyMethod := strings.ToLower(strings.TrimSpace(c.PostForm("verify_method")))
+		if verifyMethod == "" {
+			verifyMethod = "totp"
+		}
+
+		if currentCode == "" {
+			h.renderMFAChallengeViewWithStatus(c, http.StatusForbidden, state, "totp", "Enter your current verification code to authorize authenticator re-enrollment.")
+			return
+		}
+
+		var ok bool
+		var verifyErr error
+		if verifyMethod == "email" {
+			ok, verifyErr = h.mfaService.VerifyEmailOTP(ctx, state.UserIdentityKey, currentCode)
+		} else {
+			ok, verifyErr = h.mfaService.VerifyTOTP(ctx, state.UserIdentityKey, currentCode)
+		}
+
+		if verifyErr != nil || !ok {
+			if h.logger != nil {
+				h.logger.Warn("blocked TOTP re-enrollment attempt with invalid current code",
+					zap.String("user_key", state.UserIdentityKey),
+					zap.String("verify_method", verifyMethod),
+					zap.Error(verifyErr),
+				)
+			}
+			errMsg := "Current verification code is invalid. Re-enrollment denied."
+			if verifyErr != nil && (strings.Contains(verifyErr.Error(), "locked") || strings.Contains(verifyErr.Error(), "too many")) {
+				errMsg = verifyErr.Error()
+			}
+			h.renderMFAChallengeViewWithStatus(c, http.StatusForbidden, state, "totp", errMsg)
+			return
+		}
+
+		state.ReEnrollAuthorized = true
+		_ = h.correlationStore.Update(sessionID, state)
+	}
+
 	enrollData, err := h.mfaService.StartTOTPEnrollmentForce(ctx, state.UserIdentityKey, state.UserEmail)
 	if err != nil {
 		h.renderMFAChallengeView(c, state, "totp", fmt.Sprintf("Failed to generate new TOTP secret: %v", err))
@@ -799,6 +972,10 @@ func (h *SAMLHandler) HandleMFAReEnroll(c *gin.Context) {
 }
 
 func (h *SAMLHandler) renderMFAChallengeView(c *gin.Context, state *AuthSessionState, method, errorMsg string) {
+	h.renderMFAChallengeViewWithStatus(c, http.StatusOK, state, method, errorMsg)
+}
+
+func (h *SAMLHandler) renderMFAChallengeViewWithStatus(c *gin.Context, statusCode int, state *AuthSessionState, method, errorMsg string) {
 	ctx := c.Request.Context()
 	hasActiveTOTP := h.mfaService.HasActiveTOTP(ctx, state.UserIdentityKey)
 
@@ -836,13 +1013,14 @@ func (h *SAMLHandler) renderMFAChallengeView(c *gin.Context, state *AuthSessionS
 
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	if h.templates != nil {
+		c.Status(statusCode)
 		if err := h.templates.Execute(c.Writer, vm); err == nil {
 			return
 		}
 	}
 
 	// Fallback inline HTML render
-	c.String(http.StatusOK, renderInlineMFAPage(vm))
+	c.String(statusCode, renderInlineMFAPage(vm))
 }
 
 func (h *SAMLHandler) renderMockUpstreamLogin(c *gin.Context, sessionID, outboundID, prefillUser, errorMessage string) {
@@ -882,7 +1060,7 @@ func (h *SAMLHandler) renderMockUpstreamLogin(c *gin.Context, sessionID, outboun
 	vm := CorporateLoginViewModel{
 		SessionID:         sessionID,
 		OutboundID:        outboundID,
-		SAMLResponseInput: template.HTML(fmt.Sprintf(`<input type="hidden" name="SAMLResponse" value="%s"/>`, defaultSAMLResponse)),
+		SAMLResponseInput: template.HTML(fmt.Sprintf(`<input type="hidden" name="SAMLResponse" value="%s"/>`, html.EscapeString(defaultSAMLResponse))),
 		Username:          prefillUser,
 		ErrorMessage:      errorMessage,
 	}
@@ -972,7 +1150,7 @@ func (h *SAMLHandler) HandleMockIDPSubmit(c *gin.Context) {
 		return
 	}
 
-	html := fmt.Sprintf(`<!DOCTYPE html>
+	formHTML := fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head><title>SAMLGuard - Redirecting to MFA</title></head>
 <body onload="document.forms[0].submit()">
@@ -983,9 +1161,9 @@ func (h *SAMLHandler) HandleMockIDPSubmit(c *gin.Context) {
 		<noscript><button type="submit">Continue to Verification &rarr;</button></noscript>
 	</form>
 </body>
-</html>`, sessionID, result.SAMLResponse)
+</html>`, html.EscapeString(sessionID), html.EscapeString(result.SAMLResponse))
 
-	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
+	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(formHTML))
 }
 
 func (h *SAMLHandler) getKeyDescriptorXML() string {
@@ -1099,6 +1277,14 @@ func maskEmail(email string) string {
 }
 
 func renderInlineMFAPage(vm ChallengeViewModel) string {
+	escSessionID := html.EscapeString(vm.SessionID)
+	escCSRFToken := html.EscapeString(vm.CSRFToken)
+	escMethod := html.EscapeString(vm.Method)
+	escMaskedEmail := html.EscapeString(vm.MaskedEmail)
+	escSecretKey := html.EscapeString(vm.SecretKey)
+	escQRDataURI := html.EscapeString(string(vm.QRCodeDataURI))
+	escError := html.EscapeString(vm.ErrorMessage)
+
 	var qrHTML string
 	if vm.EnrollmentRequired && vm.QRCodeDataURI != "" {
 		qrHTML = fmt.Sprintf(`
@@ -1106,12 +1292,12 @@ func renderInlineMFAPage(vm ChallengeViewModel) string {
 			<p style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 0.75rem;">Scan this QR code with Microsoft Authenticator, Google Authenticator or any standard TOTP app:</p>
 			<img src="%s" alt="TOTP QR Code" style="display: block; margin: 0 auto; border-radius: 8px; width: 180px; height: 180px;"/>
 			<div style="margin-top: 0.5rem; font-family: monospace; font-size: 0.8rem; color: #38bdf8;">Key: %s</div>
-		</div>`, vm.QRCodeDataURI, vm.SecretKey)
+		</div>`, escQRDataURI, escSecretKey)
 	}
 
 	var errorHTML string
 	if vm.ErrorMessage != "" {
-		errorHTML = fmt.Sprintf(`<div style="padding: 0.75rem; border-radius: 8px; background: #3b1c26; border: 1px solid #dc2626; color: #fca5a5; margin-bottom: 1rem; font-size: 0.85rem;">%s</div>`, vm.ErrorMessage)
+		errorHTML = fmt.Sprintf(`<div style="padding: 0.75rem; border-radius: 8px; background: #3b1c26; border: 1px solid #dc2626; color: #fca5a5; margin-bottom: 1rem; font-size: 0.85rem;">%s</div>`, escError)
 	}
 
 	isPendingValue := "false"
@@ -1122,9 +1308,12 @@ func renderInlineMFAPage(vm ChallengeViewModel) string {
 	var reenrollHTML string
 	if !vm.EnrollmentRequired && vm.Method == "totp" {
 		reenrollHTML = fmt.Sprintf(`
-		<div style="margin-top: 1rem; text-align: center;">
-			<a href="?method=totp&re_enroll=true&session_id=%s" style="color: #38bdf8; text-decoration: underline; cursor: pointer; font-size: 0.85rem;">Scan New QR Code / Re-enroll Authenticator</a>
-		</div>`, vm.SessionID)
+		<form method="POST" action="/mfa/re-enroll" style="margin-top: 1rem; text-align: center;">
+			<input type="hidden" name="session_id" value="%s"/>
+			<input type="hidden" name="csrf_token" value="%s"/>
+			<input type="text" name="current_code" placeholder="Current 6-digit code" maxlength="8" autocomplete="one-time-code" required style="margin-bottom: 0.5rem; font-size: 0.95rem; padding: 0.5rem;"/>
+			<button type="submit" style="background: none; border: none; color: #38bdf8; text-decoration: underline; cursor: pointer; font-size: 0.85rem;">Verify &amp; Re-enroll Authenticator</button>
+		</form>`, escSessionID, escCSRFToken)
 	}
 
 	var resendHTML string
@@ -1135,7 +1324,7 @@ func renderInlineMFAPage(vm ChallengeViewModel) string {
 			<input type="hidden" name="csrf_token" value="%s"/>
 			<input type="hidden" name="method" value="email"/>
 			<button type="submit" style="background: none; border: none; color: #38bdf8; text-decoration: underline; cursor: pointer; font-size: 0.85rem;">Resend OTP Code</button>
-		</form>`, vm.SessionID, vm.CSRFToken)
+		</form>`, escSessionID, escCSRFToken)
 	}
 
 	return fmt.Sprintf(`<!DOCTYPE html>
@@ -1179,16 +1368,16 @@ func renderInlineMFAPage(vm ChallengeViewModel) string {
 	</div>
 </body>
 </html>`,
-		vm.MaskedEmail,
+		escMaskedEmail,
 		activeTab(vm.Method == "totp"),
-		vm.SessionID,
+		escSessionID,
 		activeTab(vm.Method == "email"),
-		vm.SessionID,
+		escSessionID,
 		errorHTML,
 		qrHTML,
-		vm.SessionID,
-		vm.CSRFToken,
-		vm.Method,
+		escSessionID,
+		escCSRFToken,
+		escMethod,
 		isPendingValue,
 		reenrollHTML,
 		resendHTML,
