@@ -50,6 +50,109 @@ type AdminSettingsPayload struct {
 	ITAManualAllowedUsers []string `json:"ita_manual_allowed_users" form:"ita_manual_allowed_users"`
 }
 
+// ApplyAdminSettings updates the in-memory Config from an AdminSettingsPayload without touching disk.
+func ApplyAdminSettings(cfg *Config, payload *AdminSettingsPayload) {
+	if cfg == nil || payload == nil {
+		return
+	}
+
+	if v := strings.TrimSpace(payload.EntityID); v != "" {
+		cfg.SAML.EntityID = v
+	}
+	if v := strings.TrimSpace(payload.ACSURL); v != "" {
+		cfg.SAML.ACSURL = v
+	}
+	if v := strings.TrimSpace(payload.SSOURL); v != "" {
+		cfg.SAML.SSOURL = v
+	}
+	if v := strings.TrimSpace(payload.SLOURL); v != "" {
+		cfg.SAML.SLOURL = v
+	}
+	cfg.SAML.IdPEntityID = strings.TrimSpace(payload.IdPEntityID)
+	cfg.SAML.IdPSSOURL = strings.TrimSpace(payload.IdPSSOURL)
+	cfg.SAML.IdPMetadataURL = strings.TrimSpace(payload.IdPMetadataURL)
+	if v := strings.TrimSpace(payload.IdPCertFile); v != "" {
+		cfg.SAML.IdPCertFile = v
+	}
+
+	if len(payload.AllowedAudiences) > 0 {
+		var cfgAudiences []string
+		for _, aud := range payload.AllowedAudiences {
+			if trimmed := strings.TrimSpace(aud); trimmed != "" {
+				cfgAudiences = append(cfgAudiences, trimmed)
+			}
+		}
+		if len(cfgAudiences) > 0 {
+			cfg.SAML.AllowedAudiences = cfgAudiences
+		}
+	}
+
+	if payload.GroupMapping != nil {
+		gm := make(map[string]string)
+		for k, v := range payload.GroupMapping {
+			tk := strings.TrimSpace(k)
+			tv := strings.TrimSpace(v)
+			if tk != "" && tv != "" {
+				gm[tk] = tv
+			}
+		}
+		cfg.SAML.GroupMapping = gm
+	}
+
+	if v := strings.TrimSpace(payload.MFADefaultProvider); v != "" {
+		cfg.MFA.DefaultProvider = v
+	}
+	if v := strings.TrimSpace(payload.MFAIssuer); v != "" {
+		cfg.MFA.Issuer = v
+	}
+	if payload.OTPExpiry > 0 {
+		cfg.MFA.OTPExpiry = payload.OTPExpiry
+	}
+	if payload.ResendCooldown > 0 {
+		cfg.MFA.ResendCooldown = payload.ResendCooldown
+	}
+	cfg.MFA.AllowDummyOTP = payload.AllowDummyOTP
+
+	cfg.SMTP.Host = strings.TrimSpace(payload.SMTPHost)
+	if payload.SMTPPort > 0 {
+		cfg.SMTP.Port = payload.SMTPPort
+	}
+	cfg.SMTP.Username = strings.TrimSpace(payload.SMTPUsername)
+	if payload.SMTPPassword != "" {
+		cfg.SMTP.Password = payload.SMTPPassword
+	}
+	if v := strings.TrimSpace(payload.SMTPFrom); v != "" {
+		cfg.SMTP.From = v
+	}
+	if v := strings.TrimSpace(payload.SMTPFromName); v != "" {
+		cfg.SMTP.FromName = v
+	}
+	if v := strings.ToLower(strings.TrimSpace(payload.SMTPEncryption)); v != "" {
+		cfg.SMTP.Encryption = v
+	}
+
+	if v := strings.TrimSpace(payload.ITAAPIURL); v != "" {
+		cfg.ITA.APIURL = v
+	}
+	cfg.ITA.APIUsername = strings.TrimSpace(payload.ITAAPIUsername)
+	if payload.ITAAPIPassword != "" {
+		cfg.ITA.APIPassword = payload.ITAAPIPassword
+	}
+	cfg.ITA.EnforceUserWhitelist = payload.ITAEnforceWhitelist
+
+	if len(payload.ITAManualAllowedUsers) > 0 {
+		var cfgList []string
+		for _, u := range payload.ITAManualAllowedUsers {
+			if tu := strings.TrimSpace(u); tu != "" {
+				cfgList = append(cfgList, tu)
+			}
+		}
+		if len(cfgList) > 0 {
+			cfg.ITA.ManualAllowedUsers = cfgList
+		}
+	}
+}
+
 // SaveConfig updates the in-memory Config and persists the changes to the specified YAML file.
 func SaveConfig(filePath string, cfg *Config, payload *AdminSettingsPayload) error {
 	if filePath == "" {
@@ -71,6 +174,8 @@ func SaveConfig(filePath string, cfg *Config, payload *AdminSettingsPayload) err
 		raw = make(map[string]interface{})
 	}
 
+	ApplyAdminSettings(cfg, payload)
+
 	// Update SAML section
 	samlMap, _ := raw["saml"].(map[string]interface{})
 	if samlMap == nil {
@@ -79,62 +184,39 @@ func SaveConfig(filePath string, cfg *Config, payload *AdminSettingsPayload) err
 	}
 
 	if payload.EntityID != "" {
-		samlMap["entity_id"] = strings.TrimSpace(payload.EntityID)
-		cfg.SAML.EntityID = samlMap["entity_id"].(string)
+		samlMap["entity_id"] = cfg.SAML.EntityID
 	}
 	if payload.ACSURL != "" {
-		samlMap["acs_url"] = strings.TrimSpace(payload.ACSURL)
-		cfg.SAML.ACSURL = samlMap["acs_url"].(string)
+		samlMap["acs_url"] = cfg.SAML.ACSURL
 	}
 	if payload.SSOURL != "" {
-		samlMap["sso_url"] = strings.TrimSpace(payload.SSOURL)
-		cfg.SAML.SSOURL = samlMap["sso_url"].(string)
+		samlMap["sso_url"] = cfg.SAML.SSOURL
 	}
 	if payload.SLOURL != "" {
-		samlMap["slo_url"] = strings.TrimSpace(payload.SLOURL)
-		cfg.SAML.SLOURL = samlMap["slo_url"].(string)
+		samlMap["slo_url"] = cfg.SAML.SLOURL
 	}
-	samlMap["idp_entity_id"] = strings.TrimSpace(payload.IdPEntityID)
-	cfg.SAML.IdPEntityID = samlMap["idp_entity_id"].(string)
-
-	samlMap["idp_sso_url"] = strings.TrimSpace(payload.IdPSSOURL)
-	cfg.SAML.IdPSSOURL = samlMap["idp_sso_url"].(string)
-
-	samlMap["idp_metadata_url"] = strings.TrimSpace(payload.IdPMetadataURL)
-	cfg.SAML.IdPMetadataURL = samlMap["idp_metadata_url"].(string)
+	samlMap["idp_entity_id"] = cfg.SAML.IdPEntityID
+	samlMap["idp_sso_url"] = cfg.SAML.IdPSSOURL
+	samlMap["idp_metadata_url"] = cfg.SAML.IdPMetadataURL
 
 	if payload.IdPCertFile != "" {
-		samlMap["idp_cert_file"] = strings.TrimSpace(payload.IdPCertFile)
-		cfg.SAML.IdPCertFile = samlMap["idp_cert_file"].(string)
+		samlMap["idp_cert_file"] = cfg.SAML.IdPCertFile
 	}
 
-	if len(payload.AllowedAudiences) > 0 {
-		var audiences []interface{}
-		var cfgAudiences []string
-		for _, aud := range payload.AllowedAudiences {
-			trimmed := strings.TrimSpace(aud)
-			if trimmed != "" {
-				audiences = append(audiences, trimmed)
-				cfgAudiences = append(cfgAudiences, trimmed)
-			}
+	if len(payload.AllowedAudiences) > 0 && len(cfg.SAML.AllowedAudiences) > 0 {
+		audiences := make([]interface{}, 0, len(cfg.SAML.AllowedAudiences))
+		for _, aud := range cfg.SAML.AllowedAudiences {
+			audiences = append(audiences, aud)
 		}
-		if len(audiences) > 0 {
-			samlMap["allowed_audiences"] = audiences
-			cfg.SAML.AllowedAudiences = cfgAudiences
-		}
+		samlMap["allowed_audiences"] = audiences
 	}
 
 	if payload.GroupMapping != nil {
-		gm := make(map[string]interface{})
-		for k, v := range payload.GroupMapping {
-			tk := strings.TrimSpace(k)
-			tv := strings.TrimSpace(v)
-			if tk != "" && tv != "" {
-				gm[tk] = tv
-			}
+		gm := make(map[string]interface{}, len(cfg.SAML.GroupMapping))
+		for k, v := range cfg.SAML.GroupMapping {
+			gm[k] = v
 		}
 		samlMap["group_mapping"] = gm
-		cfg.SAML.GroupMapping = payload.GroupMapping
 	}
 
 	// Update MFA section
@@ -144,23 +226,18 @@ func SaveConfig(filePath string, cfg *Config, payload *AdminSettingsPayload) err
 		raw["mfa"] = mfaMap
 	}
 	if payload.MFADefaultProvider != "" {
-		mfaMap["default_provider"] = strings.TrimSpace(payload.MFADefaultProvider)
-		cfg.MFA.DefaultProvider = mfaMap["default_provider"].(string)
+		mfaMap["default_provider"] = cfg.MFA.DefaultProvider
 	}
 	if payload.MFAIssuer != "" {
-		mfaMap["issuer"] = strings.TrimSpace(payload.MFAIssuer)
-		cfg.MFA.Issuer = mfaMap["issuer"].(string)
+		mfaMap["issuer"] = cfg.MFA.Issuer
 	}
 	if payload.OTPExpiry > 0 {
-		mfaMap["otp_expiry"] = payload.OTPExpiry.String()
-		cfg.MFA.OTPExpiry = payload.OTPExpiry
+		mfaMap["otp_expiry"] = cfg.MFA.OTPExpiry.String()
 	}
 	if payload.ResendCooldown > 0 {
-		mfaMap["resend_cooldown"] = payload.ResendCooldown.String()
-		cfg.MFA.ResendCooldown = payload.ResendCooldown
+		mfaMap["resend_cooldown"] = cfg.MFA.ResendCooldown.String()
 	}
-	mfaMap["allow_dummy_otp"] = payload.AllowDummyOTP
-	cfg.MFA.AllowDummyOTP = payload.AllowDummyOTP
+	mfaMap["allow_dummy_otp"] = cfg.MFA.AllowDummyOTP
 
 	// Update SMTP section
 	smtpMap, _ := raw["smtp"].(map[string]interface{})
@@ -168,31 +245,22 @@ func SaveConfig(filePath string, cfg *Config, payload *AdminSettingsPayload) err
 		smtpMap = make(map[string]interface{})
 		raw["smtp"] = smtpMap
 	}
-	smtpMap["host"] = strings.TrimSpace(payload.SMTPHost)
-	cfg.SMTP.Host = smtpMap["host"].(string)
-
+	smtpMap["host"] = cfg.SMTP.Host
 	if payload.SMTPPort > 0 {
-		smtpMap["port"] = payload.SMTPPort
-		cfg.SMTP.Port = payload.SMTPPort
+		smtpMap["port"] = cfg.SMTP.Port
 	}
-	smtpMap["username"] = strings.TrimSpace(payload.SMTPUsername)
-	cfg.SMTP.Username = smtpMap["username"].(string)
-
+	smtpMap["username"] = cfg.SMTP.Username
 	if payload.SMTPPassword != "" {
-		smtpMap["password"] = payload.SMTPPassword
-		cfg.SMTP.Password = payload.SMTPPassword
+		smtpMap["password"] = cfg.SMTP.Password
 	}
 	if payload.SMTPFrom != "" {
-		smtpMap["from"] = strings.TrimSpace(payload.SMTPFrom)
-		cfg.SMTP.From = smtpMap["from"].(string)
+		smtpMap["from"] = cfg.SMTP.From
 	}
 	if payload.SMTPFromName != "" {
-		smtpMap["from_name"] = strings.TrimSpace(payload.SMTPFromName)
-		cfg.SMTP.FromName = smtpMap["from_name"].(string)
+		smtpMap["from_name"] = cfg.SMTP.FromName
 	}
 	if payload.SMTPEncryption != "" {
-		smtpMap["encryption"] = strings.ToLower(strings.TrimSpace(payload.SMTPEncryption))
-		cfg.SMTP.Encryption = smtpMap["encryption"].(string)
+		smtpMap["encryption"] = cfg.SMTP.Encryption
 	}
 
 	// Update ITA section
@@ -202,31 +270,20 @@ func SaveConfig(filePath string, cfg *Config, payload *AdminSettingsPayload) err
 		raw["ita"] = itaMap
 	}
 	if payload.ITAAPIURL != "" {
-		itaMap["api_url"] = strings.TrimSpace(payload.ITAAPIURL)
-		cfg.ITA.APIURL = itaMap["api_url"].(string)
+		itaMap["api_url"] = cfg.ITA.APIURL
 	}
-	itaMap["api_username"] = strings.TrimSpace(payload.ITAAPIUsername)
-	cfg.ITA.APIUsername = itaMap["api_username"].(string)
-
+	itaMap["api_username"] = cfg.ITA.APIUsername
 	if payload.ITAAPIPassword != "" {
-		itaMap["api_password"] = payload.ITAAPIPassword
-		cfg.ITA.APIPassword = payload.ITAAPIPassword
+		itaMap["api_password"] = cfg.ITA.APIPassword
 	}
-	itaMap["enforce_user_whitelist"] = payload.ITAEnforceWhitelist
-	cfg.ITA.EnforceUserWhitelist = payload.ITAEnforceWhitelist
+	itaMap["enforce_user_whitelist"] = cfg.ITA.EnforceUserWhitelist
 
-	if len(payload.ITAManualAllowedUsers) > 0 {
-		var list []interface{}
-		var cfgList []string
-		for _, u := range payload.ITAManualAllowedUsers {
-			tu := strings.TrimSpace(u)
-			if tu != "" {
-				list = append(list, tu)
-				cfgList = append(cfgList, tu)
-			}
+	if len(payload.ITAManualAllowedUsers) > 0 && len(cfg.ITA.ManualAllowedUsers) > 0 {
+		list := make([]interface{}, 0, len(cfg.ITA.ManualAllowedUsers))
+		for _, u := range cfg.ITA.ManualAllowedUsers {
+			list = append(list, u)
 		}
 		itaMap["manual_allowed_users"] = list
-		cfg.ITA.ManualAllowedUsers = cfgList
 	}
 
 	// 3. Write back cleanly

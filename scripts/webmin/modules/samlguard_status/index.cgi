@@ -69,4 +69,15 @@ if ($st->{'has_systemctl'} && $st->{'unit_exists'}) {
 	print &ui_buttons_end();
 }
 
+print "<br>\n";
+
+print &ui_form_start('upgrade.cgi', 'form-data');
+print &ui_table_start('Upgrade SAMLGuard Application', 'width=100%', 2);
+print &ui_table_row('Release Archive or Binary',
+	&ui_upload('package', 50)
+	. "<br><span style='font-size:0.9em;color:#666;'>Upload <code>samlguard-vX.Y.Z-linux-*.tar.gz</code> or a compiled <code>samlguard</code> Linux ELF binary. "
+	. "Existing configuration, certificates, and SQLite database are preserved (with automatic backup &amp; rollback on failure).</span>");
+print &ui_table_end();
+print &ui_form_end([ [ 'upgrade', 'Upload & Upgrade SAMLGuard' ] ]);
+
 &ui_print_footer('/', $text{'index'});

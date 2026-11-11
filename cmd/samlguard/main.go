@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"flag"
 	"fmt"
 	"net"
@@ -37,7 +38,7 @@ import (
 )
 
 // Version string populated at build time
-var Version = "1.0.0-dev"
+var Version = "1.0.1-dev"
 
 // SetupAppWithCleanup constructs and wires all runtime dependencies into the Gin engine
 // and returns a resource cleanup function to be invoked on server shutdown.
@@ -57,6 +58,29 @@ func SetupAppWithCleanup(cfg *config.Config, appLogger *logger.Logger) (*gin.Eng
 	r.Use(middleware.Logger())
 	r.Use(middleware.SecurityHeaders())
 	r.Use(middleware.IdentityMiddleware())
+
+	// 0. Initialize persistent SQLite storage early and overlay any Admin Console settings
+	mfaStorage, err := mfa.NewSQLiteStorage(cfg.Database.Path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("mfa storage initialization failed: %w", err)
+	}
+
+	cleanup := func() {
+		if mfaStorage != nil {
+			if closeErr := mfaStorage.Close(); closeErr != nil {
+				appLogger.System().Warn("error closing database storage", zap.Error(closeErr))
+			} else {
+				appLogger.System().Info("database storage closed successfully")
+			}
+		}
+	}
+
+	if savedSettings, loadErr := mfaStorage.GetAdminSettings(context.Background()); loadErr == nil && savedSettings != nil {
+		config.ApplyAdminSettings(cfg, savedSettings)
+		appLogger.System().Info("loaded persisted gateway settings from database", zap.String("db_path", cfg.Database.Path))
+	} else if loadErr != nil && !errors.Is(loadErr, mfa.ErrNotFound) {
+		appLogger.System().Warn("failed loading persisted gateway settings from database", zap.Error(loadErr))
+	}
 
 	// 1. Federation Adapters & Registry
 	entraAdapter := &entra.EntraAdapter{}
@@ -129,24 +153,11 @@ func SetupAppWithCleanup(cfg *config.Config, appLogger *logger.Logger) (*gin.Eng
 
 	// 5. Validate dependencies during startup
 	if err := authnPipeline.Validate(); err != nil {
+		cleanup()
 		return nil, nil, fmt.Errorf("pipeline dependency validation failed: %w", err)
 	}
 
-	// 6. Initialize MFA dependencies & Response Generator
-	mfaStorage, err := mfa.NewSQLiteStorage(cfg.Database.Path)
-	if err != nil {
-		return nil, nil, fmt.Errorf("mfa storage initialization failed: %w", err)
-	}
-
-	cleanup := func() {
-		if mfaStorage != nil {
-			if closeErr := mfaStorage.Close(); closeErr != nil {
-				appLogger.System().Warn("error closing database storage", zap.Error(closeErr))
-			} else {
-				appLogger.System().Info("database storage closed successfully")
-			}
-		}
-	}
+	// 6. Initialize MFA Service & Response Generator
 
 	smtpSender := mfa.NewSMTPSender(
 		cfg.SMTP.Host,

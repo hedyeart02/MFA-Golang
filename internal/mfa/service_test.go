@@ -280,3 +280,54 @@ func TestLegacyMFADatabaseMigrationAndTOTPPreservation(t *testing.T) {
 		t.Fatalf("expected TOTP verification to succeed for migrated user, got ok=%v, err=%v", ok, err)
 	}
 }
+
+func TestSQLiteStorage_AdminSettingsPersistence(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "settings.db")
+	storage, err := NewSQLiteStorage(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStorage failed: %v", err)
+	}
+	defer storage.Close()
+
+	ctx := context.Background()
+	if _, err := storage.GetAdminSettings(ctx); err != ErrNotFound {
+		t.Fatalf("expected ErrNotFound before saving settings, got %v", err)
+	}
+
+	first := &config.AdminSettingsPayload{
+		EntityID:           "https://samlguard.local:8443",
+		ACSURL:             "https://ita.local/callback",
+		IdPEntityID:        "https://idp.local/realm",
+		IdPSSOURL:          "https://idp.local/sso",
+		MFADefaultProvider: "totp",
+		SMTPHost:           "smtp1.local",
+		SMTPPort:           587,
+		SMTPPassword:       "secret1",
+	}
+	if err := storage.SaveAdminSettings(ctx, first); err != nil {
+		t.Fatalf("SaveAdminSettings failed: %v", err)
+	}
+
+	second := &config.AdminSettingsPayload{
+		EntityID:           "https://samlguard.local:18080",
+		ACSURL:             "https://ita.local/api/current/authentication/saml2-callback",
+		IdPEntityID:        "https://keycloak.local/realms/ita",
+		IdPSSOURL:          "https://keycloak.local/realms/ita/protocol/saml",
+		MFADefaultProvider: "email",
+		SMTPHost:           "smtp2.local",
+		SMTPPort:           2525,
+		SMTPPassword:       "secret2",
+		ITAEnforceWhitelist: true,
+	}
+	if err := storage.SaveAdminSettings(ctx, second); err != nil {
+		t.Fatalf("SaveAdminSettings upsert failed: %v", err)
+	}
+
+	loaded, err := storage.GetAdminSettings(ctx)
+	if err != nil {
+		t.Fatalf("GetAdminSettings failed: %v", err)
+	}
+	if loaded.EntityID != second.EntityID || loaded.SMTPHost != "smtp2.local" || loaded.SMTPPassword != "secret2" || !loaded.ITAEnforceWhitelist {
+		t.Fatalf("unexpected loaded settings: %+v", loaded)
+	}
+}

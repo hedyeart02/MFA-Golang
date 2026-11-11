@@ -32,4 +32,15 @@ fi
 echo "==> Installing Webmin module from $WBM_PATH..."
 perl "$INSTALLER" "$WBM_PATH"
 
+if [[ -d /etc/webmin ]]; then
+    grep -q '^samlguard=' /etc/webmin/webmin.catnames 2>/dev/null || echo 'samlguard=SAMLGuard' >> /etc/webmin/webmin.catnames
+    for mod in samlguard_status samlguard_setup samlguard_certs samlguard_logs samlguard_about; do
+        if grep -q "^${mod}=" /etc/webmin/webmin.cats 2>/dev/null; then
+            sed -i "s/^${mod}=.*/${mod}=samlguard/" /etc/webmin/webmin.cats
+        else
+            echo "${mod}=samlguard" >> /etc/webmin/webmin.cats
+        fi
+    done
+fi
+
 echo "==> Done. Click 'Refresh Modules' in the Webmin sidebar to see the SAMLGuard category."

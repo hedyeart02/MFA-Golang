@@ -118,59 +118,34 @@ func TestAdminSettings_Get(t *testing.T) {
 }
 
 func TestAdminSettings_Post(t *testing.T) {
-	r, h, cfgFile := setupTestAdminHandler(t)
+	r, h, _ := setupTestAdminHandler(t)
 
-	// Override config path for test by mocking SaveConfig target in test
 	form := url.Values{
-		"idp_entity_id":          {"https://sts.windows.net/tenant-xyz/"},
-		"idp_sso_url":            {"https://login.microsoftonline.com/tenant-xyz/saml2"},
-		"idp_metadata_url":       {"https://login.microsoftonline.com/tenant-xyz/federationmetadata.xml"},
-		"entity_id":              {"https://192.168.0.178:18080"},
-		"acs_url":                {"https://192.168.0.119/api/current/authentication/saml2-callback"},
-		"sso_url":                {"https://192.168.0.178:18080/login"},
-		"slo_url":                {"https://192.168.0.178:18080/logout"},
-		"allowed_audiences_str":  {"https://192.168.0.119, https://192.168.0.178:18080"},
-		"group_map_key[]":        {"ita-admins"},
-		"group_map_val[]":        {"Admin"},
-		"mfa_default_provider":   {"email"},
-		"mfa_issuer":             {"EcoStruxure ITA"},
-		"otp_expiry":             {"10m"},
-		"resend_cooldown":        {"45s"},
-		"allow_dummy_otp":        {"true"},
-		"smtp_host":              {"smtp.office365.com"},
-		"smtp_port":              {"587"},
-		"smtp_username":          {"notifications@company.com"},
-		"smtp_password":          {""}, // Keep old password
-		"smtp_from":              {"notifications@company.com"},
-		"smtp_from_name":         {"ITA Security Gateway"},
-		"smtp_encryption":        {"starttls"},
+		"idp_entity_id":         {"https://sts.windows.net/tenant-xyz/"},
+		"idp_sso_url":           {"https://login.microsoftonline.com/tenant-xyz/saml2"},
+		"idp_metadata_url":      {"https://login.microsoftonline.com/tenant-xyz/federationmetadata.xml"},
+		"entity_id":             {"https://192.168.0.178:18080"},
+		"acs_url":               {"https://192.168.0.119/api/current/authentication/saml2-callback"},
+		"sso_url":               {"https://192.168.0.178:18080/login"},
+		"slo_url":               {"https://192.168.0.178:18080/logout"},
+		"allowed_audiences_str": {"https://192.168.0.119, https://192.168.0.178:18080"},
+		"group_map_key[]":       {"ita-admins"},
+		"group_map_val[]":       {"Admin"},
+		"mfa_default_provider":  {"email"},
+		"mfa_issuer":            {"EcoStruxure ITA"},
+		"otp_expiry":            {"10m"},
+		"resend_cooldown":       {"45s"},
+		"allow_dummy_otp":       {"true"},
+		"smtp_host":             {"smtp.office365.com"},
+		"smtp_port":             {"587"},
+		"smtp_username":         {"notifications@company.com"},
+		"smtp_password":         {""}, // Keep old password
+		"smtp_from":             {"notifications@company.com"},
+		"smtp_from_name":        {"ITA Security Gateway"},
+		"smtp_encryption":       {"starttls"},
 	}
 
-	// We test SaveConfig with test cfgFile directly first
-	payload := &config.AdminSettingsPayload{
-		IdPEntityID:        form.Get("idp_entity_id"),
-		IdPSSOURL:          form.Get("idp_sso_url"),
-		ACSURL:             form.Get("acs_url"),
-		EntityID:           form.Get("entity_id"),
-		MFADefaultProvider: form.Get("mfa_default_provider"),
-		SMTPHost:           form.Get("smtp_host"),
-		AllowDummyOTP:      true,
-	}
-	if err := config.SaveConfig(cfgFile, h.cfg, payload); err != nil {
-		t.Fatalf("SaveConfig failed: %v", err)
-	}
-
-	if h.cfg.SAML.IdPEntityID != "https://sts.windows.net/tenant-xyz/" {
-		t.Errorf("expected updated IdPEntityID, got %s", h.cfg.SAML.IdPEntityID)
-	}
-	if h.cfg.MFA.DefaultProvider != "email" {
-		t.Errorf("expected updated DefaultProvider, got %s", h.cfg.MFA.DefaultProvider)
-	}
-	if h.cfg.MFA.AllowDummyOTP != true {
-		t.Errorf("expected AllowDummyOTP true")
-	}
-
-	// Test form post request handler
+	// Test form post request handler (note: CWD has no configs/config.yaml in package dir; must save to DB)
 	req := httptest.NewRequest("POST", "/admin/settings", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
@@ -178,6 +153,36 @@ func TestAdminSettings_Post(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK from post handler, got %d: %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "Configuration updated successfully and saved to database.") {
+		t.Errorf("expected DB save confirmation message in response body")
+	}
+
+	// Verify in-memory cfg updated and existing SMTP password preserved
+	if h.cfg.SAML.IdPEntityID != "https://sts.windows.net/tenant-xyz/" {
+		t.Errorf("expected updated IdPEntityID, got %s", h.cfg.SAML.IdPEntityID)
+	}
+	if h.cfg.MFA.DefaultProvider != "email" {
+		t.Errorf("expected updated DefaultProvider, got %s", h.cfg.MFA.DefaultProvider)
+	}
+	if !h.cfg.MFA.AllowDummyOTP {
+		t.Errorf("expected AllowDummyOTP true")
+	}
+	if h.cfg.SMTP.Password != "oldpassword" {
+		t.Errorf("expected existing SMTP password preserved, got %q", h.cfg.SMTP.Password)
+	}
+
+	// Verify persisted in SQLite database
+	saved, err := h.mfaService.Storage().GetAdminSettings(context.Background())
+	if err != nil {
+		t.Fatalf("expected settings saved in DB, got error: %v", err)
+	}
+	if saved.IdPEntityID != "https://sts.windows.net/tenant-xyz/" {
+		t.Errorf("expected persisted IdPEntityID, got %s", saved.IdPEntityID)
+	}
+	if saved.SMTPPassword != "oldpassword" {
+		t.Errorf("expected persisted SMTPPassword 'oldpassword', got %q", saved.SMTPPassword)
 	}
 }
 

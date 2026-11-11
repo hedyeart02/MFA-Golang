@@ -351,7 +351,7 @@ func (h *SAMLHandler) HandleAdminSettingsGet(c *gin.Context) {
 	h.renderAdminSettings(c, vm)
 }
 
-// HandleAdminSettingsPost processes form submissions from the admin panel and persists to YAML.
+// HandleAdminSettingsPost processes form submissions from the admin panel and persists to the database.
 func (cHandler *SAMLHandler) HandleAdminSettingsPost(c *gin.Context) {
 	adminUser, _ := c.Get("admin_username")
 	adminUsername, _ := adminUser.(string)
@@ -426,14 +426,32 @@ func (cHandler *SAMLHandler) HandleAdminSettingsPost(c *gin.Context) {
 	payload.ITAAPIPassword = c.PostForm("ita_api_password") // if empty, SaveConfig preserves current
 	payload.ITAEnforceWhitelist = c.PostForm("ita_enforce_whitelist") == "true"
 
-	// Persist to configs/config.yaml and update runtime in-memory
-	configPath := "configs/config.yaml"
-	if err := config.SaveConfig(configPath, cHandler.cfg, &payload); err != nil {
-		cHandler.logger.Error("failed saving config file", zap.Error(err))
+	// Preserve existing secrets and manual allowlist when omitted from the form submission
+	if payload.SMTPPassword == "" {
+		payload.SMTPPassword = cHandler.cfg.SMTP.Password
+	}
+	if payload.ITAAPIPassword == "" {
+		payload.ITAAPIPassword = cHandler.cfg.ITA.APIPassword
+	}
+	if len(payload.ITAManualAllowedUsers) == 0 && len(cHandler.cfg.ITA.ManualAllowedUsers) > 0 {
+		payload.ITAManualAllowedUsers = append([]string(nil), cHandler.cfg.ITA.ManualAllowedUsers...)
+	}
+
+	if cHandler.mfaService == nil || cHandler.mfaService.Storage() == nil {
+		cHandler.logger.Error("failed saving gateway settings: database storage is unavailable")
+		vm := cHandler.buildAdminViewModel(adminUsername, "", "Failed to save configuration: database storage is unavailable")
+		cHandler.renderAdminSettings(c, vm)
+		return
+	}
+
+	// Persist to SQLite database and update runtime in-memory configuration
+	if err := cHandler.mfaService.Storage().SaveAdminSettings(c.Request.Context(), &payload); err != nil {
+		cHandler.logger.Error("failed saving gateway settings to database", zap.Error(err))
 		vm := cHandler.buildAdminViewModel(adminUsername, "", fmt.Sprintf("Failed to save configuration: %v", err))
 		cHandler.renderAdminSettings(c, vm)
 		return
 	}
+	config.ApplyAdminSettings(cHandler.cfg, &payload)
 
 	// Hot-reload SMTP sender on active MFA service
 	newSMTPSender := mfa.NewSMTPSender(
@@ -448,14 +466,14 @@ func (cHandler *SAMLHandler) HandleAdminSettingsPost(c *gin.Context) {
 	)
 	cHandler.mfaService.UpdateSMTPSender(newSMTPSender)
 
-	cHandler.logger.Info("admin settings successfully updated and saved to config",
-		zap.String("path", configPath),
+	cHandler.logger.Info("admin settings successfully updated and saved to database",
+		zap.String("db_path", cHandler.cfg.Database.Path),
 		zap.String("entity_id", cHandler.cfg.SAML.EntityID),
 		zap.String("acs_url", cHandler.cfg.SAML.ACSURL),
 		zap.Bool("enforce_whitelist", cHandler.cfg.ITA.EnforceUserWhitelist),
 	)
 
-	vm := cHandler.buildAdminViewModel(adminUsername, "Configuration updated successfully and saved to "+configPath, "")
+	vm := cHandler.buildAdminViewModel(adminUsername, "Configuration updated successfully and saved to database.", "")
 	cHandler.renderAdminSettings(c, vm)
 }
 

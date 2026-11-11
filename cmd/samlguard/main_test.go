@@ -5,12 +5,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/hidayat-SE/samlguard/internal/config"
+	"github.com/hidayat-SE/samlguard/internal/mfa"
 	"github.com/hidayat-SE/samlguard/pkg/logger"
 	"github.com/hidayat-SE/samlguard/web"
 	"go.uber.org/zap"
@@ -441,5 +443,44 @@ func TestSetupApp_StaticLogosAndLoginAssets(t *testing.T) {
 		if !strings.Contains(web.DefaultAdminSettingsHTML, ref) {
 			t.Errorf("expected admin_settings.html to reference %s", ref)
 		}
+	}
+}
+
+func TestSetupApp_LoadsPersistedAdminSettingsFromDB(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "samlguard.db")
+	storage, err := mfa.NewSQLiteStorage(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStorage failed: %v", err)
+	}
+	err = storage.SaveAdminSettings(context.Background(), &config.AdminSettingsPayload{
+		EntityID:           "https://persisted.samlguard.local:8443",
+		ACSURL:             "https://persisted.ita.local/callback",
+		SSOURL:             "https://persisted.samlguard.local:8443/saml/sso",
+		IdPEntityID:        "https://persisted.idp.local/realm",
+		IdPSSOURL:          "https://persisted.idp.local/sso",
+		MFADefaultProvider: "email",
+	})
+	_ = storage.Close()
+	if err != nil {
+		t.Fatalf("SaveAdminSettings failed: %v", err)
+	}
+
+	cfg := testConfig(t)
+	cfg.Database.Path = dbPath
+
+	_, cleanup, err := SetupAppWithCleanup(cfg, testLogger())
+	if err != nil {
+		t.Fatalf("SetupAppWithCleanup failed: %v", err)
+	}
+	defer cleanup()
+
+	if cfg.SAML.EntityID != "https://persisted.samlguard.local:8443" {
+		t.Errorf("expected persisted EntityID loaded at startup, got %q", cfg.SAML.EntityID)
+	}
+	if cfg.SAML.IdPSSOURL != "https://persisted.idp.local/sso" {
+		t.Errorf("expected persisted IdPSSOURL loaded at startup, got %q", cfg.SAML.IdPSSOURL)
+	}
+	if cfg.MFA.DefaultProvider != "email" {
+		t.Errorf("expected persisted MFA provider 'email', got %q", cfg.MFA.DefaultProvider)
 	}
 }

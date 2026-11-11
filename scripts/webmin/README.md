@@ -44,3 +44,15 @@ Remember to configure `/etc/samlguard/config.yaml` (e.g., use a free port such a
 sudo bash scripts/webmin/install-webmin-module.sh ./dist/samlguard-webmin.wbm.gz
 ```
 Then click **Refresh Modules** in the Webmin sidebar.
+
+## 4. Upgrading SAMLGuard Later
+
+### Option A — One-Click Upgrade inside Webmin UI
+1. Open **SAMLGuard** -> **Status** in the Webmin sidebar.
+2. Under **Upgrade SAMLGuard Application**, upload `dist/samlguard-vX.Y.Z-linux-amd64.tar.gz` (or `arm64`, or a raw `samlguard` binary) and click **Upload & Upgrade SAMLGuard**.
+   - Webmin automatically verifies the new binary (`-version`), backs up `/usr/local/bin/samlguard` and `samlguard.db`, swaps the binary, reapplies `cap_net_bind_service`, restarts `samlguard.service`, and rolls back if startup fails.
+
+### Option B — One-Command CLI Upgrade via SSH
+```bash
+sudo bash scripts/linux/upgrade.sh ./dist/samlguard-v1.0.1-linux-amd64.tar.gz --wbm ./dist/samlguard-webmin.wbm.gz
+```

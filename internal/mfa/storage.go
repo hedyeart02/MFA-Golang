@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hidayat-SE/samlguard/internal/config"
 	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
 )
@@ -94,6 +96,10 @@ type Storage interface {
 	GetAdminUser(ctx context.Context, username string) (*AdminUser, error)
 	AuthenticateAdmin(ctx context.Context, username, password string) (*AdminUser, error)
 	UpdateAdminPassword(ctx context.Context, username, newPassword string) error
+
+	// Admin Gateway Settings persistence
+	SaveAdminSettings(ctx context.Context, settings *config.AdminSettingsPayload) error
+	GetAdminSettings(ctx context.Context) (*config.AdminSettingsPayload, error)
 }
 
 type SQLiteStorage struct {
@@ -256,6 +262,12 @@ func (s *SQLiteStorage) Init(ctx context.Context) error {
 		updated_at DATETIME NOT NULL
 	);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_users_username ON admin_users(username);
+
+	CREATE TABLE IF NOT EXISTS gateway_settings (
+		id INTEGER PRIMARY KEY CHECK (id = 1),
+		settings_json TEXT NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
 	`
 
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
@@ -793,4 +805,50 @@ func (s *SQLiteStorage) UpdateAdminPassword(ctx context.Context, username, newPa
 		return errors.New("administrator user not found")
 	}
 	return nil
+}
+
+// SaveAdminSettings persists the Admin Console gateway settings as JSON in SQLite.
+func (s *SQLiteStorage) SaveAdminSettings(ctx context.Context, settings *config.AdminSettingsPayload) error {
+	if settings == nil {
+		return errors.New("settings payload cannot be nil")
+	}
+
+	raw, err := json.Marshal(settings)
+	if err != nil {
+		return fmt.Errorf("marshaling gateway settings: %w", err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UTC()
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO gateway_settings (id, settings_json, updated_at)
+		VALUES (1, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			settings_json = excluded.settings_json,
+			updated_at = excluded.updated_at
+	`, string(raw), now)
+	if err != nil {
+		return fmt.Errorf("saving gateway settings: %w", err)
+	}
+	return nil
+}
+
+// GetAdminSettings loads persisted Admin Console gateway settings from SQLite.
+func (s *SQLiteStorage) GetAdminSettings(ctx context.Context) (*config.AdminSettingsPayload, error) {
+	var raw string
+	err := s.db.QueryRowContext(ctx, `SELECT settings_json FROM gateway_settings WHERE id = 1`).Scan(&raw)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("querying gateway settings: %w", err)
+	}
+
+	var settings config.AdminSettingsPayload
+	if err := json.Unmarshal([]byte(raw), &settings); err != nil {
+		return nil, fmt.Errorf("unmarshaling gateway settings: %w", err)
+	}
+	return &settings, nil
 }

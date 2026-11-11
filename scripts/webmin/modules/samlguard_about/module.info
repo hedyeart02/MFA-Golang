@@ -2,5 +2,5 @@ name=SAMLGuard About
 desc=About
 category=samlguard
 depends=samlguard_status
-version=1.0.0
+version=1.0.1
 longdesc=About SAMLGuard SAML 2.0 MFA Gateway, endpoints, and installation paths.
