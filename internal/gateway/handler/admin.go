@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -340,6 +341,11 @@ func (h *SAMLHandler) HandleAdminLoginGet(c *gin.Context) {
 	h.renderAdminLogin(c, "", "")
 }
 
+// HasValidAdminSession reports whether the request carries a valid signed admin session cookie.
+func (h *SAMLHandler) HasValidAdminSession(c *gin.Context) bool {
+	return h.getAdminSession(c) != nil
+}
+
 // HandleAdminLoginPost authenticates administrator credentials.
 func (h *SAMLHandler) HandleAdminLoginPost(c *gin.Context) {
 	username := strings.TrimSpace(c.PostForm("username"))
@@ -357,6 +363,10 @@ func (h *SAMLHandler) HandleAdminLoginPost(c *gin.Context) {
 
 	adminUser, err := h.mfaService.Storage().AuthenticateAdmin(c.Request.Context(), username, password)
 	if err != nil {
+		h.recordAudit("admin_login", "failure",
+			zap.String("username", username),
+			zap.String("remote_ip", c.ClientIP()),
+		)
 		h.logger.Warn("admin login attempt failed", zap.String("username", username), zap.Error(err))
 		h.renderAdminLogin(c, username, err.Error())
 		return
@@ -369,6 +379,10 @@ func (h *SAMLHandler) HandleAdminLoginPost(c *gin.Context) {
 		return
 	}
 	h.setAdminSessionCookie(c, token)
+	h.recordAudit("admin_login", "success",
+		zap.String("username", adminUser.Username),
+		zap.String("remote_ip", c.ClientIP()),
+	)
 
 	h.logger.Info("admin signed in successfully",
 		zap.String("username", adminUser.Username),
@@ -437,6 +451,10 @@ func (h *SAMLHandler) HandleAdminChangePasswordPost(c *gin.Context) {
 	newToken := h.createAdminSessionToken(session.Username, false)
 	h.setAdminSessionCookie(c, newToken)
 
+	h.recordAudit("admin_password_change", "success",
+		zap.String("username", session.Username),
+		zap.String("remote_ip", c.ClientIP()),
+	)
 	h.logger.Info("administrator updated password successfully", zap.String("username", session.Username))
 	c.Redirect(http.StatusSeeOther, "/admin/settings?msg=Administrator+password+successfully+updated!")
 }
@@ -589,6 +607,11 @@ func (cHandler *SAMLHandler) HandleAdminSettingsPost(c *gin.Context) {
 	)
 	cHandler.mfaService.UpdateSMTPSender(newSMTPSender)
 
+	cHandler.recordAudit("admin_settings_update", "success",
+		zap.String("admin", adminUsername),
+		zap.Bool("enforce_whitelist", cHandler.cfg.ITA.EnforceUserWhitelist),
+		zap.String("remote_ip", c.ClientIP()),
+	)
 	cHandler.logger.Info("admin settings successfully updated and saved to database",
 		zap.String("db_path", cHandler.cfg.Database.Path),
 		zap.String("entity_id", cHandler.cfg.SAML.EntityID),
@@ -609,10 +632,26 @@ func (h *SAMLHandler) HandleAdminITASyncPost(c *gin.Context) {
 	}
 	_ = c.ShouldBindJSON(&req)
 
-	apiURL := req.APIURL
+	apiURL := strings.TrimSpace(req.APIURL)
 	if apiURL == "" {
-		apiURL = h.cfg.ITA.APIURL
+		apiURL = strings.TrimSpace(h.cfg.ITA.APIURL)
 	}
+	parsedAPIURL, parseErr := url.Parse(apiURL)
+	if parseErr != nil || parsedAPIURL.Host == "" || (!strings.EqualFold(parsedAPIURL.Scheme, "http") && !strings.EqualFold(parsedAPIURL.Scheme, "https")) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "ITA API URL must be a valid http:// or https:// URL.",
+		})
+		return
+	}
+	if h.cfg != nil && h.cfg.IsProduction() && !strings.EqualFold(parsedAPIURL.Scheme, "https") {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "ITA API URL must use https:// in production mode.",
+		})
+		return
+	}
+
 	username := req.APIUsername
 	if username == "" {
 		username = h.cfg.ITA.APIUsername
@@ -622,10 +661,37 @@ func (h *SAMLHandler) HandleAdminITASyncPost(c *gin.Context) {
 		password = h.cfg.ITA.APIPassword
 	}
 
-	itaClient := ita.NewClient(15 * time.Second)
+	adminUser, _ := c.Get("admin_username")
+	adminUsername, _ := adminUser.(string)
+
+	itaClient, clientErr := ita.NewClientWithOptions(ita.ClientOptions{
+		Timeout:            15 * time.Second,
+		CAFile:             h.cfg.ITA.TLSCAFile,
+		InsecureSkipVerify: h.cfg.ITA.TLSInsecureSkipVerify && (h.cfg == nil || !h.cfg.IsProduction()),
+	})
+	if clientErr != nil {
+		h.recordAudit("admin_ita_sync", "failure",
+			zap.String("admin", adminUsername),
+			zap.String("api_url", parsedAPIURL.Redacted()),
+			zap.String("remote_ip", c.ClientIP()),
+			zap.Error(clientErr),
+		)
+		h.logger.Warn("ITA client initialization failed", zap.Error(clientErr))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to initialize ITA client TLS configuration.",
+		})
+		return
+	}
 	users, err := itaClient.FetchUsers(c.Request.Context(), apiURL, username, password)
 	if err != nil {
-		h.logger.Warn("ITA user sync failed", zap.Error(err), zap.String("api_url", apiURL))
+		h.recordAudit("admin_ita_sync", "failure",
+			zap.String("admin", adminUsername),
+			zap.String("api_url", parsedAPIURL.Redacted()),
+			zap.String("remote_ip", c.ClientIP()),
+			zap.Error(err),
+		)
+		h.logger.Warn("ITA user sync failed", zap.Error(err), zap.String("api_url", parsedAPIURL.Redacted()))
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"error":   err.Error(),
@@ -644,9 +710,15 @@ func (h *SAMLHandler) HandleAdminITASyncPost(c *gin.Context) {
 		}
 	}
 
+	h.recordAudit("admin_ita_sync", "success",
+		zap.String("admin", adminUsername),
+		zap.Int("user_count", len(users)),
+		zap.String("api_url", parsedAPIURL.Redacted()),
+		zap.String("remote_ip", c.ClientIP()),
+	)
 	h.logger.Info("successfully synced users from Schneider ITA",
 		zap.Int("user_count", len(users)),
-		zap.String("api_url", apiURL),
+		zap.String("api_url", parsedAPIURL.Redacted()),
 	)
 
 	c.JSON(http.StatusOK, gin.H{
@@ -683,6 +755,14 @@ func (h *SAMLHandler) HandleAdminUserAddPost(c *gin.Context) {
 		}
 	}
 
+	adminUser, _ := c.Get("admin_username")
+	adminUsername, _ := adminUser.(string)
+	h.recordAudit("admin_user_add", "success",
+		zap.String("admin", adminUsername),
+		zap.String("target_user", user.Username),
+		zap.String("remote_ip", c.ClientIP()),
+	)
+
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": fmt.Sprintf("User '%s' was successfully added.", user.Username)})
 }
 
@@ -702,6 +782,14 @@ func (h *SAMLHandler) HandleAdminUserDeletePost(c *gin.Context) {
 			return
 		}
 	}
+
+	adminUser, _ := c.Get("admin_username")
+	adminUsername, _ := adminUser.(string)
+	h.recordAudit("admin_user_delete", "success",
+		zap.String("admin", adminUsername),
+		zap.String("target_user", strings.TrimSpace(req.Username)),
+		zap.String("remote_ip", c.ClientIP()),
+	)
 
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": fmt.Sprintf("User '%s' has been removed.", req.Username)})
 }
@@ -729,6 +817,12 @@ func (h *SAMLHandler) HandleAdminUserResetMFAPost(c *gin.Context) {
 
 	adminUser, _ := c.Get("admin_username")
 	adminUsername, _ := adminUser.(string)
+	h.recordAudit("admin_user_reset_mfa", "success",
+		zap.String("admin", adminUsername),
+		zap.String("target_user", strings.TrimSpace(req.Username)),
+		zap.Int64("records_removed", deleted),
+		zap.String("remote_ip", c.ClientIP()),
+	)
 	h.logger.Info("administrator reset user MFA enrollment",
 		zap.String("admin", adminUsername),
 		zap.String("target_user", strings.TrimSpace(req.Username)),
@@ -805,17 +899,26 @@ func (h *SAMLHandler) HandleAdminTestEmailPost(c *gin.Context) {
 
 // HandleAdminCertDownload allows downloading public certificates directly from the UI.
 func (h *SAMLHandler) HandleAdminCertDownload(c *gin.Context) {
-	certType := c.Query("type")
-	filePath := h.cfg.SAML.CertFile
-	filename := "saml-signing.crt"
-
-	if certType == "server" {
+	certType := strings.TrimSpace(c.Query("type"))
+	var filePath, filename string
+	switch certType {
+	case "", "signing":
+		filePath = h.cfg.SAML.CertFile
+		filename = "saml-signing.crt"
+	case "server":
 		filePath = h.cfg.TLS.CertFile
 		filename = "server.crt"
+	default:
+		c.String(http.StatusBadRequest, "Invalid certificate type requested.")
+		return
 	}
 
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		c.String(http.StatusNotFound, "Certificate file not found: %s", filePath)
+	if strings.TrimSpace(filePath) == "" {
+		c.String(http.StatusNotFound, "Requested certificate file is not configured or unavailable.")
+		return
+	}
+	if info, err := os.Stat(filePath); err != nil || info.IsDir() {
+		c.String(http.StatusNotFound, "Requested certificate file is not configured or unavailable.")
 		return
 	}
 

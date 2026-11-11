@@ -383,3 +383,20 @@ func TestSQLiteStorage_AdminSettingsEncryptedAtRest(t *testing.T) {
 		t.Fatalf("expected decrypted passwords on GetAdminSettings, got smtp=%q ita=%q", loaded.SMTPPassword, loaded.ITAAPIPassword)
 	}
 }
+
+func TestSMTPSender_RejectsHeaderInjection(t *testing.T) {
+	sender := NewSMTPSender("smtp.example.com", 587, "user", "pass", "noreply@samlguard.local", "SAMLGuard", "starttls", zap.NewNop())
+
+	if err := sender.Send(context.Background(), "victim@example.com\r\nBcc: evil@attacker.example", "123456"); err == nil || !strings.Contains(err.Error(), "invalid characters in SMTP") {
+		t.Fatalf("expected CRLF header injection in recipient to fail, got: %v", err)
+	}
+
+	injectedFrom := NewSMTPSender("smtp.example.com", 587, "u", "p", "noreply@samlguard.local\nX-Injected: bad", "Name", "starttls", zap.NewNop())
+	if err := injectedFrom.SendTestEmail(context.Background(), "admin@example.com"); err == nil || !strings.Contains(err.Error(), "invalid characters in SMTP") {
+		t.Fatalf("expected newline header injection in From address to fail, got: %v", err)
+	}
+
+	if err := validateSMTPHeaderValue("Subject", "Test\x00NullByte"); err == nil {
+		t.Fatal("expected NUL byte in SMTP header to be rejected")
+	}
+}

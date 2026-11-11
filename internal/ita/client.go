@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -11,25 +12,64 @@ import (
 	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/hidayat-SE/samlguard/internal/mfa"
 )
 
+const maxITAResponseBytes = 10 * 1024 * 1024 // 10 MB safety limit
+
+// ClientOptions configures TLS verification and timeout behavior for the ITA REST API client.
+type ClientOptions struct {
+	Timeout            time.Duration
+	CAFile             string
+	InsecureSkipVerify bool
+}
+
 // Client interacts with Schneider Electric EcoStruxure IT Advisor (ITA) REST API.
 type Client struct {
 	httpClient *http.Client
 }
 
-// NewClient creates a new ITA API client configured with TLS skip verify for on-prem appliance certificates.
+// NewClient creates a hardened ITA API client with TLS 1.2+ certificate verification enabled by default.
 func NewClient(timeout time.Duration) *Client {
+	client, _ := NewClientWithOptions(ClientOptions{Timeout: timeout})
+	return client
+}
+
+// NewClientWithOptions creates an ITA API client configured with explicit timeout and optional pinned CA file.
+func NewClientWithOptions(opts ClientOptions) (*Client, error) {
+	timeout := opts.Timeout
 	if timeout <= 0 {
 		timeout = 15 * time.Second
 	}
+
+	tlsCfg := &tls.Config{
+		MinVersion:         tls.VersionTLS12,
+		InsecureSkipVerify: opts.InsecureSkipVerify,
+	}
+
+	if caPath := strings.TrimSpace(opts.CAFile); caPath != "" {
+		pemBytes, err := os.ReadFile(caPath)
+		if err != nil {
+			return nil, fmt.Errorf("reading ITA CA certificate %q: %w", caPath, err)
+		}
+		pool, poolErr := x509.SystemCertPool()
+		if poolErr != nil || pool == nil {
+			pool = x509.NewCertPool()
+		}
+		if !pool.AppendCertsFromPEM(pemBytes) {
+			return nil, fmt.Errorf("parsing ITA CA certificate PEM %q failed", caPath)
+		}
+		tlsCfg.RootCAs = pool
+	}
+
 	jar, _ := cookiejar.New(nil)
 	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // Self-signed cert support on Hyper-V
+		TLSClientConfig: tlsCfg,
 	}
 	return &Client{
 		httpClient: &http.Client{
@@ -37,7 +77,7 @@ func NewClient(timeout time.Duration) *Client {
 			Jar:       jar,
 			Timeout:   timeout,
 		},
-	}
+	}, nil
 }
 
 // FetchUsers connects to ITA REST API, authenticates, and retrieves the current list of authorized users.
@@ -45,6 +85,14 @@ func (c *Client) FetchUsers(ctx context.Context, apiURL, username, password stri
 	cleanURL := strings.TrimRight(strings.TrimSpace(apiURL), "/")
 	if cleanURL == "" {
 		return nil, errors.New("ITA API URL is required")
+	}
+	parsedURL, parseErr := url.Parse(cleanURL)
+	if parseErr != nil || parsedURL.Host == "" {
+		return nil, errors.New("ITA API URL must be a valid URL with scheme and host")
+	}
+	scheme := strings.ToLower(parsedURL.Scheme)
+	if scheme != "https" && scheme != "http" {
+		return nil, fmt.Errorf("unsupported ITA API URL scheme %q (expected http or https)", parsedURL.Scheme)
 	}
 	if username == "" {
 		return nil, errors.New("ITA API username is required")
@@ -102,9 +150,12 @@ func (c *Client) getUsersDirect(ctx context.Context, endpoint, username, passwor
 		return nil, fmt.Errorf("HTTP %d received from %s", resp.StatusCode, endpoint)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxITAResponseBytes+1))
 	if err != nil {
 		return nil, err
+	}
+	if len(body) > maxITAResponseBytes {
+		return nil, fmt.Errorf("ITA API response exceeds maximum allowed size (%d bytes)", maxITAResponseBytes)
 	}
 
 	return ParseITAUsersJSON(body)

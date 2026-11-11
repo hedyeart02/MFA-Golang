@@ -102,7 +102,25 @@ func (s *SMTPSender) SendTestEmail(ctx context.Context, recipient string) error 
 	return s.sendMail(ctx, recipient, subject, body)
 }
 
+func validateSMTPHeaderValue(field, val string) error {
+	if strings.ContainsAny(val, "\r\n\x00") {
+		return fmt.Errorf("invalid characters in SMTP %s header", field)
+	}
+	return nil
+}
+
 func (s *SMTPSender) sendMail(ctx context.Context, recipient, subject, body string) error {
+	for field, val := range map[string]string{
+		"from_name": s.fromName,
+		"from":      s.from,
+		"to":        recipient,
+		"subject":   subject,
+	} {
+		if err := validateSMTPHeaderValue(field, val); err != nil {
+			return err
+		}
+	}
+
 	msg := fmt.Sprintf("From: %s <%s>\r\n"+
 		"To: %s\r\n"+
 		"Subject: %s\r\n"+
@@ -123,12 +141,14 @@ func (s *SMTPSender) sendMail(ctx context.Context, recipient, subject, body stri
 	if s.encryption == "tls" {
 		tlsConfig := &tls.Config{
 			ServerName: s.host,
+			MinVersion: tls.VersionTLS12,
 		}
 		conn, err := tls.Dial("tcp", addr, tlsConfig)
 		if err != nil {
 			return fmt.Errorf("tls dial smtp server: %w", err)
 		}
 		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(20 * time.Second))
 
 		client, err := smtp.NewClient(conn, s.host)
 		if err != nil {
@@ -168,6 +188,7 @@ func (s *SMTPSender) sendMail(ctx context.Context, recipient, subject, body stri
 		return fmt.Errorf("dialing smtp server: %w", err)
 	}
 	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(20 * time.Second))
 
 	client, err := smtp.NewClient(conn, s.host)
 	if err != nil {
@@ -179,6 +200,7 @@ func (s *SMTPSender) sendMail(ctx context.Context, recipient, subject, body stri
 		if ok, _ := client.Extension("STARTTLS"); ok {
 			tlsConfig := &tls.Config{
 				ServerName: s.host,
+				MinVersion: tls.VersionTLS12,
 			}
 			if err := client.StartTLS(tlsConfig); err != nil {
 				return fmt.Errorf("smtp starttls: %w", err)

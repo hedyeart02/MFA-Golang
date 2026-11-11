@@ -468,3 +468,36 @@ func TestConfig_TrustedProxiesAndCSPFormAction(t *testing.T) {
 	}
 }
 
+func TestConfig_Phase3_ITATLSAndMetricsRedaction(t *testing.T) {
+	cfg := validProdConfig()
+	cfg.ITA.TLSInsecureSkipVerify = true
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "tls_insecure_skip_verify") {
+		t.Fatalf("expected error for ita.tls_insecure_skip_verify in production, got: %v", err)
+	}
+
+	cfg = validProdConfig()
+	cfg.ITA.TLSCAFile = filepath.Join(t.TempDir(), "missing-ca.pem")
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "ita.tls_ca_file") {
+		t.Fatalf("expected error for missing ita.tls_ca_file, got: %v", err)
+	}
+
+	caPath := filepath.Join(t.TempDir(), "ita-ca.pem")
+	if err := os.WriteFile(caPath, []byte("dummy-ca"), 0o600); err != nil {
+		t.Fatalf("write dummy CA file: %v", err)
+	}
+	cfg.ITA.TLSCAFile = caPath
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected valid ita.tls_ca_file to pass, got: %v", err)
+	}
+
+	cfg.ITA.APIPassword = "ita-secret-password"
+	cfg.Metrics.BearerToken = "metrics-secret-token"
+	redacted := cfg.Redacted()
+	if redacted.ITA.APIPassword == "ita-secret-password" || redacted.Metrics.BearerToken == "metrics-secret-token" {
+		t.Fatalf("expected ITA.APIPassword and Metrics.BearerToken to be masked in Redacted()")
+	}
+	if cfg.ITA.APIPassword != "ita-secret-password" || cfg.Metrics.BearerToken != "metrics-secret-token" {
+		t.Fatalf("expected Redacted() not to mutate original Config")
+	}
+}
+

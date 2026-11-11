@@ -51,6 +51,8 @@ saml:
   allowed_audiences:
     - "https://ita.example.com"
     - "https://samlguard.example.com"
+  downstream_acs_urls:
+    - "https://ita.example.com/api/current/authentication/saml2-callback"
 
   # AuthnContextClassRef: leave empty for dynamic per-method selection
   # (TimeSyncToken for TOTP, unspecified for Email OTP)
@@ -90,6 +92,25 @@ smtp:
   from_name: "SAMLGuard MFA Security"
   encryption: "starttls"
 
+security:
+  # Dedicated high-entropy HMAC secret for Admin Console sessions and CSRF tokens
+  csrf_secret: "CHANGE_ME_GENERATE_HIGH_ENTROPY_ADMIN_CSRF_SECRET"
+  # Global API/gateway requests per minute per client IP
+  rate_limit: 100
+  # Strict auth endpoint requests per minute per IP (/admin/login, /mfa/verify, /saml/acs)
+  auth_rate_limit: 20
+  # Explicit reverse proxy IPs or CIDRs allowed to supply X-Forwarded-For / X-Forwarded-Proto
+  trusted_proxies: []
+
+ita:
+  api_url: "https://ita.example.com/api/current"
+  api_username: "apc"
+  api_password: "YOUR_ITA_API_PASSWORD"
+  # Pin internal CA certificate PEM for self-signed / private PKI ITA servers
+  tls_ca_file: ""
+  tls_insecure_skip_verify: false
+  enforce_user_whitelist: true
+
 logging:
   level: "info"
   format: "json"
@@ -98,4 +119,7 @@ logging:
 metrics:
   enabled: true
   path: "/metrics"
+  # In production /metrics requires Admin Console session or Authorization: Bearer <bearer_token>
+  require_auth: true
+  bearer_token: ""
 

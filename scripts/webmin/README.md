@@ -54,5 +54,5 @@ Then click **Refresh Modules** in the Webmin sidebar.
 
 ### Option B — One-Command CLI Upgrade via SSH
 ```bash
-sudo bash scripts/linux/upgrade.sh ./dist/samlguard-v1.0.2-linux-amd64.tar.gz --wbm ./dist/samlguard-webmin.wbm.gz
+sudo bash scripts/linux/upgrade.sh ./dist/samlguard-v1.0.3-linux-amd64.tar.gz --wbm ./dist/samlguard-webmin.wbm.gz
 ```

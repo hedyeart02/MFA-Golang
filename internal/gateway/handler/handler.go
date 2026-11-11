@@ -27,6 +27,7 @@ import (
 	"github.com/hidayat-SE/samlguard/internal/gateway"
 	"github.com/hidayat-SE/samlguard/internal/gateway/pipeline"
 	"github.com/hidayat-SE/samlguard/internal/mfa"
+	"github.com/hidayat-SE/samlguard/pkg/metrics"
 	"github.com/hidayat-SE/samlguard/pkg/replay"
 	"github.com/hidayat-SE/samlguard/pkg/response"
 	"github.com/hidayat-SE/samlguard/web"
@@ -43,6 +44,7 @@ type SAMLHandler struct {
 	templates            *template.Template
 	corporateLoginTmpl   *template.Template
 	logger               *zap.Logger
+	auditLogger          *zap.Logger
 	adminSecretMu        sync.Mutex
 	ephemeralAdminSecret []byte
 	assertionReplayMu    sync.Mutex
@@ -116,6 +118,7 @@ func NewSAMLHandler(
 	if certPath != "" {
 		certData, err := os.ReadFile(certPath)
 		if err == nil {
+			now := time.Now().UTC()
 			var roots []*x509.Certificate
 			rest := certData
 			for len(rest) > 0 {
@@ -126,6 +129,22 @@ func NewSAMLHandler(
 				}
 				if block.Type == "CERTIFICATE" {
 					if parsedCert, err := x509.ParseCertificate(block.Bytes); err == nil {
+						if now.Before(parsedCert.NotBefore) || now.After(parsedCert.NotAfter) {
+							if log != nil {
+								log.Warn("skipping expired or not-yet-valid IdP signing certificate",
+									zap.String("subject", parsedCert.Subject.String()),
+									zap.Time("not_before", parsedCert.NotBefore),
+									zap.Time("not_after", parsedCert.NotAfter),
+								)
+							}
+							continue
+						}
+						if parsedCert.NotAfter.Sub(now) < 30*24*time.Hour && log != nil {
+							log.Warn("IdP signing certificate is expiring within 30 days",
+								zap.String("subject", parsedCert.Subject.String()),
+								zap.Time("not_after", parsedCert.NotAfter),
+							)
+						}
 						roots = append(roots, parsedCert)
 					}
 				}
@@ -157,6 +176,34 @@ func NewSAMLHandler(
 		ephemeralAdminSecret: ephemeralSecret,
 		assertionReplay:      replay.NewMemoryReplayDetector(),
 	}, nil
+}
+
+// SetAuditLogger configures the dedicated security audit logger on the handler.
+func (h *SAMLHandler) SetAuditLogger(l *zap.Logger) {
+	h.auditLogger = l
+}
+
+func (h *SAMLHandler) recordAudit(event, outcome string, fields ...zap.Field) {
+	metrics.AuditEventsLogged.Inc()
+	allFields := make([]zap.Field, 0, len(fields)+2)
+	allFields = append(allFields,
+		zap.String("audit_event", event),
+		zap.String("outcome", outcome),
+	)
+	allFields = append(allFields, fields...)
+
+	target := h.auditLogger
+	if target == nil {
+		target = h.logger
+	}
+	if target == nil {
+		return
+	}
+	if outcome == "failure" || outcome == "denied" {
+		target.Warn("security audit event", allFields...)
+		return
+	}
+	target.Info("security audit event", allFields...)
 }
 
 func (h *SAMLHandler) getAssertionReplay() *replay.MemoryReplayDetector {
@@ -659,12 +706,23 @@ func (h *SAMLHandler) HandleACS(c *gin.Context) {
 
 	claims, err := h.validateUpstreamSAMLResponse(samlRespB64, state.OutboundRequestID)
 	if err != nil {
+		metrics.SAMLErrors.WithLabelValues("upstream_validation").Inc()
+		metrics.AuthFailure.Inc()
+		h.recordAudit("saml_assertion_validated", "failure",
+			zap.String("remote_ip", c.ClientIP()),
+			zap.Error(err),
+		)
 		if h.logger != nil {
 			h.logger.Warn("upstream SAML validation failed", zap.Error(err))
 		}
 		response.Error(c, http.StatusUnauthorized, fmt.Errorf("upstream SAML assertion rejected: %w", err))
 		return
 	}
+	metrics.SAMLAssertionsProcessed.Inc()
+	h.recordAudit("saml_assertion_validated", "success",
+		zap.String("subject", claims.SubjectNameID),
+		zap.String("remote_ip", c.ClientIP()),
+	)
 
 	upstreamEntityID := strings.TrimSpace(h.cfg.SAML.IdPEntityID)
 	if upstreamEntityID == "" {
@@ -684,6 +742,11 @@ func (h *SAMLHandler) HandleACS(c *gin.Context) {
 			authorized, _ = h.mfaService.IsUserAuthorized(c.Request.Context(), claims.Email)
 		}
 		if !authorized {
+			metrics.AuthFailure.Inc()
+			h.recordAudit("ita_whitelist_check", "denied",
+				zap.String("subject", claims.SubjectNameID),
+				zap.String("remote_ip", c.ClientIP()),
+			)
 			h.logger.Warn("inbound assertion user rejected by ITA whitelist policy",
 				zap.String("subject", claims.SubjectNameID),
 				zap.String("email", claims.Email),
@@ -788,6 +851,13 @@ func (h *SAMLHandler) HandleMFAVerify(c *gin.Context) {
 
 	// If MFA verification fails: NEVER emit a SAML response!
 	if err != nil || !verified {
+		metrics.MFAFailure.WithLabelValues(method).Inc()
+		metrics.AuthFailure.Inc()
+		h.recordAudit("mfa_verify", "failure",
+			zap.String("subject", state.SubjectNameID),
+			zap.String("method", method),
+			zap.String("remote_ip", c.ClientIP()),
+		)
 		if h.logger != nil {
 			h.logger.Warn("MFA verification failed",
 				zap.String("user_key", state.UserIdentityKey),
@@ -806,6 +876,8 @@ func (h *SAMLHandler) HandleMFAVerify(c *gin.Context) {
 	// MFA Succeeded: Atomically consume correlation session (enforce single-use)
 	consumedState, err := h.correlationStore.Consume(sessionID)
 	if err != nil {
+		metrics.MFAFailure.WithLabelValues(method).Inc()
+		metrics.AuthFailure.Inc()
 		response.Error(c, http.StatusConflict, errors.New("authentication state already consumed or expired"))
 		return
 	}
@@ -838,12 +910,23 @@ func (h *SAMLHandler) HandleMFAVerify(c *gin.Context) {
 
 	result, err := h.responseGen.GenerateResponse(samlReq)
 	if err != nil {
+		metrics.SAMLErrors.WithLabelValues("response_generation").Inc()
+		metrics.AuthFailure.Inc()
 		if h.logger != nil {
 			h.logger.Error("failed to generate signed SAML response", zap.Error(err))
 		}
 		response.Error(c, http.StatusInternalServerError, errors.New("failed to generate SAML response for ITA"))
 		return
 	}
+
+	metrics.MFASuccess.WithLabelValues(method).Inc()
+	metrics.AuthSuccess.Inc()
+	h.recordAudit("mfa_verify", "success",
+		zap.String("subject", consumedState.SubjectNameID),
+		zap.String("method", method),
+		zap.String("destination", consumedState.ITAACSURL),
+		zap.String("remote_ip", c.ClientIP()),
+	)
 
 	// Deliver auto-submitting POST form to ITA ACS
 	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(result.PostFormHTML))
@@ -923,6 +1006,12 @@ func (h *SAMLHandler) HandleMFAReEnroll(c *gin.Context) {
 		}
 
 		if verifyErr != nil || !ok {
+			metrics.MFAFailure.WithLabelValues(verifyMethod).Inc()
+			h.recordAudit("totp_reenroll", "denied",
+				zap.String("subject", state.SubjectNameID),
+				zap.String("verify_method", verifyMethod),
+				zap.String("remote_ip", c.ClientIP()),
+			)
 			if h.logger != nil {
 				h.logger.Warn("blocked TOTP re-enrollment attempt with invalid current code",
 					zap.String("user_key", state.UserIdentityKey),

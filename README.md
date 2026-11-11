@@ -1,6 +1,6 @@
 # SAMLGuard
 
-**Enterprise Pure-Go SAML 2.0 MFA Proxy Gateway (`v1.0.2`)**
+**Enterprise Pure-Go SAML 2.0 MFA Proxy Gateway (`v1.0.3`)**
 
 SAMLGuard is a standalone, cross-platform SAML 2.0 Identity Provider Proxy (Proxy IdP) written in Go (`CGO_ENABLED=0`). It sits between Service Providers — such as **Schneider Electric EcoStruxure™ IT Advisor** — and upstream Enterprise Identity Providers (Microsoft Entra ID, Okta, Keycloak, ADFS), enforcing Multi-Factor Authentication (TOTP or Email OTP) and user authorization before issuing a signed SAML 2.0 assertion downstream.
 
@@ -18,9 +18,9 @@ SAMLGuard is a standalone, cross-platform SAML 2.0 Identity Provider Proxy (Prox
 
 | Platform | Architecture | Binary / Package | Service Manager |
 |----------|--------------|------------------|-----------------|
-| Windows | `amd64` (x86_64) | `samlguard.exe` / `samlguard-v1.0.2-windows-amd64.zip` | Windows Service (`SAMLGuard` via SCM) |
-| Linux | `amd64` (x86_64) | `samlguard` / `samlguard-v1.0.2-linux-amd64.tar.gz` | `systemd` (`samlguard.service`) + Webmin |
-| Linux | `arm64` (aarch64) | `samlguard` / `samlguard-v1.0.2-linux-arm64.tar.gz` | `systemd` (`samlguard.service`) + Webmin |
+| Windows | `amd64` (x86_64) | `samlguard.exe` / `samlguard-v1.0.3-windows-amd64.zip` | Windows Service (`SAMLGuard` via SCM) |
+| Linux | `amd64` (x86_64) | `samlguard` / `samlguard-v1.0.3-linux-amd64.tar.gz` | `systemd` (`samlguard.service`) + Webmin |
+| Linux | `arm64` (aarch64) | `samlguard` / `samlguard-v1.0.3-linux-arm64.tar.gz` | `systemd` (`samlguard.service`) + Webmin |
 
 > **Development Note:** On macOS/Linux/Windows workstations, SAMLGuard can also run directly from any terminal via `go run ./cmd/samlguard`.
 

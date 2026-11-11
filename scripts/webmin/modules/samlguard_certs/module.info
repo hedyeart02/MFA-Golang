@@ -2,5 +2,5 @@ name=SAMLGuard Certificates
 desc=Certificates
 category=samlguard
 depends=samlguard_status
-version=1.0.2
+version=1.0.3
 longdesc=Inspect and upload TLS, SAML signing, and upstream IdP certificates for SAMLGuard.

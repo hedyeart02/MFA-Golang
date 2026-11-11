@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"crypto/tls"
 	"errors"
 	"flag"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -40,7 +42,7 @@ import (
 )
 
 // Version string populated at build time
-var Version = "1.0.2-dev"
+var Version = "v1.0.3"
 
 // SetupAppWithCleanup constructs and wires all runtime dependencies into the Gin engine
 // and returns a resource cleanup function to be invoked on server shutdown.
@@ -219,6 +221,7 @@ func SetupAppWithCleanup(cfg *config.Config, appLogger *logger.Logger) (*gin.Eng
 		cleanup()
 		return nil, nil, fmt.Errorf("handler initialization failed: %w", err)
 	}
+	samlHandler.SetAuditLogger(appLogger.Audit())
 
 	// Static assets (embedded logos, icons & public background assets)
 	if staticFS, err := web.StaticFS(); err == nil {
@@ -312,8 +315,39 @@ func SetupAppWithCleanup(cfg *config.Config, appLogger *logger.Logger) (*gin.Eng
 		response.Success(c, gin.H{"version": Version})
 	})
 
-	// Metrics endpoint
-	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
+	// Metrics endpoint (honors metrics.enabled, custom path, and auth requirements in production)
+	if cfg.Metrics.Enabled {
+		metricsPath := strings.TrimSpace(cfg.Metrics.Path)
+		if metricsPath == "" {
+			metricsPath = "/metrics"
+		}
+		if !strings.HasPrefix(metricsPath, "/") {
+			metricsPath = "/" + metricsPath
+		}
+		promHandler := gin.WrapH(promhttp.Handler())
+		r.GET(metricsPath, func(c *gin.Context) {
+			if cfg.Metrics.RequireAuth || cfg.IsProduction() {
+				if samlHandler.HasValidAdminSession(c) {
+					promHandler(c)
+					return
+				}
+				expectedToken := strings.TrimSpace(cfg.Metrics.BearerToken)
+				authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
+				const bearerPrefix = "Bearer "
+				if expectedToken != "" && len(authHeader) > len(bearerPrefix) && strings.EqualFold(authHeader[:len(bearerPrefix)], bearerPrefix) {
+					providedToken := strings.TrimSpace(authHeader[len(bearerPrefix):])
+					if subtle.ConstantTimeCompare([]byte(providedToken), []byte(expectedToken)) == 1 {
+						promHandler(c)
+						return
+					}
+				}
+				c.Header("WWW-Authenticate", `Bearer realm="samlguard-metrics"`)
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "metrics endpoint requires authentication"})
+				return
+			}
+			promHandler(c)
+		})
+	}
 
 	return r, cleanup, nil
 }

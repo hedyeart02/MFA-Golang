@@ -22,7 +22,7 @@ From Windows PowerShell in the project root:
 
 ```powershell
 # Compiles windows/amd64, linux/amd64, linux/arm64 + SHA-256 dist/checksums.txt
-powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -Version "1.0.2"
+powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -Version "1.0.3"
 
 # Builds the Webmin sidebar suite archive (dist/samlguard-webmin.wbm.gz)
 go run ./scripts/webmin/build-wbm.go -src scripts/webmin/modules -out dist/samlguard-webmin.wbm.gz
@@ -32,13 +32,13 @@ go run ./scripts/webmin/build-wbm.go -src scripts/webmin/modules -out dist/samlg
 
 ```bash
 # Windows AMD64
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -X main.Version=v1.0.2" -o bin/samlguard.exe ./cmd/samlguard
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -X main.Version=v1.0.3" -o bin/samlguard.exe ./cmd/samlguard
 
 # Linux AMD64
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.Version=v1.0.2" -o bin/samlguard-linux-amd64 ./cmd/samlguard
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.Version=v1.0.3" -o bin/samlguard-linux-amd64 ./cmd/samlguard
 
 # Linux ARM64
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w -X main.Version=v1.0.2" -o bin/samlguard-linux-arm64 ./cmd/samlguard
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w -X main.Version=v1.0.3" -o bin/samlguard-linux-arm64 ./cmd/samlguard
 ```
 
 ---
@@ -71,7 +71,7 @@ bash ./scripts/generate-certs.sh
 
 ### First-Time Installation
 
-Extract `samlguard-v1.0.2-windows-amd64.zip` and run PowerShell **as Administrator**:
+Extract `samlguard-v1.0.3-windows-amd64.zip` and run PowerShell **as Administrator**:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
@@ -122,7 +122,7 @@ Start-Service -Name SAMLGuard
 
 ### First-Time Installation (AMD64 or ARM64)
 
-Extract the matching `samlguard-v1.0.2-linux-<arch>.tar.gz` bundle on your Linux server and run:
+Extract the matching `samlguard-v1.0.3-linux-<arch>.tar.gz` bundle on your Linux server and run:
 
 ```bash
 sudo ./scripts/linux/install.sh ./bin/samlguard
@@ -153,7 +153,7 @@ sudo journalctl -u samlguard -f
 `scripts/linux/upgrade.sh` verifies `-version` on the new binary, creates timestamped backups of `/usr/local/bin/samlguard` and `/var/lib/samlguard/samlguard.db`, swaps the binary cleanly, restarts `samlguard.service`, and rolls back automatically if startup fails:
 
 ```bash
-sudo bash scripts/linux/upgrade.sh ./dist/samlguard-v1.0.2-linux-amd64.tar.gz --wbm ./dist/samlguard-webmin.wbm.gz
+sudo bash scripts/linux/upgrade.sh ./dist/samlguard-v1.0.3-linux-amd64.tar.gz --wbm ./dist/samlguard-webmin.wbm.gz
 ```
 
 ### Uninstalling on Linux

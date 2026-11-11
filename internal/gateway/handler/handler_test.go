@@ -2,9 +2,15 @@ package handler
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/pem"
 	"encoding/xml"
 	"errors"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -615,4 +621,65 @@ func b64WithModifiedDestination(t *testing.T, postFormHTML string, h *SAMLHandle
 	}
 	xmlStr := strings.Replace(string(rawXML), `Destination="`+recipient+`"`, `Destination="`+dest+`"`, 1)
 	return base64.StdEncoding.EncodeToString([]byte(xmlStr))
+}
+
+func TestNewSAMLHandler_FiltersExpiredIdPCertificate(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate rsa key: %v", err)
+	}
+
+	now := time.Now().UTC()
+	makeCertPEM := func(notBefore, notAfter time.Time, serial int64) []byte {
+		tmpl := &x509.Certificate{
+			SerialNumber: big.NewInt(serial),
+			Subject:      pkix.Name{CommonName: "idp.example.com"},
+			NotBefore:    notBefore,
+			NotAfter:     notAfter,
+		}
+		der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+		if err != nil {
+			t.Fatalf("create certificate: %v", err)
+		}
+		return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	}
+
+	expiredPEM := makeCertPEM(now.Add(-48*time.Hour), now.Add(-24*time.Hour), 1001)
+	validPEM := makeCertPEM(now.Add(-1*time.Hour), now.Add(365*24*time.Hour), 1002)
+
+	tmpDir := t.TempDir()
+	expiredOnlyPath := filepath.Join(tmpDir, "expired-idp.crt")
+	if err := os.WriteFile(expiredOnlyPath, expiredPEM, 0o600); err != nil {
+		t.Fatalf("write expired cert: %v", err)
+	}
+
+	cfg := &config.Config{
+		Env: "development",
+		SAML: config.SAMLConfig{
+			IdPCertFile: expiredOnlyPath,
+		},
+	}
+	hExpired, err := NewSAMLHandler(&mockPipeline{}, nil, nil, cfg, zap.NewNop())
+	if err != nil {
+		t.Fatalf("NewSAMLHandler failed: %v", err)
+	}
+	if hExpired.idpCertStore != nil {
+		t.Fatalf("expected expired-only IdP certificate store to be nil, got %d roots", len(hExpired.idpCertStore.Roots))
+	}
+
+	bundlePath := filepath.Join(tmpDir, "bundle-idp.crt")
+	if err := os.WriteFile(bundlePath, append(expiredPEM, validPEM...), 0o600); err != nil {
+		t.Fatalf("write bundle cert: %v", err)
+	}
+	cfg.SAML.IdPCertFile = bundlePath
+	hBundle, err := NewSAMLHandler(&mockPipeline{}, nil, nil, cfg, zap.NewNop())
+	if err != nil {
+		t.Fatalf("NewSAMLHandler bundle failed: %v", err)
+	}
+	if hBundle.idpCertStore == nil || len(hBundle.idpCertStore.Roots) != 1 {
+		t.Fatalf("expected exactly 1 non-expired root certificate, got %+v", hBundle.idpCertStore)
+	}
+	if hBundle.idpCertStore.Roots[0].SerialNumber.Int64() != 1002 {
+		t.Fatalf("expected valid cert serial 1002 to remain, got %v", hBundle.idpCertStore.Roots[0].SerialNumber)
+	}
 }

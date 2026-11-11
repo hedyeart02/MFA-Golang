@@ -523,3 +523,35 @@ func TestAdminAuth_CompleteLifecycle(t *testing.T) {
 		t.Fatalf("expected redirect to /admin/login after logout, got %d", wLogout.Code)
 	}
 }
+
+func TestAdminCertDownload_ValidationAndNoPathLeak(t *testing.T) {
+	cfg := &config.Config{
+		Env: "development",
+		SAML: config.SAMLConfig{
+			CertFile: "/nonexistent/internal/secret/saml.crt",
+		},
+		TLS: config.TLSConfig{
+			CertFile: "/nonexistent/internal/secret/server.crt",
+		},
+	}
+	h := &SAMLHandler{cfg: cfg, logger: zap.NewNop()}
+	r := gin.New()
+	r.GET("/admin/cert/download", h.HandleAdminCertDownload)
+
+	wBad := httptest.NewRecorder()
+	reqBad := httptest.NewRequest(http.MethodGet, "/admin/cert/download?type=../../etc/passwd", nil)
+	r.ServeHTTP(wBad, reqBad)
+	if wBad.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for invalid cert type, got %d", wBad.Code)
+	}
+
+	wMissing := httptest.NewRecorder()
+	reqMissing := httptest.NewRequest(http.MethodGet, "/admin/cert/download?type=server", nil)
+	r.ServeHTTP(wMissing, reqMissing)
+	if wMissing.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 Not Found for missing cert, got %d", wMissing.Code)
+	}
+	if strings.Contains(wMissing.Body.String(), "/nonexistent/internal/secret") {
+		t.Fatalf("expected 404 body not to leak filesystem path, got: %s", wMissing.Body.String())
+	}
+}

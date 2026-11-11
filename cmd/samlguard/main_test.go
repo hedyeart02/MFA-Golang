@@ -584,3 +584,46 @@ func TestSetupApp_Phase2SecurityHardening(t *testing.T) {
 		t.Fatalf("expected 429 Too Many Requests when X-Forwarded-For is untrusted and auth limit exceeded, got %d", wLimited.Code)
 	}
 }
+
+func TestSetupApp_Phase3_MetricsAuth(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Metrics.Enabled = true
+	cfg.Metrics.Path = "/metrics"
+	cfg.Metrics.RequireAuth = true
+	cfg.Metrics.BearerToken = "super-secret-scrape-token"
+
+	app, cleanup, err := SetupAppWithCleanup(cfg, testLogger())
+	if err != nil {
+		t.Fatalf("SetupAppWithCleanup failed: %v", err)
+	}
+	defer cleanup()
+
+	// Unauthenticated request to /metrics must be denied
+	wUnauth := httptest.NewRecorder()
+	reqUnauth := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	app.ServeHTTP(wUnauth, reqUnauth)
+	if wUnauth.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized on /metrics without credentials, got %d", wUnauth.Code)
+	}
+
+	// Wrong Bearer token must be denied
+	wWrong := httptest.NewRecorder()
+	reqWrong := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	reqWrong.Header.Set("Authorization", "Bearer wrong-token")
+	app.ServeHTTP(wWrong, reqWrong)
+	if wWrong.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized on /metrics with invalid bearer token, got %d", wWrong.Code)
+	}
+
+	// Valid Bearer token succeeds and serves Prometheus metrics
+	wOK := httptest.NewRecorder()
+	reqOK := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	reqOK.Header.Set("Authorization", "Bearer super-secret-scrape-token")
+	app.ServeHTTP(wOK, reqOK)
+	if wOK.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on /metrics with valid bearer token, got %d", wOK.Code)
+	}
+	if !strings.Contains(wOK.Body.String(), "audit_events_total") && !strings.Contains(wOK.Body.String(), "# HELP") {
+		t.Fatalf("expected Prometheus metrics payload, got: %s", wOK.Body.String())
+	}
+}

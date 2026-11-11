@@ -136,12 +136,14 @@ type SMTPConfig struct {
 }
 
 type ITAConfig struct {
-	APIURL               string        `mapstructure:"api_url"`
-	APIUsername          string        `mapstructure:"api_username"`
-	APIPassword          string        `mapstructure:"api_password"`
-	EnforceUserWhitelist bool          `mapstructure:"enforce_user_whitelist"`
-	AutoSyncInterval     time.Duration `mapstructure:"auto_sync_interval"`
-	ManualAllowedUsers   []string      `mapstructure:"manual_allowed_users"`
+	APIURL                string        `mapstructure:"api_url"`
+	APIUsername           string        `mapstructure:"api_username"`
+	APIPassword           string        `mapstructure:"api_password"`
+	TLSCAFile             string        `mapstructure:"tls_ca_file"`
+	TLSInsecureSkipVerify bool          `mapstructure:"tls_insecure_skip_verify"`
+	EnforceUserWhitelist  bool          `mapstructure:"enforce_user_whitelist"`
+	AutoSyncInterval      time.Duration `mapstructure:"auto_sync_interval"`
+	ManualAllowedUsers    []string      `mapstructure:"manual_allowed_users"`
 }
 
 func (c *Config) IsProduction() bool {
@@ -173,8 +175,10 @@ type LoggingConfig struct {
 }
 
 type MetricsConfig struct {
-	Enabled bool   `mapstructure:"enabled"`
-	Path    string `mapstructure:"path"`
+	Enabled     bool   `mapstructure:"enabled"`
+	Path        string `mapstructure:"path"`
+	RequireAuth bool   `mapstructure:"require_auth"`
+	BearerToken string `mapstructure:"bearer_token"`
 }
 
 type PluginsConfig struct {
@@ -465,7 +469,14 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	if caFile := strings.TrimSpace(c.ITA.TLSCAFile); caFile != "" && !fileExists(caFile) {
+		return fmt.Errorf("ita.tls_ca_file does not exist: %s", caFile)
+	}
+
 	if c.IsProduction() {
+		if c.ITA.TLSInsecureSkipVerify {
+			return errors.New("security violation: ita.tls_insecure_skip_verify cannot be enabled in production mode; configure ita.tls_ca_file instead")
+		}
 		if c.MFA.AllowDummyOTP {
 			return errors.New("security violation: mfa.allow_dummy_otp must be false in production mode")
 		}
@@ -553,6 +564,12 @@ func (c *Config) Redacted() *Config {
 	}
 	if copy.SMTP.Password != "" {
 		copy.SMTP.Password = "[REDACTED]"
+	}
+	if copy.ITA.APIPassword != "" {
+		copy.ITA.APIPassword = "[REDACTED]"
+	}
+	if copy.Metrics.BearerToken != "" {
+		copy.Metrics.BearerToken = "[REDACTED]"
 	}
 	if strings.Contains(copy.Database.ConnectionString, "password=") {
 		copy.Database.ConnectionString = "[REDACTED]"

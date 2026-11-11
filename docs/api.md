@@ -107,7 +107,7 @@ All routes below require a valid authenticated `samlguard_admin_session` cookie 
 | `GET` | `/health` | `application/json` | `200 OK` — `{"status":"ok"}` (also queried by Webmin Status check) |
 | `GET` | `/ready` | `application/json` | `200 OK` — `{"status":"ready"}` |
 | `GET` | `/live` | `application/json` | `200 OK` — `{"status":"live"}` |
-| `GET` | `/version` | `application/json` | `200 OK` — `{"version":"v1.0.2"}` (injected at build time via `-X main.Version`) |
+| `GET` | `/version` | `application/json` | `200 OK` — `{"version":"v1.0.3"}` (injected at build time via `-X main.Version`) |
 | `GET` | `/metrics` | `text/plain` | Prometheus metrics endpoint (`promhttp.Handler()`) |
 | `GET` | `/favicon.ico` | `image/x-icon` | Embedded SAMLGuard shield icon (`Cache-Control: public, max-age=86400`) |
 | `GET` | `/static/*` | Various | Embedded static assets (`img/favicon.svg`, `img/ecostruxure-*.png`, `js/theme.js`, etc.) |
