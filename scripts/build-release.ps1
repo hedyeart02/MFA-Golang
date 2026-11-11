@@ -7,7 +7,7 @@
     and creates .zip and .tar.gz distribution archives with SHA-256 checksums.
 #>
 param(
-    [string]$Version = "1.0.1"
+    [string]$Version = "1.0.2"
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,8 +23,8 @@ New-Item -ItemType Directory -Force -Path $DistDir | Out-Null
 
 $Targets = @(
     @{ OS = "windows"; Arch = "amd64"; Binary = "samlguard.exe"; ArchiveType = "zip" },
-    @{ OS = "linux";   Arch = "amd64"; Binary = "samlguard";     ArchiveType = "tar.gz" },
-    @{ OS = "linux";   Arch = "arm64"; Binary = "samlguard";     ArchiveType = "tar.gz" }
+    @{ OS = "linux"; Arch = "amd64"; Binary = "samlguard"; ArchiveType = "tar.gz" },
+    @{ OS = "linux"; Arch = "arm64"; Binary = "samlguard"; ArchiveType = "tar.gz" }
 )
 
 Write-Host "==========================================================" -ForegroundColor Cyan
@@ -72,7 +72,8 @@ foreach ($t in $Targets) {
     if ($osName -eq "windows") {
         New-Item -ItemType Directory -Force -Path "$stageDir\scripts\windows" | Out-Null
         Copy-Item "$ProjectRoot\scripts\windows\*" "$stageDir\scripts\windows\"
-    } else {
+    }
+    else {
         New-Item -ItemType Directory -Force -Path "$stageDir\scripts\linux" | Out-Null
         Copy-Item "$ProjectRoot\scripts\linux\*" "$stageDir\scripts\linux\"
     }
@@ -109,7 +110,8 @@ Documentation: https://github.com/hedyeart02/MFA-Golang
         $archivePath = "$DistDir\$pkgName.zip"
         Write-Host "==> Creating ZIP archive: $archivePath" -ForegroundColor Green
         Compress-Archive -Path "$stageDir\*" -DestinationPath $archivePath -Force
-    } else {
+    }
+    else {
         $archivePath = "$DistDir\$pkgName.tar.gz"
         Write-Host "==> Creating TAR.GZ archive: $archivePath" -ForegroundColor Green
         # Use tar utility available in modern Windows / PowerShell

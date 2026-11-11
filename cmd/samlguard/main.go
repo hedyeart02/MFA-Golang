@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
@@ -38,7 +39,7 @@ import (
 )
 
 // Version string populated at build time
-var Version = "1.0.1-dev"
+var Version = "1.0.2-dev"
 
 // SetupAppWithCleanup constructs and wires all runtime dependencies into the Gin engine
 // and returns a resource cleanup function to be invoked on server shutdown.
@@ -192,6 +193,13 @@ func SetupAppWithCleanup(cfg *config.Config, appLogger *logger.Logger) (*gin.Eng
 			c.Next()
 		})
 		staticGroup.StaticFS("/", http.FS(staticFS))
+
+		if icoBytes, readErr := fs.ReadFile(staticFS, "img/favicon.ico"); readErr == nil {
+			r.GET("/favicon.ico", func(c *gin.Context) {
+				c.Header("Cache-Control", "public, max-age=86400")
+				c.Data(http.StatusOK, "image/x-icon", icoBytes)
+			})
+		}
 	}
 	if assetsFS, err := public.AssetsFS(); err == nil {
 		assetsGroup := r.Group("/assets", func(c *gin.Context) {

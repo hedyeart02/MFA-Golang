@@ -2,5 +2,5 @@ name=SAMLGuard Setup
 desc=Setup
 category=samlguard
 depends=samlguard_status
-version=1.0.1
+version=1.0.2
 longdesc=View and edit the SAMLGuard configuration file (/etc/samlguard/config.yaml).

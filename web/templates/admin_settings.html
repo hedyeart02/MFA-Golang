@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SAMLGuard Gateway Settings - EcoStruxure™ IT Advisor</title>
+    <link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" sizes="any">
     <script src="/static/js/theme.js"></script>
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1092,6 +1094,36 @@
             z-index: 40;
         }
 
+        /* App Footer */
+        .app-footer {
+            margin-top: auto;
+            padding: 1rem 2.5rem;
+            border-top: 1px solid var(--border-main);
+            background-color: var(--bg-topbar);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+        }
+
+        .app-footer strong {
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+
+        @media (max-width: 640px) {
+            .app-footer {
+                padding: 1rem 1.25rem;
+                flex-direction: column;
+                align-items: flex-start;
+            }
+        }
+
         .spinner {
             border: 2px solid rgba(255, 255, 255, 0.2);
             border-top: 2px solid #ffffff;
@@ -1211,7 +1243,7 @@
                     <span class="status-dot"></span>
                     <span>Gateway Online</span>
                 </div>
-                <span>v1.0.1</span>
+                <span>v1.0.2</span>
             </div>
         </div>
     </aside>
@@ -1903,6 +1935,10 @@
                 </div>
             </form>
         </main>
+        <footer class="app-footer">
+            <span>SAMLGuard Enterprise MFA Gateway</span>
+            <span>&copy; 2026 <strong>Hidayat Ahmad</strong>. All rights reserved.</span>
+        </footer>
     </div>
 </div>
 

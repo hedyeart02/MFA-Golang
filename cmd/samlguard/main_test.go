@@ -386,6 +386,26 @@ func TestSetupApp_StaticLogosAndLoginAssets(t *testing.T) {
 		t.Errorf("expected /static/js/theme.js to use samlguard.theme key and system default")
 	}
 
+	wFavSVG := httptest.NewRecorder()
+	reqFavSVG, _ := http.NewRequest(http.MethodGet, "/static/img/favicon.svg", nil)
+	app.ServeHTTP(wFavSVG, reqFavSVG)
+	if wFavSVG.Code != http.StatusOK {
+		t.Fatalf("expected /static/img/favicon.svg to return 200, got %d", wFavSVG.Code)
+	}
+	if !strings.Contains(wFavSVG.Body.String(), "<svg") {
+		t.Errorf("expected /static/img/favicon.svg to return valid SVG markup")
+	}
+
+	wFavICO := httptest.NewRecorder()
+	reqFavICO, _ := http.NewRequest(http.MethodGet, "/favicon.ico", nil)
+	app.ServeHTTP(wFavICO, reqFavICO)
+	if wFavICO.Code != http.StatusOK {
+		t.Fatalf("expected /favicon.ico to return 200, got %d", wFavICO.Code)
+	}
+	if wFavICO.Body.Len() < 22 || !strings.HasPrefix(wFavICO.Body.String(), "\x00\x00\x01\x00") {
+		t.Errorf("expected /favicon.ico to return valid ICO binary payload")
+	}
+
 	wLogin := httptest.NewRecorder()
 	reqLogin, _ := http.NewRequest(http.MethodGet, "/admin/login", nil)
 	app.ServeHTTP(wLogin, reqLogin)
@@ -429,6 +449,8 @@ func TestSetupApp_StaticLogosAndLoginAssets(t *testing.T) {
 		"/assets/backgrounds/bg-login-dark.png",
 		"/assets/backgrounds/bg-login-light.png",
 		"#00B050",
+		"app-footer",
+		"Hidayat Ahmad",
 	} {
 		if !strings.Contains(corpBody, ref) {
 			t.Errorf("expected /login HTML to reference %q", ref)
@@ -442,6 +464,29 @@ func TestSetupApp_StaticLogosAndLoginAssets(t *testing.T) {
 	} {
 		if !strings.Contains(web.DefaultAdminSettingsHTML, ref) {
 			t.Errorf("expected admin_settings.html to reference %s", ref)
+		}
+	}
+
+	embeddedTemplates := map[string]string{
+		"mfa_challenge.html":         web.DefaultMFAChallengeHTML,
+		"error.html":                 web.DefaultErrorHTML,
+		"admin_settings.html":        web.DefaultAdminSettingsHTML,
+		"admin_login.html":           web.DefaultAdminLoginHTML,
+		"admin_change_password.html": web.DefaultAdminChangePasswordHTML,
+		"corporate_login.html":       web.DefaultCorporateLoginHTML,
+	}
+	for name, html := range embeddedTemplates {
+		if !strings.Contains(html, `class="app-footer"`) {
+			t.Errorf("expected %s to include class=\"app-footer\"", name)
+		}
+		if !strings.Contains(html, "Hidayat Ahmad") {
+			t.Errorf("expected %s footer to include Hidayat Ahmad", name)
+		}
+		if !strings.Contains(html, "/static/img/favicon.svg") {
+			t.Errorf("expected %s to reference /static/img/favicon.svg", name)
+		}
+		if !strings.Contains(html, "/favicon.ico") {
+			t.Errorf("expected %s to reference /favicon.ico", name)
 		}
 	}
 }

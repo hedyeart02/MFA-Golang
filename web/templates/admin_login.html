@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SAMLGuard Admin Console - EcoStruxure™ IT Advisor</title>
+    <link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" sizes="any">
     <script src="/static/js/theme.js"></script>
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -420,16 +422,32 @@
             font-weight: 700;
         }
 
-        .footer-tagline {
-            margin-top: 1.5rem;
-            font-size: 0.74rem;
+        .app-footer {
+            position: relative;
+            z-index: 20;
+            padding: 0.95rem 2.25rem;
+            background: var(--topbar-bg);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border-top: 1px solid rgba(125, 155, 195, 0.12);
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            gap: 0.5rem 1rem;
+            font-size: 0.76rem;
             color: var(--text-muted);
-            letter-spacing: 0.02em;
+        }
+
+        .app-footer strong {
+            color: var(--text-secondary);
+            font-weight: 600;
         }
 
         @media (max-width: 640px) {
             .top-navbar { padding: 1rem 1.25rem; }
             .auth-card { padding: 2rem 1.5rem; }
+            .app-footer { padding: 0.85rem 1.25rem; flex-direction: column; text-align: center; }
         }
     </style>
 </head>
@@ -577,9 +595,13 @@
                 </div>
             </div>
 
-            <div class="footer-tagline">SAMLGuard Enterprise MFA Gateway</div>
         </div>
     </main>
+
+    <footer class="app-footer">
+        <span>SAMLGuard Enterprise MFA Gateway</span>
+        <span>&copy; 2026 <strong>Hidayat Ahmad</strong>. All rights reserved.</span>
+    </footer>
 
     <script>
         function togglePasswordVisibility(fieldId) {
