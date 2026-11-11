@@ -98,6 +98,23 @@ func TestHandler_HandleSSO_Success(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected status 200 for mock IdP login, got %d", w.Code)
 	}
+	body := w.Body.String()
+	for _, want := range []string{
+		"/static/js/theme.js",
+		"/assets/backgrounds/bg-login-dark.png",
+		"/assets/backgrounds/bg-login-light.png",
+		"Corporate Sign In",
+		"Secure access to Schneider Electric IT Advisor",
+		"Continue to Verification",
+		"/static/img/schneider-electric.png",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected corporate login HTML to contain %q", want)
+		}
+	}
+	if strings.Contains(body, "🛡️") {
+		t.Errorf("expected corporate login HTML to use SVG shield instead of emoji")
+	}
 }
 
 func TestHandler_HandleSSO_PipelineError(t *testing.T) {

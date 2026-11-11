@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAMLGuard - Corporate Sign In</title>
+    <script src="/static/js/theme.js"></script>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root, [data-theme="dark"] {
+            --bg-body: #101B2B;
+            --bg-page-image: url('/assets/backgrounds/bg-login-dark.png');
+            --bg-page-scrim: linear-gradient(135deg, rgba(16, 27, 43, 0.22) 0%, rgba(16, 27, 43, 0.42) 100%);
+            --bg-card: rgba(23, 37, 54, 0.86);
+            --bg-card-border: rgba(56, 86, 128, 0.48);
+            --bg-input: rgba(16, 27, 43, 0.88);
+            --border-input: #233b5c;
+            --border-focus: #00B050;
+            --text-primary: #f1f6fc;
+            --text-secondary: #b4c6dc;
+            --text-muted: #7b93b2;
+            --brand-green: #00B050;
+            --brand-green-hover: #009845;
+            --brand-green-dark: #007d39;
+            --brand-green-glow: rgba(0, 176, 80, 0.34);
+            --topbar-bg: rgba(16, 27, 43, 0.74);
+            --dropdown-bg: #172536;
+            --dropdown-border: #253d5c;
+            --error-bg: rgba(220, 38, 38, 0.14);
+            --error-border: rgba(239, 68, 68, 0.42);
+            --error-text: #fca5a5;
+            --card-shadow: 0 30px 60px -12px rgba(0, 0, 0, 0.72), 0 0 1px 1px rgba(255, 255, 255, 0.08);
+        }
+
+        [data-theme="light"] {
+            --bg-body: #eef3f8;
+            --bg-page-image: url('/assets/backgrounds/bg-login-light.png');
+            --bg-page-scrim: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(240, 245, 250, 0.22) 100%);
+            --bg-card: rgba(255, 255, 255, 0.88);
+            --bg-card-border: rgba(203, 216, 232, 0.92);
+            --bg-input: #ffffff;
+            --border-input: #cbd5e1;
+            --border-focus: #00B050;
+            --text-primary: #101B2B;
+            --text-secondary: #475569;
+            --text-muted: #64748b;
+            --brand-green: #00B050;
+            --brand-green-hover: #009845;
+            --brand-green-dark: #007d39;
+            --brand-green-glow: rgba(0, 176, 80, 0.25);
+            --topbar-bg: rgba(255, 255, 255, 0.80);
+            --dropdown-bg: #ffffff;
+            --dropdown-border: #cbd5e1;
+            --error-bg: rgba(254, 226, 226, 0.92);
+            --error-border: rgba(239, 68, 68, 0.45);
+            --error-text: #b91c1c;
+            --card-shadow: 0 25px 50px -12px rgba(16, 27, 43, 0.16), 0 1px 3px rgba(0, 0, 0, 0.06);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-body);
+            background-image: var(--bg-page-scrim), var(--bg-page-image);
+            background-size: cover;
+            background-position: center center;
+            background-repeat: no-repeat;
+            background-attachment: fixed;
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            overflow-x: clip;
+            transition: background-color 0.2s ease, color 0.2s ease;
+        }
+
+        /* Top Brand Bar */
+        .top-navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.05rem 2.25rem;
+            position: relative;
+            z-index: 20;
+            background: var(--topbar-bg);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border-bottom: 1px solid rgba(125, 155, 195, 0.14);
+        }
+
+        .brand-left {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+
+        .eco-logo-wrap {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 2px;
+        }
+
+        .eco-logo {
+            height: 22px;
+            width: auto;
+            display: block;
+        }
+
+        [data-theme="dark"] .eco-logo-light { display: none; }
+        [data-theme="light"] .eco-logo-dark { display: none; }
+
+        .eco-sub {
+            font-size: 0.68rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            letter-spacing: 0.02em;
+            line-height: 1;
+        }
+
+        .brand-right {
+            display: flex;
+            align-items: center;
+            gap: 1.25rem;
+        }
+
+        .schneider-logo-img {
+            height: 30px;
+            width: auto;
+            display: block;
+            transition: filter 0.2s ease;
+        }
+
+        [data-theme="light"] .schneider-logo-img {
+            filter: brightness(0) saturate(100%) invert(37%) sepia(87%) saturate(950%) hue-rotate(116deg) brightness(95%) contrast(103%);
+        }
+
+        /* Theme Dropdown Pill */
+        .theme-dropdown-wrapper { position: relative; }
+
+        .theme-btn {
+            background: rgba(125, 155, 195, 0.12);
+            border: 1px solid rgba(125, 155, 195, 0.28);
+            color: var(--text-primary);
+            padding: 0.45rem 0.85rem;
+            border-radius: 8px;
+            font-size: 0.82rem;
+            font-weight: 500;
+            font-family: inherit;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            cursor: pointer;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .theme-btn:hover { border-color: var(--brand-green); }
+        .theme-btn:focus-visible {
+            outline: none;
+            border-color: var(--brand-green);
+            box-shadow: 0 0 0 3px var(--brand-green-glow);
+        }
+        .theme-btn svg { width: 14px; height: 14px; stroke: currentColor; fill: none; }
+
+        .theme-menu {
+            position: absolute;
+            right: 0;
+            top: calc(100% + 8px);
+            background: var(--dropdown-bg);
+            border: 1px solid var(--dropdown-border);
+            border-radius: 12px;
+            box-shadow: 0 16px 36px rgba(0, 0, 0, 0.35);
+            width: 250px;
+            padding: 0.6rem;
+            z-index: 50;
+            display: none;
+            animation: menuFadeIn 0.15s ease-out;
+        }
+
+        .theme-menu.active { display: block; }
+
+        @keyframes menuFadeIn {
+            from { opacity: 0; transform: translateY(-6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .theme-menu-title {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            font-weight: 700;
+            padding: 0.35rem 0.6rem 0.5rem;
+        }
+
+        .theme-option {
+            width: 100%;
+            background: transparent;
+            font-family: inherit;
+            text-align: left;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.6rem 0.75rem;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color 0.15s, border-color 0.15s;
+            border: 1px solid transparent;
+            margin-bottom: 0.25rem;
+            color: var(--text-primary);
+        }
+
+        .theme-option:last-child { margin-bottom: 0; }
+        .theme-option:hover { background: rgba(125, 155, 195, 0.12); }
+        .theme-option:focus-visible {
+            outline: none;
+            border-color: var(--brand-green);
+            box-shadow: 0 0 0 2px var(--brand-green-glow);
+        }
+        .theme-option.selected {
+            border-color: var(--brand-green);
+            background: rgba(0, 176, 80, 0.10);
+        }
+
+        .theme-opt-left { display: flex; align-items: center; gap: 0.65rem; }
+        .theme-opt-left svg { width: 18px; height: 18px; stroke: currentColor; fill: none; flex-shrink: 0; }
+        .theme-opt-title { font-size: 0.84rem; font-weight: 600; line-height: 1.2; }
+        .theme-opt-sub { font-size: 0.72rem; color: var(--text-secondary); }
+        .theme-check { color: var(--brand-green); display: none; }
+        .theme-option.selected .theme-check { display: block; }
+
+        /* Main Center View */
+        .main-viewport {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 2rem 1.25rem;
+            position: relative;
+            z-index: 10;
+        }
+
+        .auth-card {
+            background: var(--bg-card);
+            border: 1px solid var(--bg-card-border);
+            border-radius: 16px;
+            padding: 38px 36px;
+            max-width: 460px;
+            width: 100%;
+            box-shadow: var(--card-shadow);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+            text-align: center;
+            position: relative;
+        }
+
+        .card-product-brand {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.45rem;
+            margin-bottom: 1.1rem;
+        }
+
+        .shield-icon-wrapper {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .shield-icon-wrapper svg {
+            width: 52px;
+            height: 52px;
+            filter: drop-shadow(0 4px 14px var(--brand-green-glow));
+        }
+
+        .product-name {
+            font-size: 0.84rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--brand-green);
+        }
+
+        h1.login-title {
+            font-size: 1.65rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.02em;
+            margin-bottom: 0.4rem;
+        }
+
+        .login-subtitle {
+            font-size: 0.88rem;
+            color: var(--text-secondary);
+            margin-bottom: 1.75rem;
+            line-height: 1.45;
+        }
+
+        .alert-error {
+            padding: 0.8rem 1rem;
+            border-radius: 10px;
+            font-size: 0.84rem;
+            margin-bottom: 1.35rem;
+            text-align: left;
+            background: var(--error-bg);
+            border: 1px solid var(--error-border);
+            color: var(--error-text);
+            display: flex;
+            align-items: flex-start;
+            gap: 0.55rem;
+            line-height: 1.45;
+        }
+
+        .alert-error svg {
+            width: 17px;
+            height: 17px;
+            stroke: currentColor;
+            fill: none;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+
+        form.login-form {
+            width: 100%;
+            text-align: left;
+        }
+
+        .form-field {
+            width: 100%;
+            margin-bottom: 1.35rem;
+            text-align: left;
+        }
+
+        .form-field label {
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+            font-size: 0.84rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+        }
+
+        .form-field label svg {
+            width: 15px;
+            height: 15px;
+            stroke: currentColor;
+            fill: none;
+            flex-shrink: 0;
+        }
+
+        .input-box {
+            position: relative;
+            width: 100%;
+        }
+
+        .input-box input {
+            width: 100%;
+            display: block;
+            background: var(--bg-input);
+            border: 1.5px solid var(--border-input);
+            border-radius: 10px;
+            padding: 0.82rem 1rem;
+            font-size: 0.95rem;
+            color: var(--text-primary);
+            font-family: inherit;
+            transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
+        }
+
+        .input-box input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .input-box input:focus {
+            outline: none;
+            border-color: var(--border-focus);
+            box-shadow: 0 0 0 3px var(--brand-green-glow);
+        }
+
+        .input-box input[aria-invalid="true"] {
+            border-color: #ef4444;
+            box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.20);
+        }
+
+        .field-error {
+            margin-top: 0.45rem;
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--error-text);
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+        }
+
+        .field-error[hidden] {
+            display: none;
+        }
+
+        .btn-submit {
+            width: 100%;
+            padding: 0.88rem 1rem;
+            border: none;
+            border-radius: 10px;
+            background: var(--brand-green);
+            color: #ffffff;
+            font-size: 0.96rem;
+            font-weight: 600;
+            font-family: inherit;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.55rem;
+            transition: background-color 0.2s, transform 0.15s, box-shadow 0.2s, opacity 0.2s;
+            box-shadow: 0 4px 14px var(--brand-green-glow);
+        }
+
+        .btn-submit:hover:not(:disabled) {
+            background: var(--brand-green-hover);
+            transform: translateY(-1px);
+        }
+
+        .btn-submit:active:not(:disabled) {
+            background: var(--brand-green-dark);
+            transform: translateY(0);
+        }
+
+        .btn-submit:focus-visible {
+            outline: 2px solid var(--brand-green);
+            outline-offset: 3px;
+        }
+
+        .btn-submit:disabled {
+            opacity: 0.72;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-spinner {
+            display: none;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.35);
+            border-top-color: #ffffff;
+            border-radius: 50%;
+            animation: spin 0.75s linear infinite;
+            flex-shrink: 0;
+        }
+
+        .btn-submit.is-loading .btn-spinner {
+            display: inline-block;
+        }
+
+        .btn-submit.is-loading .btn-arrow {
+            display: none;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .footer-tagline {
+            margin-top: 1.6rem;
+            padding-top: 1.15rem;
+            border-top: 1px solid rgba(125, 155, 195, 0.16);
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            letter-spacing: 0.02em;
+        }
+
+        @media (max-width: 640px) {
+            .top-navbar { padding: 0.9rem 1.15rem; }
+            .brand-right { gap: 0.75rem; }
+            .schneider-logo-img { height: 24px; }
+            .auth-card { padding: 32px 24px; }
+            h1.login-title { font-size: 1.45rem; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Top Navigation Bar -->
+    <header class="top-navbar">
+        <div class="brand-left">
+            <div class="eco-logo-wrap">
+                <img src="/static/img/ecostruxure-dark.png" alt="EcoStruxure" class="eco-logo eco-logo-dark">
+                <img src="/static/img/ecostruxure-light.png" alt="EcoStruxure" class="eco-logo eco-logo-light">
+                <span class="eco-sub">IT Advisor</span>
+            </div>
+        </div>
+
+        <div class="brand-right">
+            <!-- Theme Mode Selector Dropdown -->
+            <div class="theme-dropdown-wrapper">
+                <button type="button" class="theme-btn" id="themeDropdownBtn" onclick="toggleThemeMenu()" aria-label="Appearance theme selector">
+                    <span id="themeBtnIcon">
+                        <svg viewBox="0 0 24 24" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                    </span>
+                    <span id="themeBtnLabel">Device</span>
+                    <svg viewBox="0 0 24 24" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+
+                <!-- Appearance Dropdown Menu -->
+                <div class="theme-menu" id="themeMenu" role="menu" aria-label="Appearance options">
+                    <div class="theme-menu-title">Appearance</div>
+                    <button type="button" class="theme-option" data-val="system" onclick="selectTheme('system')" role="menuitemradio">
+                        <div class="theme-opt-left">
+                            <svg viewBox="0 0 24 24" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                            <div>
+                                <div class="theme-opt-title">Device Mode</div>
+                                <div class="theme-opt-sub">Follow OS preference</div>
+                            </div>
+                        </div>
+                        <div class="theme-check">
+                            <svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3" fill="none"><polyline points="20 6 9 17 4 12"/></svg>
+                        </div>
+                    </button>
+
+                    <button type="button" class="theme-option" data-val="light" onclick="selectTheme('light')" role="menuitemradio">
+                        <div class="theme-opt-left">
+                            <svg viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                            <div>
+                                <div class="theme-opt-title">Light Mode</div>
+                                <div class="theme-opt-sub">Always use light theme</div>
+                            </div>
+                        </div>
+                        <div class="theme-check">
+                            <svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3" fill="none"><polyline points="20 6 9 17 4 12"/></svg>
+                        </div>
+                    </button>
+
+                    <button type="button" class="theme-option" data-val="dark" onclick="selectTheme('dark')" role="menuitemradio">
+                        <div class="theme-opt-left">
+                            <svg viewBox="0 0 24 24" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                            <div>
+                                <div class="theme-opt-title">Dark Mode</div>
+                                <div class="theme-opt-sub">Always use dark theme</div>
+                            </div>
+                        </div>
+                        <div class="theme-check">
+                            <svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3" fill="none"><polyline points="20 6 9 17 4 12"/></svg>
+                        </div>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Schneider Electric Brand Logo -->
+            <img src="/static/img/schneider-electric.png" alt="Schneider Electric" class="schneider-logo-img">
+        </div>
+    </header>
+
+    <!-- Center Login Form View -->
+    <main class="main-viewport">
+        <div class="auth-card">
+            <div class="card-product-brand">
+                <div class="shield-icon-wrapper" aria-hidden="true">
+                    <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <defs>
+                            <linearGradient id="corpShieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <stop offset="0%" stop-color="#008744"/>
+                                <stop offset="100%" stop-color="#3dcd58"/>
+                            </linearGradient>
+                            <linearGradient id="corpShieldStroke" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <stop offset="0%" stop-color="#55e670"/>
+                                <stop offset="100%" stop-color="#00B050"/>
+                            </linearGradient>
+                        </defs>
+                        <path d="M32 4L10 13V29C10 43.5 19.5 56.2 32 60C44.5 56.2 54 43.5 54 29V13L32 4Z" fill="url(#corpShieldGrad)" fill-opacity="0.22" stroke="url(#corpShieldStroke)" stroke-width="3"/>
+                        <path d="M23 32L29 38L41 25" stroke="var(--brand-green)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </div>
+                <span class="product-name">SAMLGuard</span>
+            </div>
+
+            <h1 class="login-title">Corporate Sign In</h1>
+            <p class="login-subtitle">Secure access to Schneider Electric IT Advisor</p>
+
+            {{if .ErrorMessage}}
+            <div class="alert-error" role="alert">
+                <svg viewBox="0 0 24 24" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <div><strong>Access Denied:</strong> {{.ErrorMessage}}</div>
+            </div>
+            {{end}}
+
+            <form id="corporateLoginForm" class="login-form" method="POST" action="/mock-idp/submit" novalidate>
+                <input type="hidden" name="session_id" value="{{.SessionID}}"/>
+                <input type="hidden" name="outbound_id" value="{{.OutboundID}}"/>
+                {{.SAMLResponseInput}}
+
+                <div class="form-field">
+                    <label for="username">
+                        <svg viewBox="0 0 24 24" stroke-width="2" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                        Username or Corporate Email
+                    </label>
+                    <div class="input-box">
+                        <input
+                            type="text"
+                            id="username"
+                            name="username"
+                            value="{{.Username}}"
+                            placeholder="e.g. itaadmin or user@domain.com"
+                            required
+                            autofocus
+                            autocomplete="username"
+                            aria-describedby="usernameError"
+                        />
+                    </div>
+                    <div id="usernameError" class="field-error" role="alert" aria-live="polite" hidden>
+                        Please enter your username or corporate email.
+                    </div>
+                </div>
+
+                <button type="submit" id="submitBtn" class="btn-submit">
+                    <span class="btn-spinner" aria-hidden="true"></span>
+                    <span id="submitBtnText">Continue to Verification</span>
+                    <span class="btn-arrow" aria-hidden="true">&rarr;</span>
+                </button>
+            </form>
+
+            <div class="footer-tagline">SAMLGuard Enterprise MFA Gateway</div>
+        </div>
+    </main>
+
+    <script>
+        (function () {
+            var form = document.getElementById('corporateLoginForm');
+            var input = document.getElementById('username');
+            var errorEl = document.getElementById('usernameError');
+            var submitBtn = document.getElementById('submitBtn');
+            var submitText = document.getElementById('submitBtnText');
+
+            function showValidationError(show) {
+                if (!input || !errorEl) return;
+                if (show) {
+                    input.setAttribute('aria-invalid', 'true');
+                    errorEl.hidden = false;
+                } else {
+                    input.removeAttribute('aria-invalid');
+                    errorEl.hidden = true;
+                }
+            }
+
+            if (input) {
+                input.addEventListener('input', function () {
+                    if (input.value.trim() !== '') {
+                        showValidationError(false);
+                    }
+                });
+            }
+
+            if (form) {
+                form.addEventListener('submit', function (e) {
+                    var trimmed = input ? input.value.trim() : '';
+                    if (!trimmed) {
+                        e.preventDefault();
+                        showValidationError(true);
+                        if (input) input.focus();
+                        return;
+                    }
+                    if (input) input.value = trimmed;
+                    if (submitBtn) {
+                        submitBtn.disabled = true;
+                        submitBtn.classList.add('is-loading');
+                        submitBtn.setAttribute('aria-busy', 'true');
+                    }
+                    if (submitText) {
+                        submitText.textContent = 'Verifying account...';
+                    }
+                });
+            }
+
+            window.addEventListener('pageshow', function () {
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.classList.remove('is-loading');
+                    submitBtn.removeAttribute('aria-busy');
+                }
+                if (submitText) {
+                    submitText.textContent = 'Continue to Verification';
+                }
+            });
+        })();
+    </script>
+</body>
+</html>

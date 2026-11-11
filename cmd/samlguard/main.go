@@ -29,6 +29,8 @@ import (
 	"github.com/hidayat-SE/samlguard/pkg/logger"
 	"github.com/hidayat-SE/samlguard/pkg/middleware"
 	"github.com/hidayat-SE/samlguard/pkg/response"
+	"github.com/hidayat-SE/samlguard/public"
+	"github.com/hidayat-SE/samlguard/web"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -170,6 +172,22 @@ func SetupAppWithCleanup(cfg *config.Config, appLogger *logger.Logger) (*gin.Eng
 	if err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("handler initialization failed: %w", err)
+	}
+
+	// Static assets (embedded logos, icons & public background assets)
+	if staticFS, err := web.StaticFS(); err == nil {
+		staticGroup := r.Group("/static", func(c *gin.Context) {
+			c.Header("Cache-Control", "public, max-age=86400")
+			c.Next()
+		})
+		staticGroup.StaticFS("/", http.FS(staticFS))
+	}
+	if assetsFS, err := public.AssetsFS(); err == nil {
+		assetsGroup := r.Group("/assets", func(c *gin.Context) {
+			c.Header("Cache-Control", "public, max-age=86400")
+			c.Next()
+		})
+		assetsGroup.StaticFS("/", http.FS(assetsFS))
 	}
 
 	// Register SAML and MFA routes

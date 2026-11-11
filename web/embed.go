@@ -1,8 +1,9 @@
 package web
 
 import (
-	_ "embed"
+	"embed"
 	"html/template"
+	"io/fs"
 )
 
 //go:embed templates/mfa_challenge.html
@@ -19,6 +20,17 @@ var DefaultAdminLoginHTML string
 
 //go:embed templates/admin_change_password.html
 var DefaultAdminChangePasswordHTML string
+
+//go:embed templates/corporate_login.html
+var DefaultCorporateLoginHTML string
+
+//go:embed static
+var staticFiles embed.FS
+
+// StaticFS returns the embedded static assets filesystem rooted at static/.
+func StaticFS() (fs.FS, error) {
+	return fs.Sub(staticFiles, "static")
+}
 
 // ParseMFAChallengeTemplate parses and returns the embedded MFA challenge template
 func ParseMFAChallengeTemplate() (*template.Template, error) {
@@ -43,4 +55,9 @@ func ParseAdminLoginTemplate() (*template.Template, error) {
 // ParseAdminChangePasswordTemplate parses and returns the embedded admin change password template
 func ParseAdminChangePasswordTemplate() (*template.Template, error) {
 	return template.New("admin_change_password.html").Parse(DefaultAdminChangePasswordHTML)
+}
+
+// ParseCorporateLoginTemplate parses and returns the embedded corporate sign-in template
+func ParseCorporateLoginTemplate() (*template.Template, error) {
+	return template.New("corporate_login.html").Parse(DefaultCorporateLoginHTML)
 }

@@ -1,47 +1,225 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SAMLGuard - Multi-Factor Verification</title>
+    <script src="/static/js/theme.js"></script>
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+        :root, [data-theme="dark"] {
+            --bg-body: #101B2B;
+            --bg-page-image: url('/assets/backgrounds/bg-login-dark.png');
+            --bg-page-scrim: linear-gradient(135deg, rgba(16, 27, 43, 0.22) 0%, rgba(16, 27, 43, 0.42) 100%);
+            --bg-card: rgba(23, 37, 54, 0.86);
+            --bg-card-border: rgba(56, 86, 128, 0.48);
+            --bg-input: rgba(16, 27, 43, 0.88);
+            --border-input: #233b5c;
+            --border-focus: #00B050;
+            --text-primary: #f1f6fc;
+            --text-secondary: #9bb1cc;
+            --text-muted: #7088a8;
+            --brand-green: #00B050;
+            --brand-green-hover: #009845;
+            --brand-green-dark: #00823a;
+            --brand-green-glow: rgba(0, 176, 80, 0.34);
+            --topbar-bg: rgba(16, 27, 43, 0.72);
+            --dropdown-bg: #172536;
+            --dropdown-border: #253d5c;
+            --card-shadow: 0 30px 60px -12px rgba(0, 0, 0, 0.72), 0 0 1px 1px rgba(255, 255, 255, 0.08);
+            --box-bg: rgba(16, 27, 43, 0.86);
+            --box-border: rgba(0, 176, 80, 0.45);
+        }
+
+        [data-theme="light"] {
+            --bg-body: #eef3f8;
+            --bg-page-image: url('/assets/backgrounds/bg-login-light.png');
+            --bg-page-scrim: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(240, 245, 250, 0.22) 100%);
+            --bg-card: rgba(255, 255, 255, 0.88);
+            --bg-card-border: rgba(203, 216, 232, 0.92);
+            --bg-input: #ffffff;
+            --border-input: #cbd5e1;
+            --border-focus: #00B050;
+            --text-primary: #101B2B;
+            --text-secondary: #475569;
+            --text-muted: #64748b;
+            --brand-green: #00B050;
+            --brand-green-hover: #009845;
+            --brand-green-dark: #007d39;
+            --brand-green-glow: rgba(0, 176, 80, 0.25);
+            --topbar-bg: rgba(255, 255, 255, 0.78);
+            --dropdown-bg: #ffffff;
+            --dropdown-border: #cbd5e1;
+            --card-shadow: 0 25px 50px -12px rgba(16, 27, 43, 0.16), 0 1px 3px rgba(0, 0, 0, 0.06);
+            --box-bg: rgba(240, 253, 244, 0.92);
+            --box-border: rgba(167, 243, 208, 0.95);
+        }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-body);
+            background-image: var(--bg-page-scrim), var(--bg-page-image);
+            background-size: cover;
+            background-position: center center;
+            background-repeat: no-repeat;
+            background-attachment: fixed;
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            overflow-x: clip;
+            transition: background-color 0.2s ease, color 0.2s ease;
+        }
+
+        .top-navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.15rem 2.25rem;
+            position: relative;
+            z-index: 20;
+            background: var(--topbar-bg);
+            backdrop-filter: blur(14px);
+            border-bottom: 1px solid rgba(125, 155, 195, 0.12);
+        }
+
+        .eco-logo-wrap {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 2px;
+        }
+        .eco-logo { height: 22px; width: auto; display: block; }
+        [data-theme="dark"] .eco-logo-light { display: none; }
+        [data-theme="light"] .eco-logo-dark { display: none; }
+        .eco-sub {
+            font-size: 0.68rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            letter-spacing: 0.02em;
+            line-height: 1;
+        }
+        .brand-right { display: flex; align-items: center; gap: 1.25rem; }
+        .schneider-logo-img { height: 30px; width: auto; display: block; transition: filter 0.2s ease; }
+        [data-theme="light"] .schneider-logo-img {
+            filter: brightness(0) saturate(100%) invert(37%) sepia(87%) saturate(950%) hue-rotate(116deg) brightness(95%) contrast(103%);
+        }
+
+        .theme-dropdown-wrapper { position: relative; }
+        .theme-btn {
+            background: rgba(125, 155, 195, 0.12);
+            border: 1px solid rgba(125, 155, 195, 0.28);
+            color: var(--text-primary);
+            padding: 0.45rem 0.85rem;
+            border-radius: 8px;
+            font-size: 0.82rem;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .theme-btn:hover { border-color: var(--brand-green); }
+        .theme-btn svg { width: 14px; height: 14px; stroke: currentColor; fill: none; }
+
+        .theme-menu {
+            position: absolute;
+            right: 0;
+            top: calc(100% + 8px);
+            background: var(--dropdown-bg);
+            border: 1px solid var(--dropdown-border);
+            border-radius: 12px;
+            box-shadow: 0 16px 36px rgba(0, 0, 0, 0.35);
+            width: 250px;
+            padding: 0.6rem;
+            z-index: 50;
+            display: none;
+        }
+        .theme-menu.active { display: block; animation: menuFadeIn 0.15s ease-out; }
+        @keyframes menuFadeIn {
+            from { opacity: 0; transform: translateY(-6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .theme-menu-title {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            font-weight: 700;
+            padding: 0.35rem 0.6rem 0.5rem;
+        }
+
+        .theme-option {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.6rem 0.75rem;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.15s;
+            border: 1px solid transparent;
+            margin-bottom: 0.25rem;
+            color: var(--text-primary);
+        }
+        .theme-option:hover { background: rgba(125, 155, 195, 0.12); }
+        .theme-option.selected {
+            border-color: var(--brand-green);
+            background: rgba(61, 205, 88, 0.1);
+        }
+        .theme-opt-left { display: flex; align-items: center; gap: 0.65rem; }
+        .theme-opt-left svg { width: 18px; height: 18px; stroke: currentColor; fill: none; }
+        .theme-opt-title { font-size: 0.84rem; font-weight: 600; line-height: 1.2; }
+        .theme-opt-sub { font-size: 0.72rem; color: var(--text-secondary); }
+        .theme-check { color: var(--brand-green); display: none; }
+        .theme-option.selected .theme-check { display: block; }
+
+        /* Center Viewport */
+        .main-viewport {
+            flex: 1;
             display: flex;
             justify-content: center;
             align-items: center;
-            min-height: 100vh;
-            background: #0f172a;
-            color: #e2e8f0;
+            padding: 2rem 1.5rem;
+            position: relative;
+            z-index: 10;
         }
 
-        .card {
-            background: #1e293b;
-            border-radius: 16px;
-            padding: 2.5rem;
-            max-width: 440px;
-            width: 90%;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-            border: 1px solid #334155;
+        .auth-card {
+            background: var(--bg-card);
+            border: 1px solid var(--bg-card-border);
+            border-radius: 18px;
+            padding: 2.5rem 2.35rem;
+            max-width: 450px;
+            width: 100%;
+            box-shadow: var(--card-shadow);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            text-align: center;
+            position: relative;
         }
 
-        .logo { font-size: 2rem; text-align: center; margin-bottom: 0.5rem; }
+        .shield-icon-wrapper svg {
+            width: 50px;
+            height: 50px;
+            filter: drop-shadow(0 4px 14px var(--brand-green-glow));
+            margin-bottom: 0.75rem;
+        }
 
-        h1 {
-            font-size: 1.4rem;
+        h1.app-title {
+            font-size: 1.45rem;
             font-weight: 700;
-            margin-bottom: 0.5rem;
-            color: #38bdf8;
-            text-align: center;
+            color: var(--text-primary);
+            margin-bottom: 0.25rem;
         }
 
-        .subtitle {
-            color: #94a3b8;
-            font-size: 0.85rem;
-            text-align: center;
-            margin-bottom: 1.25rem;
+        .app-sub {
+            font-size: 0.84rem;
+            color: var(--text-secondary);
+            margin-bottom: 1.4rem;
         }
 
         .tabs {
@@ -52,53 +230,54 @@
 
         .tab {
             flex: 1;
-            padding: 0.6rem;
+            padding: 0.62rem;
             text-align: center;
             font-size: 0.85rem;
             font-weight: 600;
             border-radius: 8px;
-            border: 1px solid #334155;
+            border: 1px solid var(--border-input);
             cursor: pointer;
             text-decoration: none;
-            color: #94a3b8;
-            background: #0f172a;
+            color: var(--text-secondary);
+            background: var(--bg-input);
             transition: all 0.2s;
         }
 
+        .tab:hover {
+            border-color: var(--brand-green);
+            color: var(--text-primary);
+        }
+
         .tab.active {
-            background: #2563eb;
+            background: var(--brand-green);
             color: white;
-            border-color: #2563eb;
+            border-color: var(--brand-green);
+            box-shadow: 0 4px 12px var(--brand-green-glow);
         }
 
-        .message {
-            padding: 0.75rem 1rem;
+        .alert-error {
+            padding: 0.75rem 0.95rem;
             border-radius: 8px;
-            background: #1e3a5f;
-            border: 1px solid #2563eb;
+            font-size: 0.82rem;
             margin-bottom: 1.25rem;
-            font-size: 0.875rem;
-            color: #bfdbfe;
-        }
-
-        .message.error {
-            background: #3b1c26;
-            border-color: #dc2626;
-            color: #fca5a5;
+            text-align: left;
+            background: rgba(220, 38, 38, 0.12);
+            border: 1px solid rgba(239, 68, 68, 0.35);
+            color: #ef4444;
         }
 
         .qr-section {
             text-align: center;
-            background: #0f172a;
+            background: var(--box-bg);
             padding: 1rem;
             border-radius: 10px;
-            border: 1px solid #334155;
+            border: 1px solid var(--box-border);
             margin-bottom: 1.25rem;
         }
 
         .qr-section p {
             font-size: 0.8rem;
-            color: #94a3b8;
+            color: var(--text-secondary);
             margin-bottom: 0.75rem;
         }
 
@@ -117,25 +296,26 @@
             font-family: monospace;
             font-size: 0.85rem;
             letter-spacing: 0.1em;
-            color: #38bdf8;
+            color: var(--brand-green);
             word-break: break-all;
         }
 
         label {
             display: block;
-            font-size: 0.875rem;
-            font-weight: 500;
-            color: #94a3b8;
+            font-size: 0.84rem;
+            font-weight: 600;
+            color: var(--text-secondary);
             margin-bottom: 0.5rem;
+            text-align: left;
         }
 
         .code-input {
             width: 100%;
-            padding: 0.875rem;
-            border: 2px solid #334155;
+            padding: 0.85rem;
+            border: 1.5px solid var(--border-input);
             border-radius: 10px;
-            background: #0f172a;
-            color: #e2e8f0;
+            background: var(--bg-input);
+            color: var(--text-primary);
             font-size: 1.5rem;
             letter-spacing: 0.3em;
             text-align: center;
@@ -145,29 +325,28 @@
 
         .code-input:focus {
             outline: none;
-            border-color: #38bdf8;
-            box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.15);
+            border-color: var(--border-focus);
+            box-shadow: 0 0 0 4px var(--brand-green-glow);
         }
 
-        .submit-btn {
+        .btn-submit {
             width: 100%;
-            padding: 0.875rem;
+            padding: 0.85rem;
             border: none;
             border-radius: 10px;
-            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            background: var(--brand-green);
             color: white;
-            font-size: 1rem;
+            font-size: 0.98rem;
             font-weight: 600;
             cursor: pointer;
-            transition: transform 0.1s, box-shadow 0.2s;
+            transition: all 0.2s;
+            box-shadow: 0 4px 14px var(--brand-green-glow);
         }
 
-        .submit-btn:hover {
+        .btn-submit:hover {
+            background: var(--brand-green-hover);
             transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
         }
-
-        .submit-btn:active { transform: translateY(0); }
 
         .resend-section {
             text-align: center;
@@ -178,94 +357,172 @@
         .resend-btn {
             background: none;
             border: none;
-            color: #38bdf8;
+            color: var(--brand-green);
             cursor: pointer;
             font-size: 0.85rem;
             text-decoration: underline;
             padding: 0;
         }
 
-        .resend-btn:disabled {
-            color: #64748b;
-            cursor: not-allowed;
-            text-decoration: none;
+        .footer-tagline {
+            margin-top: 1.5rem;
+            font-size: 0.74rem;
+            color: var(--text-muted);
         }
 
-        .footer {
-            text-align: center;
-            margin-top: 1.5rem;
-            font-size: 0.75rem;
-            color: #475569;
+        @media (max-width: 640px) {
+            .top-navbar { padding: 1rem 1.25rem; }
+            .auth-card { padding: 2rem 1.5rem; }
         }
     </style>
 </head>
 <body>
-    <div class="card">
-        <div class="logo">🔐</div>
-        <h1>Multi-Factor Verification</h1>
-        <p class="subtitle">{{.MaskedEmail}}</p>
 
-        <div class="tabs">
-            <a class="tab {{if eq .Method "totp"}}active{{end}}" href="?method=totp&session_id={{.SessionID}}">Authenticator App</a>
-            <a class="tab {{if eq .Method "email"}}active{{end}}" href="?method=email&session_id={{.SessionID}}">Email OTP</a>
+    <!-- Top Navigation Bar -->
+    <header class="top-navbar">
+        <div class="brand-left">
+            <div class="eco-logo-wrap">
+                <img src="/static/img/ecostruxure-dark.png" alt="EcoStruxure" class="eco-logo eco-logo-dark">
+                <img src="/static/img/ecostruxure-light.png" alt="EcoStruxure" class="eco-logo eco-logo-light">
+                <span class="eco-sub">IT Advisor</span>
+            </div>
         </div>
 
-        {{if .ErrorMessage}}
-        <div class="message error">{{.ErrorMessage}}</div>
-        {{end}}
+        <div class="brand-right">
+            <!-- Theme Dropdown -->
+            <div class="theme-dropdown-wrapper">
+                <button type="button" class="theme-btn" id="themeDropdownBtn" onclick="toggleThemeMenu()">
+                    <span id="themeBtnIcon">
+                        <svg viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                    </span>
+                    <span id="themeBtnLabel">Theme</span>
+                    <svg viewBox="0 0 24 24" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
 
-        {{if and .EnrollmentRequired (eq .Method "totp")}}
-        <div class="qr-section">
-            <p>Scan with Microsoft Authenticator, Google Authenticator or standard TOTP app:</p>
-            {{if .QRCodeDataURI}}
-            <img class="qr-image" src="{{.QRCodeDataURI}}" alt="TOTP QR Code"/>
+                <div class="theme-menu" id="themeMenu">
+                    <div class="theme-menu-title">Appearance</div>
+                    <div class="theme-option" data-val="system" onclick="selectTheme('system')">
+                        <div class="theme-opt-left">
+                            <svg viewBox="0 0 24 24" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                            <div>
+                                <div class="theme-opt-title">Device Mode</div>
+                                <div class="theme-opt-sub">Follow OS preference</div>
+                            </div>
+                        </div>
+                        <div class="theme-check">
+                            <svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3" fill="none"><polyline points="20 6 9 17 4 12"/></svg>
+                        </div>
+                    </div>
+
+                    <div class="theme-option" data-val="light" onclick="selectTheme('light')">
+                        <div class="theme-opt-left">
+                            <svg viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                            <div>
+                                <div class="theme-opt-title">Light Mode</div>
+                                <div class="theme-opt-sub">Always use light theme</div>
+                            </div>
+                        </div>
+                        <div class="theme-check">
+                            <svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3" fill="none"><polyline points="20 6 9 17 4 12"/></svg>
+                        </div>
+                    </div>
+
+                    <div class="theme-option" data-val="dark" onclick="selectTheme('dark')">
+                        <div class="theme-opt-left">
+                            <svg viewBox="0 0 24 24" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                            <div>
+                                <div class="theme-opt-title">Dark Mode</div>
+                                <div class="theme-opt-sub">Always use dark theme</div>
+                            </div>
+                        </div>
+                        <div class="theme-check">
+                            <svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3" fill="none"><polyline points="20 6 9 17 4 12"/></svg>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Schneider Electric Brand Logo -->
+            <img src="/static/img/schneider-electric.png" alt="Schneider Electric" class="schneider-logo-img">
+        </div>
+    </header>
+
+    <!-- Center Card -->
+    <main class="main-viewport">
+        <div class="auth-card">
+            <div class="shield-icon-wrapper">
+                <svg viewBox="0 0 64 64" fill="none">
+                    <path d="M32 4L10 13V29C10 43.5 19.5 56.2 32 60C44.5 56.2 54 43.5 54 29V13L32 4Z" fill="var(--brand-green)" fill-opacity="0.2" stroke="var(--brand-green)" stroke-width="3"/>
+                    <rect x="24" y="28" width="16" height="14" rx="2" fill="var(--brand-green)"/>
+                    <path d="M27 28V23C27 20.2 29.2 18 32 18C34.8 18 37 20.2 37 23V28" stroke="var(--brand-green)" stroke-width="3"/>
+                </svg>
+            </div>
+
+            <h1 class="app-title">Multi-Factor Verification</h1>
+            <p class="app-sub">{{.MaskedEmail}}</p>
+
+            <div class="tabs">
+                <a class="tab {{if eq .Method "totp"}}active{{end}}" href="?method=totp&session_id={{.SessionID}}">Authenticator App</a>
+                <a class="tab {{if eq .Method "email"}}active{{end}}" href="?method=email&session_id={{.SessionID}}">Email OTP</a>
+            </div>
+
+            {{if .ErrorMessage}}
+            <div class="alert-error">{{.ErrorMessage}}</div>
             {{end}}
-            {{if .SecretKey}}
-            <div class="secret-key">Key: {{.SecretKey}}</div>
+
+            {{if and .EnrollmentRequired (eq .Method "totp")}}
+            <div class="qr-section">
+                <p>Scan with Microsoft Authenticator, Google Authenticator or standard TOTP app:</p>
+                {{if .QRCodeDataURI}}
+                <img class="qr-image" src="{{.QRCodeDataURI}}" alt="TOTP QR Code"/>
+                {{end}}
+                {{if .SecretKey}}
+                <div class="secret-key">Key: {{.SecretKey}}</div>
+                {{end}}
+            </div>
             {{end}}
-        </div>
-        {{end}}
 
-        <form method="POST" action="/mfa/verify" id="mfa-form">
-            <input type="hidden" name="session_id" value="{{.SessionID}}"/>
-            <input type="hidden" name="csrf_token" value="{{.CSRFToken}}"/>
-            <input type="hidden" name="method" value="{{.Method}}"/>
-            <input type="hidden" name="is_pending" value="{{if .EnrollmentRequired}}true{{else}}false{{end}}"/>
-
-            <label for="code">Verification Code</label>
-            <input type="text"
-                   id="code"
-                   name="code"
-                   class="code-input"
-                   placeholder="000000"
-                   maxlength="8"
-                   autocomplete="one-time-code"
-                   inputmode="numeric"
-                   pattern="[0-9]*"
-                   autofocus
-                   required/>
-
-            <button type="submit" class="submit-btn">Verify Code</button>
-        </form>
-
-        {{if and (not .EnrollmentRequired) (eq .Method "totp")}}
-        <div class="resend-section">
-            <a href="?method=totp&re_enroll=true&session_id={{.SessionID}}" class="resend-btn" style="color: #38bdf8; text-decoration: underline; font-size: 0.85rem;">Scan New QR Code / Re-enroll</a>
-        </div>
-        {{end}}
-
-        {{if eq .Method "email"}}
-        <div class="resend-section">
-            <form method="POST" action="/mfa/resend" style="display: inline;">
+            <form method="POST" action="/mfa/verify" id="mfa-form">
                 <input type="hidden" name="session_id" value="{{.SessionID}}"/>
                 <input type="hidden" name="csrf_token" value="{{.CSRFToken}}"/>
-                <input type="hidden" name="method" value="email"/>
-                <button type="submit" id="resend-btn" class="resend-btn">Resend OTP Code</button>
-            </form>
-        </div>
-        {{end}}
+                <input type="hidden" name="method" value="{{.Method}}"/>
+                <input type="hidden" name="is_pending" value="{{if .EnrollmentRequired}}true{{else}}false{{end}}"/>
 
-        <div class="footer">SAMLGuard Enterprise MFA Gateway</div>
-    </div>
+                <label for="code">Verification Code</label>
+                <input type="text"
+                       id="code"
+                       name="code"
+                       class="code-input"
+                       placeholder="000000"
+                       maxlength="8"
+                       autocomplete="one-time-code"
+                       inputmode="numeric"
+                       pattern="[0-9]*"
+                       autofocus
+                       required/>
+
+                <button type="submit" class="btn-submit">Verify Code & Continue</button>
+            </form>
+
+            {{if and (not .EnrollmentRequired) (eq .Method "totp")}}
+            <div class="resend-section">
+                <a href="?method=totp&re_enroll=true&session_id={{.SessionID}}" class="resend-btn">Scan New QR Code / Re-enroll</a>
+            </div>
+            {{end}}
+
+            {{if eq .Method "email"}}
+            <div class="resend-section">
+                <form method="POST" action="/mfa/resend" style="display: inline;">
+                    <input type="hidden" name="session_id" value="{{.SessionID}}"/>
+                    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}"/>
+                    <input type="hidden" name="method" value="email"/>
+                    <button type="submit" id="resend-btn" class="resend-btn">Resend OTP Code</button>
+                </form>
+            </div>
+            {{end}}
+
+            <div class="footer-tagline">SAMLGuard Enterprise MFA Gateway</div>
+        </div>
+    </main>
 </body>
 </html>

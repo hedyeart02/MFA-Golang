@@ -1,202 +1,894 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SAMLGuard - Dedicated Admin Settings</title>
+    <title>SAMLGuard Gateway Settings - EcoStruxure™ IT Advisor</title>
+    <script src="/static/js/theme.js"></script>
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root, [data-theme="dark"] {
+            --bg-body: #101B2B;
+            --bg-sidebar: rgba(11, 20, 33, 0.84);
+            --bg-sidebar-hover: rgba(23, 37, 54, 0.85);
+            --bg-sidebar-active: #00B050;
+            --bg-topbar: rgba(16, 27, 43, 0.82);
+            --bg-hero-image: url('/assets/backgrounds/bg-console-dark.png');
+            --bg-console-scrim: linear-gradient(135deg, rgba(16, 27, 43, 0.56) 0%, rgba(16, 27, 43, 0.34) 55%, rgba(16, 27, 43, 0.42) 100%);
+            --bg-content: transparent;
+            --bg-card: rgba(23, 37, 54, 0.88);
+            --bg-card-subtle: rgba(18, 30, 46, 0.88);
+            --bg-input: rgba(16, 27, 43, 0.90);
+            --border-main: rgba(148, 178, 214, 0.18);
+            --border-card: rgba(148, 178, 214, 0.16);
+            --border-input: #27405e;
+            --border-focus: #00B050;
+            --text-primary: #f1f6fc;
+            --text-secondary: #b2c5dc;
+            --text-muted: #7f96b3;
+            --brand-green: #00B050;
+            --brand-green-hover: #009845;
+            --brand-green-dark: #00823a;
+            --brand-green-glow: rgba(0, 176, 80, 0.30);
+            --dropdown-bg: #172536;
+            --dropdown-border: #253d5c;
+            --code-bg: #101B2B;
+            --code-color: #3dcd58;
+            --empty-tower-glass: #1b314d;
+            --empty-tower-dark: #101B2B;
+        }
+
+        [data-theme="light"] {
+            --bg-body: #f1f4f8;
+            --bg-sidebar: rgba(255, 255, 255, 0.86);
+            --bg-sidebar-hover: rgba(241, 245, 249, 0.90);
+            --bg-sidebar-active: #00B050;
+            --bg-topbar: rgba(255, 255, 255, 0.86);
+            --bg-hero-image: url('/assets/backgrounds/bg-console-light.png');
+            --bg-console-scrim: linear-gradient(135deg, rgba(248, 250, 252, 0.62) 0%, rgba(248, 250, 252, 0.40) 55%, rgba(241, 244, 248, 0.50) 100%);
+            --bg-content: transparent;
+            --bg-card: rgba(255, 255, 255, 0.90);
+            --bg-card-subtle: rgba(248, 250, 252, 0.90);
+            --bg-input: #ffffff;
+            --border-main: rgba(16, 27, 43, 0.10);
+            --border-card: rgba(16, 27, 43, 0.10);
+            --border-input: #cbd5e1;
+            --border-focus: #00B050;
+            --text-primary: #101B2B;
+            --text-secondary: #334155;
+            --text-muted: #64748b;
+            --brand-green: #00B050;
+            --brand-green-hover: #009845;
+            --brand-green-dark: #007d39;
+            --brand-green-glow: rgba(0, 176, 80, 0.25);
+            --dropdown-bg: #ffffff;
+            --dropdown-border: #cbd5e1;
+            --code-bg: #f1f5f9;
+            --code-color: #008744;
+            --empty-tower-glass: #c9dbed;
+            --empty-tower-dark: #a1b8d2;
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            background: #0b0f19;
-            color: #e2e8f0;
-            line-height: 1.5;
+            background-color: var(--bg-body);
+            color: var(--text-primary);
             min-height: 100vh;
-            padding: 1.5rem;
-        }
-        .container {
-            max-width: 1100px;
-            margin: 0 auto;
-        }
-        header {
             display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 1rem;
-            padding-bottom: 1.25rem;
-            border-bottom: 1px solid #1e293b;
-            margin-bottom: 1.5rem;
+            transition: background-color 0.2s ease, color 0.2s ease;
+            overflow-x: clip;
         }
-        .brand {
+
+        /* Full-viewport static floating background for Admin Console */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-color: var(--bg-body);
+            background-image: var(--bg-console-scrim), var(--bg-hero-image);
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* App Wrapper with Sidebar + Main Content */
+        .app-layout {
+            display: flex;
+            width: 100%;
+            min-height: 100vh;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* ----------------- SIDEBAR ----------------- */
+        .sidebar {
+            width: 250px;
+            background-color: var(--bg-sidebar);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border-right: 1px solid var(--border-main);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            height: 100vh;
+            align-self: flex-start;
+            overflow-y: auto;
+            overflow-x: hidden;
+            z-index: 30;
+            transition: width 0.25s ease, transform 0.25s ease;
+            flex-shrink: 0;
+        }
+
+        .sidebar.collapsed {
+            width: 72px;
+        }
+
+        .sidebar-header {
+            padding: 1.25rem 1.15rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border-main);
+            gap: 0.5rem;
+        }
+
+        .sidebar-brand {
             display: flex;
             align-items: center;
             gap: 0.75rem;
+            text-decoration: none;
+            color: inherit;
+            overflow: hidden;
+            white-space: nowrap;
         }
-        .brand-icon {
-            font-size: 2rem;
-            background: linear-gradient(135deg, #1e3a8a, #0284c7);
-            border-radius: 12px;
-            width: 48px;
-            height: 48px;
+
+        .sidebar-brand-icon {
+            width: 34px;
+            height: 34px;
+            flex-shrink: 0;
             display: flex;
             align-items: center;
             justify-content: center;
-            border: 1px solid #38bdf8;
-            box-shadow: 0 0 15px rgba(56, 189, 248, 0.2);
         }
-        .brand-title h1 {
-            font-size: 1.35rem;
+
+        .sidebar-brand-icon svg {
+            width: 32px;
+            height: 32px;
+            filter: drop-shadow(0 2px 8px var(--brand-green-glow));
+        }
+
+        .sidebar-brand-text {
+            display: flex;
+            flex-direction: column;
+            transition: opacity 0.2s;
+        }
+
+        .sidebar.collapsed .sidebar-brand-text {
+            display: none;
+        }
+
+        .brand-name {
+            font-size: 1.12rem;
             font-weight: 700;
-            color: #f8fafc;
+            color: var(--text-primary);
+            line-height: 1.15;
+            letter-spacing: -0.01em;
+        }
+
+        .brand-subtitle {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .sidebar-collapse-btn {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 0.35rem;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .sidebar-collapse-btn:hover {
+            color: var(--text-primary);
+            background: rgba(125, 155, 195, 0.12);
+        }
+
+        .sidebar-collapse-btn svg {
+            width: 16px;
+            height: 16px;
+            stroke: currentColor;
+            fill: none;
+            transition: transform 0.25s ease;
+        }
+
+        .sidebar.collapsed .sidebar-collapse-btn svg {
+            transform: rotate(180deg);
+        }
+
+        /* Sidebar Navigation Menu */
+        .sidebar-menu {
+            padding: 1rem 0.65rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+            flex: 1;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 0.85rem;
+            padding: 0.75rem 0.95rem;
+            border-radius: 10px;
+            color: var(--text-secondary);
+            font-size: 0.88rem;
+            font-weight: 500;
+            text-decoration: none;
+            cursor: pointer;
+            border: none;
+            background: none;
+            width: 100%;
+            text-align: left;
+            transition: all 0.18s ease;
+            white-space: nowrap;
+            overflow: hidden;
+        }
+
+        .nav-item:hover {
+            background-color: var(--bg-sidebar-hover);
+            color: var(--text-primary);
+        }
+
+        .nav-item.active {
+            background-color: var(--bg-sidebar-active);
+            color: #ffffff;
+            font-weight: 600;
+            box-shadow: 0 4px 14px var(--brand-green-glow);
+        }
+
+        .nav-item svg {
+            width: 20px;
+            height: 20px;
+            stroke: currentColor;
+            fill: none;
+            flex-shrink: 0;
+        }
+
+        .sidebar.collapsed .nav-item {
+            justify-content: center;
+            padding: 0.75rem 0;
+        }
+
+        .sidebar.collapsed .nav-item span {
+            display: none;
+        }
+
+        /* Sidebar Bottom Decoration & Status */
+        .sidebar-footer {
+            position: relative;
+            padding: 1.25rem 1rem;
+            border-top: 1px solid var(--border-main);
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        .sidebar-wave-art {
+            position: absolute;
+            left: 0;
+            bottom: 0;
+            width: 100%;
+            height: 70px;
+            pointer-events: none;
+            opacity: 0.6;
+        }
+
+        .sidebar-status-box {
+            position: relative;
+            z-index: 2;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.76rem;
+            color: var(--text-muted);
+        }
+
+        .status-dot-wrap {
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: var(--brand-green);
+            box-shadow: 0 0 8px var(--brand-green);
+        }
+
+        .sidebar.collapsed .sidebar-status-box span {
+            display: none;
+        }
+
+        /* ----------------- MAIN VIEWPORT ----------------- */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            min-height: 100vh;
+            background-color: var(--bg-content);
+        }
+
+        /* Top Header Navbar */
+        .topbar {
+            height: 60px;
+            background-color: var(--bg-topbar);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border-bottom: 1px solid var(--border-main);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 1.5rem;
+            position: sticky;
+            top: 0;
+            z-index: 25;
+        }
+
+        .topbar-left {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .topbar-brand {
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+        }
+
+        .topbar-divider {
+            color: var(--border-main);
+            font-weight: 300;
+            font-size: 1.2rem;
+            margin: 0 0.2rem;
+        }
+
+        .topbar-app-name {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.01em;
+        }
+
+        .topbar-right {
+            display: flex;
+            align-items: center;
+            gap: 0.85rem;
+        }
+
+        .icon-btn {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 0.45rem;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            transition: all 0.15s;
+        }
+
+        .icon-btn:hover {
+            color: var(--text-primary);
+            background: rgba(125, 155, 195, 0.12);
+        }
+
+        .icon-btn svg {
+            width: 18px;
+            height: 18px;
+            stroke: currentColor;
+            fill: none;
+        }
+
+        .notification-badge-dot {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            width: 7px;
+            height: 7px;
+            background: var(--brand-green);
+            border-radius: 50%;
+            border: 1.5px solid var(--bg-topbar);
+        }
+
+        /* Theme Dropdown in Topbar */
+        .theme-dropdown-wrap {
+            position: relative;
+        }
+
+        .theme-pill-btn {
+            background: rgba(125, 155, 195, 0.1);
+            border: 1px solid var(--border-main);
+            color: var(--text-primary);
+            padding: 0.4rem 0.8rem;
+            border-radius: 8px;
+            font-size: 0.82rem;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            cursor: pointer;
+            transition: all 0.18s;
+        }
+
+        .theme-pill-btn:hover {
+            border-color: var(--brand-green);
+        }
+
+        .theme-pill-btn svg {
+            width: 15px;
+            height: 15px;
+            stroke: currentColor;
+            fill: none;
+        }
+
+        .theme-menu {
+            position: absolute;
+            right: 0;
+            top: calc(100% + 8px);
+            background: var(--dropdown-bg);
+            border: 1px solid var(--dropdown-border);
+            border-radius: 12px;
+            box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4);
+            width: 250px;
+            padding: 0.6rem;
+            z-index: 50;
+            display: none;
+        }
+
+        .theme-menu.active {
+            display: block;
+            animation: menuFadeIn 0.15s ease-out;
+        }
+
+        @keyframes menuFadeIn {
+            from { opacity: 0; transform: translateY(-6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .theme-menu-title {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            font-weight: 700;
+            padding: 0.35rem 0.6rem 0.5rem;
+        }
+
+        .theme-option {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.6rem 0.75rem;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.15s;
+            border: 1px solid transparent;
+            margin-bottom: 0.25rem;
+            color: var(--text-primary);
+        }
+
+        .theme-option:hover {
+            background: rgba(125, 155, 195, 0.12);
+        }
+
+        .theme-option.selected {
+            border-color: var(--brand-green);
+            background: rgba(61, 205, 88, 0.08);
+        }
+
+        .theme-opt-left {
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+        }
+
+        .theme-opt-left svg {
+            width: 18px;
+            height: 18px;
+            stroke: currentColor;
+            fill: none;
+        }
+
+        .theme-opt-title {
+            font-size: 0.84rem;
+            font-weight: 600;
+            line-height: 1.2;
+        }
+
+        .theme-opt-sub {
+            font-size: 0.72rem;
+            color: var(--text-secondary);
+        }
+
+        .theme-check {
+            color: var(--brand-green);
+            display: none;
+        }
+
+        .theme-option.selected .theme-check {
+            display: block;
+        }
+
+        .eco-logo-wrap {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 2px;
+        }
+
+        .eco-logo {
+            height: 20px;
+            width: auto;
+            display: block;
+        }
+
+        [data-theme="dark"] .eco-logo-light { display: none; }
+        [data-theme="light"] .eco-logo-dark { display: none; }
+
+        .eco-sub {
+            font-size: 0.62rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            letter-spacing: 0.02em;
+            line-height: 1;
+        }
+
+        /* Schneider Electric Green Block Logo */
+        .schneider-block {
+            background-color: #009e4f;
+            color: #ffffff;
+            height: 40px;
+            padding: 0 1.15rem;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.85rem;
+            letter-spacing: -0.02em;
+            box-shadow: 0 2px 8px rgba(0, 158, 79, 0.3);
+            text-decoration: none;
+        }
+
+        .schneider-block img {
+            height: 24px;
+            width: auto;
+            display: block;
+        }
+
+        /* ----------------- HERO BANNER ----------------- */
+        .hero-banner {
+            background: transparent;
+            border-bottom: 1px solid var(--border-main);
+            padding: 2.2rem 2.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: relative;
+            overflow: hidden;
+            min-height: 165px;
+        }
+
+        .hero-banner-content {
+            position: relative;
+            z-index: 5;
+            max-width: 600px;
+        }
+
+        .hero-title-row {
+            display: flex;
+            align-items: center;
+            gap: 0.85rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .hero-icon svg {
+            width: 32px;
+            height: 32px;
+            stroke: var(--text-primary);
+            fill: none;
+        }
+
+        .hero-title {
+            font-size: 1.75rem;
+            font-weight: 700;
+            color: var(--text-primary);
             letter-spacing: -0.02em;
         }
-        .brand-title p {
-            font-size: 0.8rem;
-            color: #94a3b8;
+
+        .hero-desc {
+            font-size: 0.88rem;
+            color: var(--text-secondary);
+            margin-bottom: 1.4rem;
         }
-        .header-meta {
+
+        .hero-actions {
             display: flex;
             align-items: center;
             gap: 0.75rem;
             flex-wrap: wrap;
         }
-        .badge {
-            font-size: 0.75rem;
-            padding: 0.35rem 0.65rem;
-            border-radius: 9999px;
-            font-weight: 600;
-            display: inline-flex;
-            align-items: center;
-            gap: 0.35rem;
-        }
-        .badge-success { background: #064e3b; color: #34d399; border: 1px solid #059669; }
-        .badge-info { background: #1e3a8a; color: #60a5fa; border: 1px solid #2563eb; }
-        .badge-warning { background: #78350f; color: #fbbf24; border: 1px solid #d97706; }
-        .btn-link {
-            color: #38bdf8;
-            text-decoration: none;
-            font-size: 0.85rem;
-            padding: 0.4rem 0.8rem;
-            border-radius: 6px;
-            border: 1px solid #334155;
-            background: #1e293b;
-            transition: all 0.2s;
-        }
-        .btn-link:hover {
-            background: #334155;
+
+        .btn-green-add {
+            background-color: var(--brand-green);
             color: #ffffff;
-        }
-        .nav-tabs {
-            display: flex;
-            gap: 0.5rem;
-            margin-bottom: 1.5rem;
-            border-bottom: 1px solid #1e293b;
-            padding-bottom: 0.5rem;
-            overflow-x: auto;
-        }
-        .tab-btn {
-            background: #111827;
-            color: #94a3b8;
-            border: 1px solid #1e293b;
-            padding: 0.7rem 1.2rem;
+            border: none;
             border-radius: 8px;
-            font-size: 0.9rem;
+            padding: 0.62rem 1.25rem;
+            font-size: 0.88rem;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.2s;
-            display: flex;
+            display: inline-flex;
             align-items: center;
             gap: 0.5rem;
-            white-space: nowrap;
+            transition: all 0.18s;
+            box-shadow: 0 4px 14px var(--brand-green-glow);
         }
-        .tab-btn:hover {
-            background: #1f2937;
-            color: #e2e8f0;
+
+        .btn-green-add:hover {
+            background-color: var(--brand-green-hover);
+            transform: translateY(-1px);
         }
-        .tab-btn.active {
-            background: #2563eb;
-            color: #ffffff;
-            border-color: #3b82f6;
-            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+
+        .btn-green-add svg {
+            width: 16px;
+            height: 16px;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 2.5;
         }
-        .tab-pane {
+
+        .hero-search-box {
+            position: relative;
+            display: flex;
+            align-items: center;
+            min-width: 260px;
+        }
+
+        .hero-search-box input {
+            width: 100%;
+            background-color: var(--bg-card-subtle);
+            border: 1px solid var(--border-input);
+            border-radius: 8px;
+            padding: 0.62rem 0.85rem 0.62rem 2.25rem;
+            color: var(--text-primary);
+            font-size: 0.86rem;
+            font-family: inherit;
+            transition: border-color 0.2s;
+        }
+
+        .hero-search-box input:focus {
+            outline: none;
+            border-color: var(--border-focus);
+            box-shadow: 0 0 0 3px var(--brand-green-glow);
+        }
+
+        .hero-search-icon {
+            position: absolute;
+            left: 0.75rem;
+            color: var(--text-muted);
+            pointer-events: none;
+            display: flex;
+        }
+
+        .hero-search-icon svg {
+            width: 15px;
+            height: 15px;
+            stroke: currentColor;
+            fill: none;
+        }
+
+        .hero-filter-btn {
+            background-color: var(--bg-card-subtle);
+            border: 1px solid var(--border-input);
+            color: var(--text-secondary);
+            border-radius: 8px;
+            padding: 0.62rem 0.85rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s;
+        }
+
+        .hero-filter-btn:hover {
+            color: var(--text-primary);
+            border-color: var(--brand-green);
+        }
+
+        .hero-filter-btn svg {
+            width: 16px;
+            height: 16px;
+            stroke: currentColor;
+            fill: none;
+        }
+
+        /* ----------------- CONTENT CONTAINER ----------------- */
+        .page-body {
+            padding: 2rem 2.5rem;
+            flex: 1;
+            max-width: 1300px;
+            width: 100%;
+        }
+
+        /* Alerts */
+        .flash-alert {
+            padding: 0.85rem 1.15rem;
+            border-radius: 8px;
+            font-size: 0.88rem;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .alert-success {
+            background: rgba(16, 185, 129, 0.12);
+            border: 1px solid rgba(16, 185, 129, 0.35);
+            color: #34d399;
+        }
+
+        .alert-danger {
+            background: rgba(239, 68, 68, 0.12);
+            border: 1px solid rgba(239, 68, 68, 0.35);
+            color: #f87171;
+        }
+
+        /* ----------------- TAB PANES ----------------- */
+        .tab-content-pane {
             display: none;
             animation: fadeIn 0.2s ease-in-out;
         }
-        .tab-pane.active {
+
+        .tab-content-pane.active {
             display: block;
         }
+
         @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(4px); }
+            from { opacity: 0; transform: translateY(5px); }
             to { opacity: 1; transform: translateY(0); }
         }
-        .card {
-            background: #111827;
-            border: 1px solid #1f2937;
-            border-radius: 12px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+
+        /* Empty State Illustration for Customers */
+        .empty-state-card {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 4.5rem 2rem;
+            text-align: center;
         }
+
+        .empty-state-art {
+            width: 160px;
+            height: 140px;
+            margin-bottom: 1.5rem;
+        }
+
+        .empty-state-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 0.4rem;
+        }
+
+        .empty-state-desc {
+            font-size: 0.88rem;
+            color: var(--text-secondary);
+            margin-bottom: 1.6rem;
+            max-width: 360px;
+        }
+
+        /* Content Cards & Sections */
+        .card {
+            background: var(--bg-card);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--border-card);
+            border-radius: 12px;
+            padding: 1.6rem;
+            margin-bottom: 1.6rem;
+            box-shadow: 0 8px 28px rgba(0, 0, 0, 0.14);
+        }
+
         .card-header {
-            margin-bottom: 1.25rem;
-            padding-bottom: 0.75rem;
-            border-bottom: 1px solid #1f2937;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            padding-bottom: 1rem;
+            margin-bottom: 1.25rem;
+            border-bottom: 1px solid var(--border-card);
+            flex-wrap: wrap;
+            gap: 0.75rem;
         }
+
         .card-header h2 {
             font-size: 1.15rem;
             font-weight: 600;
-            color: #f1f5f9;
+            color: var(--text-primary);
             display: flex;
             align-items: center;
-            gap: 0.5rem;
+            gap: 0.6rem;
         }
+
         .grid-2 {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
             gap: 1.25rem;
         }
+
         .form-group {
             margin-bottom: 1.15rem;
         }
-        label {
+
+        .form-group label {
             display: block;
             font-size: 0.85rem;
             font-weight: 600;
-            margin-bottom: 0.4rem;
-            color: #cbd5e1;
+            margin-bottom: 0.45rem;
+            color: var(--text-secondary);
         }
+
         .help-text {
-            font-size: 0.75rem;
-            color: #64748b;
-            margin-top: 0.25rem;
+            font-size: 0.76rem;
+            color: var(--text-muted);
+            margin-top: 0.35rem;
+            line-height: 1.4;
         }
+
         input[type="text"], input[type="password"], input[type="number"], select, textarea {
             width: 100%;
-            background: #0b0f19;
-            border: 1px solid #334155;
+            background: var(--bg-input);
+            border: 1px solid var(--border-input);
             border-radius: 8px;
             padding: 0.65rem 0.85rem;
-            color: #f8fafc;
+            color: var(--text-primary);
             font-size: 0.9rem;
             font-family: inherit;
             transition: all 0.2s;
         }
+
         input:focus, select:focus, textarea:focus {
             outline: none;
-            border-color: #38bdf8;
-            box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+            border-color: var(--border-focus);
+            box-shadow: 0 0 0 3px var(--brand-green-glow);
         }
+
         .input-group {
             display: flex;
             gap: 0.5rem;
         }
+
         .btn {
-            background: #2563eb;
+            background: var(--brand-green);
             color: #ffffff;
             border: none;
             border-radius: 8px;
@@ -209,73 +901,114 @@
             align-items: center;
             gap: 0.5rem;
         }
-        .btn:hover { background: #1d4ed8; }
+
+        .btn:hover { background: var(--brand-green-hover); }
+
         .btn-secondary {
-            background: #1e293b;
-            color: #cbd5e1;
-            border: 1px solid #334155;
+            background: var(--bg-card-subtle);
+            color: var(--text-secondary);
+            border: 1px solid var(--border-input);
         }
+
         .btn-secondary:hover {
-            background: #334155;
-            color: #ffffff;
+            background: rgba(125, 155, 195, 0.15);
+            color: var(--text-primary);
         }
-        .btn-success { background: #059669; }
-        .btn-success:hover { background: #047857; }
-        .btn-danger { background: #dc2626; }
+
+        .btn-danger { background: #dc2626; color: #ffffff; }
         .btn-danger:hover { background: #b91c1c; }
+
         .btn-sm {
             padding: 0.35rem 0.65rem;
             font-size: 0.75rem;
+            border-radius: 6px;
         }
+
+        /* Preset buttons */
+        .preset-bar {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .preset-btn {
+            background: var(--bg-card-subtle);
+            border: 1px solid var(--border-input);
+            color: var(--text-secondary);
+            border-radius: 6px;
+            padding: 0.4rem 0.8rem;
+            font-size: 0.78rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .preset-btn:hover {
+            border-color: var(--brand-green);
+            color: var(--text-primary);
+        }
+
+        /* Guide boxes */
         .guide-box {
-            background: #0f172a;
-            border: 1px solid #1e3a8a;
+            background: var(--bg-card-subtle);
+            border: 1px solid var(--border-card);
             border-radius: 10px;
             padding: 1.25rem;
             margin-top: 1.25rem;
         }
+
         .guide-box h3 {
             font-size: 0.95rem;
-            color: #38bdf8;
+            color: var(--brand-green);
             margin-bottom: 0.75rem;
             display: flex;
             align-items: center;
             gap: 0.4rem;
         }
+
         .guide-item {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            background: #1e293b;
+            background: var(--bg-card);
             padding: 0.5rem 0.75rem;
             border-radius: 6px;
             margin-bottom: 0.5rem;
-            font-family: monospace;
-            font-size: 0.85rem;
-            color: #cbd5e1;
-            border: 1px solid #334155;
+            font-family: ui-monospace, SFMono-Regular, monospace;
+            font-size: 0.82rem;
+            color: var(--text-secondary);
+            border: 1px solid var(--border-card);
         }
+
         .guide-item .val {
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
             margin-right: 0.5rem;
-            color: #93c5fd;
+            color: var(--text-primary);
         }
+
+        /* Toggle switch */
+        .form-group label.toggle-label,
         .toggle-label {
             display: flex;
             align-items: center;
             cursor: pointer;
-            gap: 0.75rem;
+            gap: 0.85rem;
+            margin-bottom: 0;
         }
+
         .toggle-switch {
             position: relative;
-            width: 44px;
-            height: 24px;
-            background: #334155;
+            display: inline-block;
+            width: 46px;
+            height: 26px;
+            background: var(--border-input);
+            border: 1px solid rgba(148, 178, 214, 0.25);
             border-radius: 9999px;
-            transition: 0.2s;
+            transition: background-color 0.2s ease, border-color 0.2s ease;
+            flex-shrink: 0;
         }
+
         .toggle-switch::after {
             content: '';
             position: absolute;
@@ -285,878 +1018,1136 @@
             height: 20px;
             background: #ffffff;
             border-radius: 50%;
-            transition: 0.2s;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+            transition: transform 0.2s ease;
         }
+
         input[type="checkbox"]:checked + .toggle-switch {
-            background: #2563eb;
+            background: var(--brand-green);
+            border-color: var(--brand-green);
         }
+
         input[type="checkbox"]:checked + .toggle-switch::after {
             transform: translateX(20px);
         }
-        input[type="checkbox"] { display: none; }
-        .preset-bar {
-            display: flex;
-            gap: 0.5rem;
-            flex-wrap: wrap;
-            margin-bottom: 1.25rem;
+
+        input[type="checkbox"]:focus-visible + .toggle-switch {
+            box-shadow: 0 0 0 3px var(--brand-green-glow);
         }
-        .preset-btn {
-            background: #1e293b;
-            border: 1px solid #334155;
-            color: #94a3b8;
-            border-radius: 6px;
-            padding: 0.45rem 0.85rem;
-            font-size: 0.8rem;
-            cursor: pointer;
-            transition: all 0.2s;
+
+        input[type="checkbox"] {
+            position: absolute;
+            opacity: 0;
+            width: 0;
+            height: 0;
+            pointer-events: none;
         }
-        .preset-btn:hover {
-            background: #334155;
-            color: #38bdf8;
-            border-color: #38bdf8;
-        }
+
+        /* Tables */
         .table {
             width: 100%;
             border-collapse: collapse;
             font-size: 0.85rem;
         }
+
         .table th, .table td {
-            padding: 0.65rem 0.85rem;
+            padding: 0.75rem 0.85rem;
             text-align: left;
-            border-bottom: 1px solid #1f2937;
+            border-bottom: 1px solid var(--border-card);
         }
+
         .table th {
-            color: #94a3b8;
+            color: var(--text-muted);
             font-weight: 600;
         }
-        .alert {
-            padding: 0.85rem 1.15rem;
-            border-radius: 8px;
-            font-size: 0.875rem;
-            margin-bottom: 1.25rem;
-            display: flex;
+
+        .badge {
+            font-size: 0.75rem;
+            padding: 0.3rem 0.6rem;
+            border-radius: 9999px;
+            font-weight: 600;
+            display: inline-flex;
             align-items: center;
-            justify-content: space-between;
+            gap: 0.35rem;
         }
-        .alert-success { background: #064e3b; border: 1px solid #059669; color: #a7f3d0; }
-        .alert-danger { background: #450a0a; border: 1px solid #b91c1c; color: #fecaca; }
+
+        .badge-success { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+        .badge-info { background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); }
+        .badge-warning { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
+
+        /* Sticky Floating Action Bar */
         .floating-actions {
             position: sticky;
             bottom: 1.5rem;
-            background: rgba(17, 24, 39, 0.95);
+            background: var(--bg-card);
             backdrop-filter: blur(8px);
-            border: 1px solid #334155;
+            border: 1px solid var(--border-card);
             border-radius: 12px;
             padding: 1rem 1.5rem;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
             margin-top: 2rem;
-            z-index: 100;
+            z-index: 40;
         }
+
         .spinner {
             border: 2px solid rgba(255, 255, 255, 0.2);
             border-top: 2px solid #ffffff;
             border-radius: 50%;
-            width: 16px;
-            height: 16px;
+            width: 14px;
+            height: 14px;
             animation: spin 0.8s linear infinite;
             display: inline-block;
         }
+
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+
+        @media (max-width: 900px) {
+            .sidebar { position: fixed; top: 0; left: 0; height: 100vh; transform: translateX(-100%); }
+            .sidebar.mobile-open { transform: translateX(0); }
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <!-- Top Header -->
-        <header>
-            <div class="brand">
-                <div class="brand-icon">🛡️</div>
-                <div class="brand-title">
-                    <h1>SAMLGuard Gateway Settings</h1>
-                    <p>Enterprise MFA & SAML 2.0 Identity Administration</p>
+
+<div class="app-layout">
+    <!-- ----------------- SIDEBAR ----------------- -->
+    <aside class="sidebar" id="appSidebar">
+        <div>
+            <!-- Sidebar Header & SAMLGuard Brand -->
+            <div class="sidebar-header">
+                <a href="/admin/settings" class="sidebar-brand">
+                    <div class="sidebar-brand-icon">
+                        <!-- Shield Logo with green gradient and lock -->
+                        <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <defs>
+                                <linearGradient id="sbShieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                    <stop offset="0%" stop-color="#008744"/>
+                                    <stop offset="100%" stop-color="#3dcd58"/>
+                                </linearGradient>
+                            </defs>
+                            <path d="M32 4L10 13V29C10 43.5 19.5 56.2 32 60C44.5 56.2 54 43.5 54 29V13L32 4Z" fill="url(#sbShieldGrad)" fill-opacity="0.25" stroke="#3dcd58" stroke-width="3"/>
+                            <path d="M23 31L29 37L41 24" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
+                    <div class="sidebar-brand-text">
+                        <span class="brand-name">SAMLGuard</span>
+                        <span class="brand-subtitle">Admin Console</span>
+                    </div>
+                </a>
+                <button type="button" class="sidebar-collapse-btn" onclick="toggleSidebar()" aria-label="Toggle Sidebar">
+                    <svg viewBox="0 0 24 24" stroke-width="2.5"><polyline points="11 19 4 12 11 5"/><polyline points="18 19 11 12 18 5"/></svg>
+                </button>
+            </div>
+
+            <!-- Navigation Items matching the Mockup -->
+            <nav class="sidebar-menu">
+                <!-- 1. Customers -->
+                <button type="button" class="nav-item active" onclick="switchNavTab(this, 'tab-customers', 'Customers', 'Manage customer tenants, SSO configuration, and access control.')">
+                    <svg viewBox="0 0 24 24" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    <span>Customers</span>
+                </button>
+
+                <!-- 2. Identity Providers -->
+                <button type="button" class="nav-item" onclick="switchNavTab(this, 'tab-upstream', 'Identity Providers', 'Configure upstream SAML 2.0 IdP federation (Microsoft Entra ID, Keycloak, Okta).')">
+                    <svg viewBox="0 0 24 24" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><line x1="15" y1="8" x2="17" y2="8"/><line x1="15" y1="12" x2="17" y2="12"/><line x1="7" y1="16" x2="17" y2="16"/></svg>
+                    <span>Identity Providers</span>
+                </button>
+
+                <!-- 3. Service Providers -->
+                <button type="button" class="nav-item" onclick="switchNavTab(this, 'tab-downstream', 'Service Providers', 'Configure downstream Service Providers including Schneider Electric EcoStruxure IT Advisor.')">
+                    <svg viewBox="0 0 24 24" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"/><line x1="9" y1="22" x2="9" y2="22.01"/><line x1="15" y1="22" x2="15" y2="22.01"/><line x1="9" y1="6" x2="9" y2="6.01"/><line x1="15" y1="6" x2="15" y2="6.01"/><line x1="9" y1="10" x2="9" y2="10.01"/><line x1="15" y1="10" x2="15" y2="10.01"/><line x1="9" y1="14" x2="9" y2="14.01"/><line x1="15" y1="14" x2="15" y2="14.01"/><line x1="9" y1="18" x2="9" y2="18.01"/><line x1="15" y1="18" x2="15" y2="18.01"/></svg>
+                    <span>Service Providers</span>
+                </button>
+
+                <!-- 4. User Groups & Whitelist -->
+                <button type="button" class="nav-item" onclick="switchNavTab(this, 'tab-user-groups', 'User Groups & Whitelist', 'Synchronize authorized users from Schneider IT Advisor and enforce strict whitelist security.')">
+                    <svg viewBox="0 0 24 24" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    <span>User Groups</span>
+                </button>
+
+                <!-- 5. Audit Logs -->
+                <button type="button" class="nav-item" onclick="switchNavTab(this, 'tab-audit', 'Audit Logs', 'Inspect gateway authentication telemetry, server clock diagnostics, and SAML events.')">
+                    <svg viewBox="0 0 24 24" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    <span>Audit Logs</span>
+                </button>
+
+                <!-- 6. System Settings -->
+                <button type="button" class="nav-item" onclick="switchNavTab(this, 'tab-system-settings', 'System Settings', 'Configure multi-factor authentication policies, SMTP delivery, certificates, and metadata.')">
+                    <svg viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    <span>System Settings</span>
+                </button>
+            </nav>
+        </div>
+
+        <!-- Sidebar Footer with Status and Wave Art -->
+        <div class="sidebar-footer">
+            <svg class="sidebar-wave-art" viewBox="0 0 250 90" preserveAspectRatio="none" style="height: 95px; opacity: 0.78;">
+                <defs>
+                    <linearGradient id="sbWaveGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+                        <stop offset="0%" stop-color="#008744" stop-opacity="0.9"/>
+                        <stop offset="55%" stop-color="#3dcd58" stop-opacity="0.8"/>
+                        <stop offset="100%" stop-color="#3dcd58" stop-opacity="0.05"/>
+                    </linearGradient>
+                </defs>
+                <g fill="none" stroke="url(#sbWaveGrad)">
+                    <path d="M-10,72 C55,22 125,85 260,18" stroke-width="1.6"/>
+                    <path d="M-10,78 C60,28 130,90 260,25" stroke-width="1.4" opacity="0.88"/>
+                    <path d="M-10,84 C65,34 135,95 260,32" stroke-width="1.2" opacity="0.76"/>
+                    <path d="M-10,90 C70,40 140,100 260,39" stroke-width="1.0" opacity="0.64"/>
+                    <path d="M-10,64 C48,14 118,78 260,10" stroke-width="1.2" opacity="0.7"/>
+                    <path d="M-10,56 C42,8 112,72 260,4" stroke-width="0.9" opacity="0.45"/>
+                    <path d="M-10,45 C75,65 145,25 260,68" stroke-width="1.1" opacity="0.5"/>
+                    <path d="M-10,52 C80,72 150,32 260,75" stroke-width="0.9" opacity="0.38"/>
+                </g>
+            </svg>
+            <div class="sidebar-status-box">
+                <div class="status-dot-wrap">
+                    <span class="status-dot"></span>
+                    <span>Gateway Online</span>
+                </div>
+                <span>v1.0.0</span>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ----------------- MAIN VIEWPORT ----------------- -->
+    <div class="main-content">
+        <!-- Top Header Navigation Bar -->
+        <header class="topbar">
+            <div class="topbar-left">
+                <div class="topbar-brand">
+                    <div class="eco-logo-wrap">
+                        <img src="/static/img/ecostruxure-dark.png" alt="EcoStruxure" class="eco-logo eco-logo-dark">
+                        <img src="/static/img/ecostruxure-light.png" alt="EcoStruxure" class="eco-logo eco-logo-light">
+                        <span class="eco-sub">IT Advisor</span>
+                    </div>
+                    <span class="topbar-divider">|</span>
+                    <span class="topbar-app-name">SAMLGuard Gateway Settings</span>
                 </div>
             </div>
-            <div class="header-meta">
-                <span class="badge badge-success">● Active</span>
-                <span class="badge badge-info">HTTPS :{{.Port}}</span>
-                <span class="badge badge-warning" id="serverClock">🕒 UTC: {{.ServerTimeUTC}}</span>
+
+            <div class="topbar-right">
+                <!-- Search Icon -->
+                <button type="button" class="icon-btn" onclick="document.getElementById('heroSearchInput').focus()" aria-label="Search">
+                    <svg viewBox="0 0 24 24" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                </button>
+
+                <!-- Help Icon -->
+                <a href="https://www.se.com/ww/en/work/products/product-launch/ecostruxure-it-advisor/" target="_blank" class="icon-btn" aria-label="Help & Documentation">
+                    <svg viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                </a>
+
+                <!-- Notifications Bell with unread dot -->
+                <button type="button" class="icon-btn" onclick="alert('All security gateways and MFA providers are operating normally.')" aria-label="Notifications">
+                    <svg viewBox="0 0 24 24" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                    <span class="notification-badge-dot"></span>
+                </button>
+
+                <!-- Appearance / Theme Selector Dropdown (Day / Dark / Device) -->
+                <div class="theme-dropdown-wrap">
+                    <button type="button" class="theme-pill-btn" id="themeDropdownBtn" onclick="toggleThemeMenu()" aria-label="Theme mode selector">
+                        <span id="themeBtnIcon">
+                            <svg viewBox="0 0 24 24" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                        </span>
+                        <span id="themeBtnLabel">Device</span>
+                        <svg viewBox="0 0 24 24" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+
+                    <!-- Appearance Dropdown Menu matching mockup -->
+                    <div class="theme-menu" id="themeMenu">
+                        <div class="theme-menu-title">Appearance</div>
+                        <div class="theme-option" data-val="system" onclick="selectTheme('system')">
+                            <div class="theme-opt-left">
+                                <svg viewBox="0 0 24 24" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                                <div>
+                                    <div class="theme-opt-title">Device Mode</div>
+                                    <div class="theme-opt-sub">Follow OS preference</div>
+                                </div>
+                            </div>
+                            <div class="theme-check">
+                                <svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3" fill="none"><polyline points="20 6 9 17 4 12"/></svg>
+                            </div>
+                        </div>
+
+                        <div class="theme-option" data-val="light" onclick="selectTheme('light')">
+                            <div class="theme-opt-left">
+                                <svg viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                                <div>
+                                    <div class="theme-opt-title">Light Mode</div>
+                                    <div class="theme-opt-sub">Always use light theme</div>
+                                </div>
+                            </div>
+                            <div class="theme-check">
+                                <svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3" fill="none"><polyline points="20 6 9 17 4 12"/></svg>
+                            </div>
+                        </div>
+
+                        <div class="theme-option" data-val="dark" onclick="selectTheme('dark')">
+                            <div class="theme-opt-left">
+                                <svg viewBox="0 0 24 24" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                                <div>
+                                    <div class="theme-opt-title">Dark Mode</div>
+                                    <div class="theme-opt-sub">Always use dark theme</div>
+                                </div>
+                            </div>
+                            <div class="theme-check">
+                                <svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3" fill="none"><polyline points="20 6 9 17 4 12"/></svg>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Admin user badge & Sign out links -->
                 {{if .AdminUsername}}
-                <span class="badge badge-info" style="background: #1e293b; border-color: #38bdf8; color: #f8fafc;">👤 {{.AdminUsername}}</span>
-                <a href="/admin/change-password" class="btn-link" style="color: #cbd5e1;">🔑 Password</a>
-                <a href="/admin/logout" class="btn-link" style="color: #f87171; border-color: #7f1d1d;">🚪 Sign Out</a>
+                <span class="badge badge-info" style="font-size: 0.8rem; padding: 0.35rem 0.65rem;">👤 {{.AdminUsername}}</span>
+                <a href="/admin/change-password" class="icon-btn" title="Change Admin Password">
+                    <svg viewBox="0 0 24 24" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                </a>
+                <a href="/admin/logout" class="icon-btn" title="Sign Out of Console" style="color: #f87171;">
+                    <svg viewBox="0 0 24 24" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                </a>
                 {{end}}
-                <a href="/login" class="btn-link" target="_blank">↗ Test Login Screen</a>
-                <a href="/health" class="btn-link" target="_blank">Health Check</a>
+
+                <!-- Schneider Electric Green Solid Block Logo -->
+                <div class="schneider-block">
+                    <img src="/static/img/schneider-electric.png" alt="Schneider Electric">
+                </div>
             </div>
         </header>
 
-        <!-- Flash Notifications -->
-        {{if .SuccessMessage}}
-        <div class="alert alert-success">
-            <span>✅ {{.SuccessMessage}}</span>
-            <button type="button" class="btn btn-sm btn-secondary" onclick="this.parentElement.remove()">✕</button>
-        </div>
-        {{end}}
-        {{if .ErrorMessage}}
-        <div class="alert alert-danger">
-            <span>⚠️ {{.ErrorMessage}}</span>
-            <button type="button" class="btn btn-sm btn-secondary" onclick="this.parentElement.remove()">✕</button>
-        </div>
-        {{end}}
+        <!-- ----------------- HERO BANNER ----------------- -->
+        <section class="hero-banner">
+            <div class="hero-banner-content">
+                <div class="hero-title-row">
+                    <div class="hero-icon" id="heroIcon">
+                        <!-- Default icon: Users -->
+                        <svg viewBox="0 0 24 24" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    </div>
+                    <h1 class="hero-title" id="heroTitle">Customers</h1>
+                </div>
+                <p class="hero-desc" id="heroDesc">Manage customer tenants, SSO configuration, and access control.</p>
 
-        <!-- Navigation Tabs -->
-        <div class="nav-tabs">
-            <button class="tab-btn active" onclick="openTab(event, 'tab-upstream')">
-                <span>🌐</span> Upstream IdP (Azure / Keycloak)
-            </button>
-            <button class="tab-btn" onclick="openTab(event, 'tab-downstream')">
-                <span>🏢</span> Downstream SP (Schneider ITA)
-            </button>
-            <button class="tab-btn" onclick="openTab(event, 'tab-mfa-smtp')">
-                <span>🛡️</span> MFA Policies & Email (SMTP)
-            </button>
-            <button class="tab-btn" onclick="openTab(event, 'tab-certs')">
-                <span>📜</span> Certificates & Metadata
-            </button>
-        </div>
+                <div class="hero-actions" id="heroActions">
+                    <button type="button" class="btn-green-add" onclick="showAddCustomerModal()">
+                        <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        <span>Add New Customer</span>
+                    </button>
 
-        <form id="settingsForm" method="POST" action="/admin/settings">
-            <!-- TAB 1: UPSTREAM IDP -->
-            <div id="tab-upstream" class="tab-pane active">
-                <div class="card">
-                    <div class="card-header">
-                        <h2>🌐 Upstream Identity Provider (SAML 2.0 IdP)</h2>
-                        <div class="preset-bar">
-                            <span style="font-size: 0.8rem; color: #94a3b8; align-self: center;">Quick Presets:</span>
-                            <button type="button" class="preset-btn" onclick="applyPreset('simulator')">💻 Local Simulator</button>
-                            <button type="button" class="preset-btn" onclick="applyPreset('entra')">☁️ Microsoft Entra ID</button>
-                            <button type="button" class="preset-btn" onclick="applyPreset('keycloak')">🗝️ Keycloak</button>
+                    <div class="hero-search-box">
+                        <div class="hero-search-icon">
+                            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                         </div>
+                        <input type="text" id="heroSearchInput" placeholder="Search customers..." onkeyup="filterCustomers(this.value)">
                     </div>
 
-                    <div class="grid-2">
-                        <div class="form-group">
-                            <label for="idp_entity_id">Upstream IdP Entity ID (Issuer)</label>
-                            <input type="text" id="idp_entity_id" name="idp_entity_id" value="{{.Settings.IdPEntityID}}" placeholder="e.g. https://sts.windows.net/{tenant-id}/" required>
-                            <p class="help-text">Unique identifier of your primary Identity Provider (Azure AD Entity ID or Keycloak realm).</p>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="idp_sso_url">Upstream IdP Single Sign-On (SSO) URL</label>
-                            <input type="text" id="idp_sso_url" name="idp_sso_url" value="{{.Settings.IdPSSOURL}}" placeholder="e.g. https://login.microsoftonline.com/{tenant-id}/saml2" required>
-                            <p class="help-text">Endpoint where SAMLGuard redirects users for upstream primary authentication.</p>
-                        </div>
-                    </div>
-
-                    <div class="grid-2">
-                        <div class="form-group">
-                            <label for="idp_metadata_url">Upstream Federation Metadata URL</label>
-                            <input type="text" id="idp_metadata_url" name="idp_metadata_url" value="{{.Settings.IdPMetadataURL}}" placeholder="e.g. https://login.microsoftonline.com/{tenant-id}/federationmetadata/2007-06/federationmetadata.xml">
-                            <p class="help-text">Optional URL to auto-sync IdP public keys and signing certificates.</p>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="idp_cert_file">Upstream IdP Certificate File Path</label>
-                            <input type="text" id="idp_cert_file" name="idp_cert_file" value="{{.Settings.IdPCertFile}}" placeholder="./cert/saml-signing.crt">
-                            <p class="help-text">Path to public certificate used to verify inbound upstream SAML assertions.</p>
-                        </div>
-                    </div>
-
-                    <!-- Entra ID Cheatsheet Guide Box -->
-                    <div class="guide-box">
-                        <h3>☁️ Microsoft Entra ID (Azure AD) Setup Cheatsheet</h3>
-                        <p style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 0.75rem;">
-                            When configuring your <strong>Enterprise Application</strong> in Microsoft Entra ID (Azure Portal), enter these values into <em>Set up Single Sign-On with SAML</em>:
-                        </p>
-                        <div class="guide-item">
-                            <span style="color: #cbd5e1; width: 220px;">Identifier (Entity ID):</span>
-                            <span class="val" id="entraEntityID">{{.Settings.EntityID}}</span>
-                            <button type="button" class="btn btn-sm btn-secondary" onclick="copyToClipboard('entraEntityID')">Copy</button>
-                        </div>
-                        <div class="guide-item">
-                            <span style="color: #cbd5e1; width: 220px;">Reply URL (ACS URL):</span>
-                            <span class="val" id="entraACSURL">{{.Settings.EntityID}}/saml/acs</span>
-                            <button type="button" class="btn btn-sm btn-secondary" onclick="copyToClipboard('entraACSURL')">Copy</button>
-                        </div>
-                        <div class="guide-item">
-                            <span style="color: #cbd5e1; width: 220px;">Sign-on URL:</span>
-                            <span class="val" id="entraSignonURL">{{.Settings.EntityID}}/login</span>
-                            <button type="button" class="btn btn-sm btn-secondary" onclick="copyToClipboard('entraSignonURL')">Copy</button>
-                        </div>
-                        <div class="guide-item">
-                            <span style="color: #cbd5e1; width: 220px;">Logout URL:</span>
-                            <span class="val" id="entraLogoutURL">{{.Settings.EntityID}}/logout</span>
-                            <button type="button" class="btn btn-sm btn-secondary" onclick="copyToClipboard('entraLogoutURL')">Copy</button>
-                        </div>
-                        <p style="font-size: 0.8rem; color: #94a3b8; margin-top: 0.75rem;">
-                            ℹ️ <strong>Attributes & Claims:</strong> Set <code>Unique User Identifier (Name ID)</code> to <code>user.userprincipalname</code> or <code>user.mail</code>. SAMLGuard uses this NameID to pass through to Schneider ITA.
-                        </p>
-                    </div>
+                    <button type="button" class="hero-filter-btn" title="Filter" onclick="alert('Filter options: Active tenants, Whitelisted users, Connected IdPs.')">
+                        <svg viewBox="0 0 24 24" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                    </button>
                 </div>
             </div>
+        </section>
 
-            <!-- TAB 2: DOWNSTREAM SP (SCHNEIDER ITA) -->
-            <div id="tab-downstream" class="tab-pane">
-                <div class="card">
-                    <div class="card-header">
-                        <h2>🏢 Downstream Service Provider (Schneider Electric EcoStruxure IT Advisor)</h2>
-                    </div>
-
-                    <div class="grid-2">
-                        <div class="form-group">
-                            <label for="entity_id">SAMLGuard Gateway Entity ID</label>
-                            <input type="text" id="entity_id" name="entity_id" value="{{.Settings.EntityID}}" required>
-                            <p class="help-text">This gateway's entity identifier as presented to both downstream SP and upstream IdP.</p>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="acs_url">Downstream ITA ACS Callback URL</label>
-                            <input type="text" id="acs_url" name="acs_url" value="{{.Settings.ACSURL}}" placeholder="https://192.168.0.119/api/current/authentication/saml2-callback" required>
-                            <p class="help-text">Exact callback endpoint on Schneider ITA where the signed assertion is POSTed.</p>
-                        </div>
-                    </div>
-
-                    <div class="grid-2">
-                        <div class="form-group">
-                            <label for="sso_url">Gateway Single Sign-On (SSO) URL</label>
-                            <input type="text" id="sso_url" name="sso_url" value="{{.Settings.SSOURL}}" required>
-                            <p class="help-text">Entry point where ITA sends AuthnRequests (e.g. https://192.168.0.178:18080/login).</p>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="slo_url">Gateway Single Logout (SLO) URL</label>
-                            <input type="text" id="slo_url" name="slo_url" value="{{.Settings.SLOURL}}" required>
-                            <p class="help-text">Logout termination endpoint for SAML session invalidation.</p>
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="allowed_audiences">Allowed SAML Audiences (Comma-Separated)</label>
-                        <input type="text" id="allowed_audiences" name="allowed_audiences_str" value="{{.AllowedAudiencesStr}}" placeholder="https://192.168.0.119, https://192.168.0.178:18080">
-                        <p class="help-text">Permitted SAML AudienceRestriction URIs accepted by the gateway and generated in assertions.</p>
-                    </div>
-
-                    <!-- Role / Group Mapping Table -->
-                    <div class="form-group" style="margin-top: 1.5rem;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-                            <label style="margin-bottom: 0;">Group & Role Mappings (Upstream Claim ➔ ITA Role)</label>
-                            <button type="button" class="btn btn-sm btn-secondary" onclick="addGroupMappingRow('', '')">+ Add Mapping</button>
-                        </div>
-                        <table class="table" id="groupMappingTable">
-                            <thead>
-                                <tr>
-                                    <th>Upstream Group / Role Claim</th>
-                                    <th>Target Schneider ITA Role</th>
-                                    <th style="width: 80px;">Action</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {{range $k, $v := .Settings.GroupMapping}}
-                                <tr>
-                                    <td><input type="text" name="group_map_key[]" value="{{$k}}" placeholder="e.g. ita-admins" required></td>
-                                    <td>
-                                        <select name="group_map_val[]">
-                                            <option value="Admin" {{if eq $v "Admin"}}selected{{end}}>Admin</option>
-                                            <option value="Operator" {{if eq $v "Operator"}}selected{{end}}>Operator</option>
-                                            <option value="Viewer" {{if eq $v "Viewer"}}selected{{end}}>Viewer</option>
-                                        </select>
-                                    </td>
-                                    <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">Remove</button></td>
-                                </tr>
-                                {{end}}
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <!-- ITA SAML Integration Guide -->
-                    <div class="guide-box">
-                        <h3>🏢 Schneider Electric EcoStruxure IT Advisor (ITA) Setup Guide</h3>
-                        <ol style="font-size: 0.85rem; color: #cbd5e1; padding-left: 1.25rem; line-height: 1.8;">
-                            <li>Log in to ITA Web Client (<code>https://192.168.0.119</code>) as an administrator.</li>
-                            <li>Navigate to <strong>Administration</strong> &gt; <strong>External Authentication</strong> &gt; <strong>SAML 2.0</strong>.</li>
-                            <li>Set <strong>IdP Entity ID</strong>: <code id="itaGuideIdPEntityID">{{.Settings.EntityID}}</code> <button type="button" class="btn btn-sm btn-secondary" style="padding: 0.15rem 0.4rem; font-size: 0.7rem;" onclick="copyText('itaGuideIdPEntityID')">Copy</button></li>
-                            <li>Set <strong>Single Sign-On Service URL</strong>: <code id="itaGuideSSO">{{.Settings.SSOURL}}</code> <button type="button" class="btn btn-sm btn-secondary" style="padding: 0.15rem 0.4rem; font-size: 0.7rem;" onclick="copyText('itaGuideSSO')">Copy</button></li>
-                            <li>Set <strong>Single Logout Service URL</strong>: <code id="itaGuideSLO">{{.Settings.SLOURL}}</code> <button type="button" class="btn btn-sm btn-secondary" style="padding: 0.15rem 0.4rem; font-size: 0.7rem;" onclick="copyText('itaGuideSLO')">Copy</button></li>
-                            <li>Download the <strong>SAMLGuard Signing Certificate</strong> from the <em>Certificates & Metadata</em> tab and upload it to ITA.</li>
-                            <li><strong>Important (Option B Behavior):</strong> Users must be created or invited inside ITA. SAMLGuard forwards the verified user's NameID/Email. If the user does not exist in ITA, ITA will reject login.</li>
-                        </ol>
-                    </div>
-                </div>
-
-                <!-- ITA User Account Synchronization & Whitelist Guard Card -->
-                <div class="card" style="margin-top: 1.5rem;">
-                    <div class="card-header">
-                        <h2>🛡️ ITA User Synchronization & Whitelist Protection</h2>
-                        <span class="badge {{if .Settings.ITAEnforceWhitelist}}badge-success{{else}}badge-warning{{end}}">
-                            {{if .Settings.ITAEnforceWhitelist}}● Whitelist Active{{else}}○ Whitelist Disabled{{end}}
-                        </span>
-                    </div>
-                    <p style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 1.25rem;">
-                        Prevent unauthorized external users from self-registering and block blank account creation in Schneider IT Advisor. Only pre-authorized users present in ITA records are permitted through authentication.
-                    </p>
-
-                    <div class="form-group" style="padding: 1rem; background: #0f172a; border-radius: 8px; border: 1px solid #334155; margin-bottom: 1.5rem;">
-                        <label class="toggle-label">
-                            <input type="checkbox" id="ita_enforce_whitelist" name="ita_enforce_whitelist" value="true" {{if .Settings.ITAEnforceWhitelist}}checked{{end}}>
-                            <span class="toggle-switch"></span>
-                            <div>
-                                <span style="font-weight: 600; color: #f8fafc;">Enforce User Whitelist (Block Unregistered Accounts)</span>
-                                <p class="help-text" style="margin-top: 0.2rem;">
-                                    When enabled, SAMLGuard blocks sign-in attempts for any username or email not present in ITA records before any SAML assertion is dispatched.
-                                </p>
-                            </div>
-                        </label>
-                    </div>
-
-                    <div class="grid-2">
-                        <div class="form-group">
-                            <label for="ita_api_url">ITA REST API Base URL</label>
-                            <input type="text" id="ita_api_url" name="ita_api_url" value="{{.Settings.ITAAPIURL}}" placeholder="https://192.168.0.119/api/current">
-                            <p class="help-text">ITA REST API endpoint to retrieve authorized users.</p>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="ita_api_username">ITA Admin Username</label>
-                            <input type="text" id="ita_api_username" name="ita_api_username" value="{{.Settings.ITAAPIUsername}}" placeholder="apc">
-                            <p class="help-text">ITA administrator account with permission to read user directories.</p>
-                        </div>
-                    </div>
-
-                    <div class="grid-2">
-                        <div class="form-group">
-                            <label for="ita_api_password">ITA Admin Password</label>
-                            <div class="input-group">
-                                <input type="password" id="ita_api_password" name="ita_api_password" placeholder="•••••••• (Leave blank to keep current)">
-                                <button type="button" class="btn btn-secondary" onclick="togglePasswordVisibility('ita_api_password')">👁️</button>
-                            </div>
-                        </div>
-
-                        <div class="form-group" style="display: flex; flex-direction: column; justify-content: flex-end;">
-                            <button type="button" class="btn btn-info" id="btnITASync" onclick="syncUsersFromITA()" style="width: 100%; justify-content: center;">
-                                <span id="itaSyncSpinner" class="spinner" style="display: none;"></span>
-                                <span>🔄 Sync Users From ITA Now</span>
-                            </button>
-                        </div>
-                    </div>
-
-                    <div id="itaSyncResult" style="margin-top: 1rem; display: none;"></div>
-
-                    <!-- Authorized Users List Table -->
-                    <div style="margin-top: 1.5rem;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-                            <label style="margin-bottom: 0;">Authorized Users Permitted to Login ({{len .AuthorizedUsers}} Accounts)</label>
-                            <button type="button" class="btn btn-sm btn-secondary" onclick="showAddUserPrompt()">+ Add Manual User</button>
-                        </div>
-                        <table class="table" id="authorizedUsersTable">
-                            <thead>
-                                <tr>
-                                    <th>Username</th>
-                                    <th>Email</th>
-                                    <th>Full Name</th>
-                                    <th>Source</th>
-                                    <th style="width: 80px;">Action</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {{range .AuthorizedUsers}}
-                                <tr>
-                                    <td><strong style="color: #93c5fd;">{{.Username}}</strong></td>
-                                    <td>{{if .Email}}{{.Email}}{{else}}<span style="color: #64748b;">-</span>{{end}}</td>
-                                    <td>{{if .FullName}}{{.FullName}}{{else}}<span style="color: #64748b;">-</span>{{end}}</td>
-                                    <td>
-                                        <span class="badge {{if eq .Source "ita_sync"}}badge-info{{else if eq .Source "manual"}}badge-warning{{else}}badge-success{{end}}">
-                                            {{.Source}}
-                                        </span>
-                                    </td>
-                                    <td>
-                                        {{if ne .Username "apc"}}
-                                        <button type="button" class="btn btn-sm btn-danger" onclick="deleteAuthorizedUser('{{.Username}}')">Delete</button>
-                                        {{else}}
-                                        <span style="font-size: 0.75rem; color: #64748b;">System</span>
-                                        {{end}}
-                                    </td>
-                                </tr>
-                                {{else}}
-                                <tr>
-                                    <td colspan="5" style="text-align: center; color: #64748b; padding: 1.5rem;">
-                                        No users currently in database. Click "Sync Users From ITA Now" to fetch user accounts from IT Advisor.
-                                    </td>
-                                </tr>
-                                {{end}}
-                            </tbody>
-                        </table>
-                    </div>
+        <!-- ----------------- MAIN CONTENT BODY ----------------- -->
+        <main class="page-body">
+            <!-- Flash Messages -->
+            {{if .SuccessMessage}}
+            <div class="flash-alert alert-success">
+                <span>✅ {{.SuccessMessage}}</span>
+                <button type="button" class="btn btn-sm btn-secondary" onclick="this.parentElement.remove()">✕</button>
             </div>
+            {{end}}
+            {{if .ErrorMessage}}
+            <div class="flash-alert alert-danger">
+                <span>⚠️ {{.ErrorMessage}}</span>
+                <button type="button" class="btn btn-sm btn-secondary" onclick="this.parentElement.remove()">✕</button>
+            </div>
+            {{end}}
 
-            <!-- TAB 3: MFA & SMTP -->
-            <div id="tab-mfa-smtp" class="tab-pane">
-                <div class="grid-2">
-                    <!-- MFA Policy Column -->
+            <!-- Form Wrapper for Config Persistence -->
+            <form id="settingsForm" method="POST" action="/admin/settings">
+
+                <!-- TAB 1: CUSTOMERS (Matching the Mockup empty state & customer tenants) -->
+                <div id="tab-customers" class="tab-content-pane active">
                     <div class="card">
                         <div class="card-header">
-                            <h2>🛡️ MFA Security Policies</h2>
+                            <h2>👥 Customer Tenants & Single Sign-On Environments</h2>
+                            <span class="badge badge-success">● 1 Connected SP Environment</span>
                         </div>
 
-                        <div class="form-group">
-                            <label>Default MFA Verification Method</label>
-                            <div style="display: flex; gap: 1rem; margin-top: 0.4rem;">
-                                <label style="font-weight: normal; display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
-                                    <input type="radio" name="mfa_default_provider" value="totp" {{if eq .Settings.MFADefaultProvider "totp"}}checked{{end}}>
-                                    <span>📱 Authenticator App (TOTP)</span>
-                                </label>
-                                <label style="font-weight: normal; display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
-                                    <input type="radio" name="mfa_default_provider" value="email" {{if eq .Settings.MFADefaultProvider "email"}}checked{{end}}>
-                                    <span>📧 Email OTP</span>
-                                </label>
+                        <!-- Empty State Section exactly like mockup -->
+                        <div class="empty-state-card" id="emptyCustomerBlock">
+                            <!-- Modern isometric tower vector -->
+                            <svg class="empty-state-art" viewBox="0 0 160 140" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <circle cx="80" cy="70" r="54" stroke="var(--brand-green)" stroke-width="1.5" stroke-dasharray="4 4" opacity="0.4"/>
+                                <!-- Building Left -->
+                                <polygon points="45,45 68,32 68,110 45,110" fill="var(--empty-tower-glass)" stroke="var(--brand-green)" stroke-width="1.5"/>
+                                <!-- Building Right / Center -->
+                                <polygon points="68,32 108,18 108,110 68,110" fill="var(--empty-tower-dark)" stroke="var(--brand-green)" stroke-width="1.5"/>
+                                <!-- Building Far Right -->
+                                <polygon points="108,45 125,36 125,110 108,110" fill="var(--empty-tower-glass)" stroke="var(--brand-green)" stroke-width="1.5"/>
+                                <!-- Windows grid -->
+                                <g stroke="#3dcd58" stroke-width="1" opacity="0.6">
+                                    <line x1="52" y1="52" x2="61" y2="48"/><line x1="52" y1="65" x2="61" y2="61"/>
+                                    <line x1="52" y1="78" x2="61" y2="74"/><line x1="52" y1="91" x2="61" y2="87"/>
+                                    <line x1="78" y1="40" x2="98" y2="34"/><line x1="78" y1="55" x2="98" y2="49"/>
+                                    <line x1="78" y1="70" x2="98" y2="64"/><line x1="78" y1="85" x2="98" y2="79"/>
+                                </g>
+                            </svg>
+                            <h3 class="empty-state-title">No customers yet</h3>
+                            <p class="empty-state-desc">Please add a new customer or configure the default Schneider Electric IT Advisor tenant to get started.</p>
+                            <button type="button" class="btn btn-secondary" onclick="showAddCustomerModal()" style="border-color: var(--brand-green); color: var(--brand-green);">
+                                <span>+ Add New Customer</span>
+                            </button>
+                        </div>
+
+                        <!-- Primary Configured Tenant Card -->
+                        <div style="margin-top: 1.5rem; background: var(--bg-card-subtle); border: 1px solid var(--border-card); border-radius: 10px; padding: 1.25rem;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                                <div>
+                                    <strong style="font-size: 1rem; color: var(--text-primary);">Schneider Electric EcoStruxure IT Advisor (Default Tenant)</strong>
+                                    <div style="font-size: 0.78rem; color: var(--text-muted);">Target Host: {{.Settings.ACSURL}}</div>
+                                </div>
+                                <span class="badge badge-success">● Active Gateway Connected</span>
                             </div>
-                            <p class="help-text">Which MFA challenge tab is presented first to users upon sign-in.</p>
+                            <div style="font-size: 0.82rem; color: var(--text-secondary); line-height: 1.6;">
+                                Primary Downstream Service Provider tenant linked to SAML 2.0 gateway endpoint <code>{{.Settings.SSOURL}}</code>.
+                                External SAML assertions forwarded securely with MFA claims validation.
+                            </div>
                         </div>
+                    </div>
+                </div>
 
-                        <div class="form-group">
-                            <label for="mfa_issuer">Authenticator App Issuer Display Name</label>
-                            <input type="text" id="mfa_issuer" name="mfa_issuer" value="{{.Settings.MFAIssuer}}" placeholder="e.g. SAMLGuard or EcoStruxure ITA" required>
-                            <p class="help-text">The title displayed above the OTP code in Google Authenticator or Microsoft Authenticator.</p>
+                <!-- TAB 2: IDENTITY PROVIDERS (Upstream IdP) -->
+                <div id="tab-upstream" class="tab-content-pane">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>🪪 Upstream Identity Provider (SAML 2.0 IdP)</h2>
+                            <div class="preset-bar">
+                                <span style="font-size: 0.8rem; color: var(--text-muted); align-self: center;">Quick Presets:</span>
+                                <button type="button" class="preset-btn" onclick="applyPreset('simulator')">💻 Local Simulator</button>
+                                <button type="button" class="preset-btn" onclick="applyPreset('entra')">☁️ Microsoft Entra ID</button>
+                                <button type="button" class="preset-btn" onclick="applyPreset('keycloak')">🗝️ Keycloak</button>
+                            </div>
                         </div>
 
                         <div class="grid-2">
                             <div class="form-group">
-                                <label for="otp_expiry">Email OTP Validity Duration</label>
-                                <input type="text" id="otp_expiry" name="otp_expiry" value="{{.Settings.OTPExpiry}}" placeholder="5m" required>
-                                <p class="help-text">Expiry lifetime for generated email OTPs (e.g. 5m, 10m).</p>
+                                <label for="idp_entity_id">Upstream IdP Entity ID (Issuer)</label>
+                                <input type="text" id="idp_entity_id" name="idp_entity_id" value="{{.Settings.IdPEntityID}}" placeholder="e.g. https://sts.windows.net/{tenant-id}/" required>
+                                <p class="help-text">Unique identifier of your primary Identity Provider (Azure AD Entity ID or Keycloak realm).</p>
                             </div>
 
                             <div class="form-group">
-                                <label for="resend_cooldown">OTP Resend Cooldown</label>
-                                <input type="text" id="resend_cooldown" name="resend_cooldown" value="{{.Settings.ResendCooldown}}" placeholder="60s" required>
-                                <p class="help-text">Enforced waiting period between OTP resend requests.</p>
+                                <label for="idp_sso_url">Upstream IdP Single Sign-On (SSO) URL</label>
+                                <input type="text" id="idp_sso_url" name="idp_sso_url" value="{{.Settings.IdPSSOURL}}" placeholder="e.g. https://login.microsoftonline.com/{tenant-id}/saml2" required>
+                                <p class="help-text">Endpoint where SAMLGuard redirects users for upstream primary authentication.</p>
                             </div>
                         </div>
 
-                        <div class="form-group" style="margin-top: 1.5rem; padding: 1rem; background: #0f172a; border-radius: 8px; border: 1px solid #334155;">
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label for="idp_metadata_url">Upstream Federation Metadata URL</label>
+                                <input type="text" id="idp_metadata_url" name="idp_metadata_url" value="{{.Settings.IdPMetadataURL}}" placeholder="e.g. https://login.microsoftonline.com/{tenant-id}/federationmetadata/2007-06/federationmetadata.xml">
+                                <p class="help-text">Optional URL to auto-sync IdP public keys and signing certificates.</p>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="idp_cert_file">Upstream IdP Certificate File Path</label>
+                                <input type="text" id="idp_cert_file" name="idp_cert_file" value="{{.Settings.IdPCertFile}}" placeholder="./cert/saml-signing.crt">
+                                <p class="help-text">Path to public certificate used to verify inbound upstream SAML assertions.</p>
+                            </div>
+                        </div>
+
+                        <!-- Entra ID Cheatsheet Guide Box -->
+                        <div class="guide-box">
+                            <h3>☁️ Microsoft Entra ID (Azure AD) Setup Cheatsheet</h3>
+                            <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+                                When configuring your <strong>Enterprise Application</strong> in Microsoft Entra ID, enter these values into <em>Set up Single Sign-On with SAML</em>:
+                            </p>
+                            <div class="guide-item">
+                                <span style="width: 200px;">Identifier (Entity ID):</span>
+                                <span class="val" id="entraEntityID">{{.Settings.EntityID}}</span>
+                                <button type="button" class="btn btn-sm btn-secondary" onclick="copyToClipboard('entraEntityID')">Copy</button>
+                            </div>
+                            <div class="guide-item">
+                                <span style="width: 200px;">Reply URL (ACS URL):</span>
+                                <span class="val" id="entraACSURL">{{.Settings.EntityID}}/saml/acs</span>
+                                <button type="button" class="btn btn-sm btn-secondary" onclick="copyToClipboard('entraACSURL')">Copy</button>
+                            </div>
+                            <div class="guide-item">
+                                <span style="width: 200px;">Sign-on URL:</span>
+                                <span class="val" id="entraSignonURL">{{.Settings.EntityID}}/login</span>
+                                <button type="button" class="btn btn-sm btn-secondary" onclick="copyToClipboard('entraSignonURL')">Copy</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 3: SERVICE PROVIDERS (Downstream SP - Schneider ITA) -->
+                <div id="tab-downstream" class="tab-content-pane">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>🏢 Downstream Service Provider (Schneider Electric EcoStruxure IT Advisor)</h2>
+                        </div>
+
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label for="entity_id">SAMLGuard Gateway Entity ID</label>
+                                <input type="text" id="entity_id" name="entity_id" value="{{.Settings.EntityID}}" required>
+                                <p class="help-text">This gateway's entity identifier as presented to downstream SP and upstream IdP.</p>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="acs_url">Downstream ITA ACS Callback URL</label>
+                                <input type="text" id="acs_url" name="acs_url" value="{{.Settings.ACSURL}}" placeholder="https://192.168.0.119/api/current/authentication/saml2-callback" required>
+                                <p class="help-text">Exact callback endpoint on Schneider ITA where the signed assertion is POSTed.</p>
+                            </div>
+                        </div>
+
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label for="sso_url">Gateway Single Sign-On (SSO) URL</label>
+                                <input type="text" id="sso_url" name="sso_url" value="{{.Settings.SSOURL}}" required>
+                                <p class="help-text">Entry point where ITA sends AuthnRequests (e.g. https://192.168.0.178:18080/login).</p>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="slo_url">Gateway Single Logout (SLO) URL</label>
+                                <input type="text" id="slo_url" name="slo_url" value="{{.Settings.SLOURL}}" required>
+                                <p class="help-text">Logout termination endpoint for SAML session invalidation.</p>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="allowed_audiences">Allowed SAML Audiences (Comma-Separated)</label>
+                            <input type="text" id="allowed_audiences" name="allowed_audiences_str" value="{{.AllowedAudiencesStr}}" placeholder="https://192.168.0.119, https://192.168.0.178:18080">
+                            <p class="help-text">Permitted SAML AudienceRestriction URIs accepted by the gateway and generated in assertions.</p>
+                        </div>
+
+                        <!-- Role / Group Mapping Table -->
+                        <div class="form-group" style="margin-top: 1.5rem;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                <label style="margin-bottom: 0;">Group & Role Mappings (Upstream Claim ➔ ITA Role)</label>
+                                <button type="button" class="btn btn-sm btn-secondary" onclick="addGroupMappingRow('', '')">+ Add Mapping</button>
+                            </div>
+                            <table class="table" id="groupMappingTable">
+                                <thead>
+                                    <tr>
+                                        <th>Upstream Group / Role Claim</th>
+                                        <th>Target Schneider ITA Role</th>
+                                        <th style="width: 80px;">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {{range $k, $v := .Settings.GroupMapping}}
+                                    <tr>
+                                        <td><input type="text" name="group_map_key[]" value="{{$k}}" placeholder="e.g. ita-admins" required></td>
+                                        <td>
+                                            <select name="group_map_val[]">
+                                                <option value="Admin" {{if eq $v "Admin"}}selected{{end}}>Admin</option>
+                                                <option value="Operator" {{if eq $v "Operator"}}selected{{end}}>Operator</option>
+                                                <option value="Viewer" {{if eq $v "Viewer"}}selected{{end}}>Viewer</option>
+                                            </select>
+                                        </td>
+                                        <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">Remove</button></td>
+                                    </tr>
+                                    {{end}}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- ITA SAML Integration Guide -->
+                        <div class="guide-box">
+                            <h3>🏢 Schneider Electric EcoStruxure IT Advisor (ITA) Setup Guide</h3>
+                            <ol style="font-size: 0.85rem; color: var(--text-secondary); padding-left: 1.25rem; line-height: 1.8;">
+                                <li>Log in to ITA Web Client (<code>https://192.168.0.119</code>) as an administrator.</li>
+                                <li>Navigate to <strong>Administration</strong> &gt; <strong>External Authentication</strong> &gt; <strong>SAML 2.0</strong>.</li>
+                                <li>Set <strong>IdP Entity ID</strong>: <code id="itaGuideIdPEntityID">{{.Settings.EntityID}}</code> <button type="button" class="btn btn-sm btn-secondary" style="padding: 0.15rem 0.4rem; font-size: 0.7rem;" onclick="copyText('itaGuideIdPEntityID')">Copy</button></li>
+                                <li>Set <strong>Single Sign-On Service URL</strong>: <code id="itaGuideSSO">{{.Settings.SSOURL}}</code> <button type="button" class="btn btn-sm btn-secondary" style="padding: 0.15rem 0.4rem; font-size: 0.7rem;" onclick="copyText('itaGuideSSO')">Copy</button></li>
+                                <li>Download the <strong>SAMLGuard Signing Certificate</strong> from System Settings and upload to ITA.</li>
+                            </ol>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 4: USER GROUPS & WHITELIST -->
+                <div id="tab-user-groups" class="tab-content-pane">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>🛡️ ITA User Synchronization & Whitelist Protection</h2>
+                            <span class="badge {{if .Settings.ITAEnforceWhitelist}}badge-success{{else}}badge-warning{{end}}">
+                                {{if .Settings.ITAEnforceWhitelist}}● Whitelist Active{{else}}○ Whitelist Disabled{{end}}
+                            </span>
+                        </div>
+                        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.25rem;">
+                            Prevent unauthorized external users from self-registering and block blank account creation in Schneider IT Advisor. Only pre-authorized users present in ITA records are permitted through authentication.
+                        </p>
+
+                        <div class="form-group" style="padding: 1rem; background: var(--bg-card-subtle); border-radius: 8px; border: 1px solid var(--border-card); margin-bottom: 1.5rem;">
                             <label class="toggle-label">
-                                <input type="checkbox" id="allow_dummy_otp" name="allow_dummy_otp" value="true" {{if .Settings.AllowDummyOTP}}checked{{end}}>
+                                <input type="checkbox" id="ita_enforce_whitelist" name="ita_enforce_whitelist" value="true" {{if .Settings.ITAEnforceWhitelist}}checked{{end}}>
                                 <span class="toggle-switch"></span>
                                 <div>
-                                    <span style="font-weight: 600; color: #f8fafc;">Allow Dummy OTP (000000)</span>
-                                    <p class="help-text" style="margin-top: 0;">Bypasses real code verification using code 000000. <strong>FOR LOCAL TESTING ONLY.</strong></p>
+                                    <span style="font-weight: 600; color: var(--text-primary);">Enforce User Whitelist (Block Unregistered Accounts)</span>
+                                    <p class="help-text" style="margin-top: 0.2rem;">
+                                        When enabled, SAMLGuard blocks sign-in attempts for any username or email not present in ITA records before any SAML assertion is dispatched.
+                                    </p>
                                 </div>
                             </label>
                         </div>
-                    </div>
-
-                    <!-- SMTP Email Server Column -->
-                    <div class="card">
-                        <div class="card-header">
-                            <h2>📧 SMTP Mail Server (Email OTP)</h2>
-                        </div>
 
                         <div class="grid-2">
                             <div class="form-group">
-                                <label for="smtp_host">SMTP Server Host</label>
-                                <input type="text" id="smtp_host" name="smtp_host" value="{{.Settings.SMTPHost}}" placeholder="smtp.office365.com or localhost" required>
+                                <label for="ita_api_url">ITA REST API Base URL</label>
+                                <input type="text" id="ita_api_url" name="ita_api_url" value="{{.Settings.ITAAPIURL}}" placeholder="https://192.168.0.119/api/current">
+                                <p class="help-text">ITA REST API endpoint to retrieve authorized users.</p>
                             </div>
 
                             <div class="form-group">
-                                <label for="smtp_port">SMTP Port</label>
-                                <input type="number" id="smtp_port" name="smtp_port" value="{{.Settings.SMTPPort}}" placeholder="587" required>
+                                <label for="ita_api_username">ITA Admin Username</label>
+                                <input type="text" id="ita_api_username" name="ita_api_username" value="{{.Settings.ITAAPIUsername}}" placeholder="apc">
+                                <p class="help-text">ITA administrator account with permission to read user directories.</p>
                             </div>
                         </div>
 
                         <div class="grid-2">
                             <div class="form-group">
-                                <label for="smtp_username">SMTP Username / Email</label>
-                                <input type="text" id="smtp_username" name="smtp_username" value="{{.Settings.SMTPUsername}}" placeholder="user@domain.com">
-                            </div>
-
-                            <div class="form-group">
-                                <label for="smtp_password">SMTP Password</label>
+                                <label for="ita_api_password">ITA Admin Password</label>
                                 <div class="input-group">
-                                    <input type="password" id="smtp_password" name="smtp_password" placeholder="•••••••• (Leave blank to keep current)">
-                                    <button type="button" class="btn btn-secondary" onclick="togglePasswordVisibility('smtp_password')">👁️</button>
+                                    <input type="password" id="ita_api_password" name="ita_api_password" placeholder="•••••••• (Leave blank to keep current)">
+                                    <button type="button" class="btn btn-secondary" onclick="togglePasswordVisibility('ita_api_password')">👁️</button>
                                 </div>
                             </div>
-                        </div>
 
-                        <div class="grid-2">
-                            <div class="form-group">
-                                <label for="smtp_from">From Email Address</label>
-                                <input type="text" id="smtp_from" name="smtp_from" value="{{.Settings.SMTPFrom}}" placeholder="no-reply@company.com">
-                            </div>
-
-                            <div class="form-group">
-                                <label for="smtp_from_name">From Sender Name</label>
-                                <input type="text" id="smtp_from_name" name="smtp_from_name" value="{{.Settings.SMTPFromName}}" placeholder="SAMLGuard MFA">
-                            </div>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="smtp_encryption">Encryption Mode</label>
-                            <select id="smtp_encryption" name="smtp_encryption">
-                                <option value="starttls" {{if eq .Settings.SMTPEncryption "starttls"}}selected{{end}}>STARTTLS (Port 587 - Recommended)</option>
-                                <option value="tls" {{if eq .Settings.SMTPEncryption "tls"}}selected{{end}}>TLS / SSL (Port 465)</option>
-                                <option value="none" {{if eq .Settings.SMTPEncryption "none"}}selected{{end}}>None / Plaintext (Port 25 or Local Relay)</option>
-                            </select>
-                        </div>
-
-                        <!-- Live Send Test Email Box -->
-                        <div class="guide-box" style="margin-top: 1rem;">
-                            <h3>📨 Live SMTP Test</h3>
-                            <p style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 0.75rem;">
-                                Test whether SAMLGuard can connect to this SMTP server and dispatch an email OTP.
-                            </p>
-                            <div class="input-group">
-                                <input type="text" id="testEmailRecipient" placeholder="Enter recipient email (e.g. your email)" style="flex: 1;">
-                                <button type="button" class="btn btn-info" id="btnTestEmail" onclick="sendTestEmail()">
-                                    <span id="testEmailSpinner" class="spinner" style="display: none;"></span>
-                                    <span>Send Test Email</span>
+                            <div class="form-group" style="display: flex; flex-direction: column; justify-content: flex-end;">
+                                <button type="button" class="btn btn-secondary" id="btnITASync" onclick="syncUsersFromITA()" style="width: 100%; justify-content: center; border-color: var(--brand-green); color: var(--brand-green);">
+                                    <span id="itaSyncSpinner" class="spinner" style="display: none;"></span>
+                                    <span>🔄 Sync Users From ITA Now</span>
                                 </button>
                             </div>
-                            <div id="testEmailResult" style="margin-top: 0.75rem; display: none;"></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- TAB 4: CERTIFICATES & METADATA -->
-            <div id="tab-certs" class="tab-pane">
-                <div class="grid-2">
-                    <!-- Download Metadata Card -->
-                    <div class="card">
-                        <div class="card-header">
-                            <h2>📄 Metadata XML Downloads</h2>
-                        </div>
-                        <p style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 1.25rem;">
-                            Export SAML 2.0 XML metadata to easily import configuration into Microsoft Entra ID or Schneider Electric ITA.
-                        </p>
-
-                        <div style="display: flex; flex-direction: column; gap: 0.75rem;">
-                            <div class="guide-item" style="padding: 0.75rem;">
-                                <div>
-                                    <div style="font-weight: 600; color: #f8fafc;">SP Metadata XML (Gateway as SP)</div>
-                                    <div style="font-size: 0.75rem; color: #64748b;">Upload to Microsoft Entra ID or Keycloak</div>
-                                </div>
-                                <a href="/saml/metadata/sp" download="samlguard-sp-metadata.xml" class="btn btn-sm btn-secondary">⬇️ Download XML</a>
-                            </div>
-
-                            <div class="guide-item" style="padding: 0.75rem;">
-                                <div>
-                                    <div style="font-weight: 600; color: #f8fafc;">IdP Metadata XML (Gateway as IdP)</div>
-                                    <div style="font-size: 0.75rem; color: #64748b;">Upload to Schneider Electric EcoStruxure ITA</div>
-                                </div>
-                                <a href="/saml/metadata/idp" download="samlguard-idp-metadata.xml" class="btn btn-sm btn-secondary">⬇️ Download XML</a>
-                            </div>
-
-                            <div class="guide-item" style="padding: 0.75rem;">
-                                <div>
-                                    <div style="font-weight: 600; color: #f8fafc;">Combined Federation Metadata</div>
-                                    <div style="font-size: 0.75rem; color: #64748b;">Full dual-entity descriptor</div>
-                                </div>
-                                <a href="/saml/metadata" download="samlguard-metadata.xml" class="btn btn-sm btn-secondary">⬇️ Download XML</a>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Certificate Management Card -->
-                    <div class="card">
-                        <div class="card-header">
-                            <h2>📜 Certificates & Keys</h2>
                         </div>
 
-                        <div style="display: flex; flex-direction: column; gap: 0.75rem;">
-                            <div class="guide-item" style="padding: 0.75rem;">
-                                <div>
-                                    <div style="font-weight: 600; color: #f8fafc;">SAML Signing Certificate (.crt)</div>
-                                    <div style="font-size: 0.75rem; color: #64748b;">Public certificate for assertion signatures</div>
-                                </div>
-                                <a href="/admin/cert/download?type=saml" class="btn btn-sm btn-secondary">⬇️ Download .crt</a>
-                            </div>
+                        <div id="itaSyncResult" style="margin-top: 1rem; display: none;"></div>
 
-                            <div class="guide-item" style="padding: 0.75rem;">
-                                <div>
-                                    <div style="font-weight: 600; color: #f8fafc;">TLS Web Server Certificate (.crt)</div>
-                                    <div style="font-size: 0.75rem; color: #64748b;">HTTPS TLS certificate for port {{.Port}}</div>
-                                </div>
-                                <a href="/admin/cert/download?type=server" class="btn btn-sm btn-secondary">⬇️ Download .crt</a>
+                        <!-- Authorized Users List Table -->
+                        <div style="margin-top: 1.5rem;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                                <label style="margin-bottom: 0;">Authorized Users Permitted to Login ({{len .AuthorizedUsers}} Accounts)</label>
+                                <button type="button" class="btn btn-sm btn-secondary" onclick="showAddUserPrompt()">+ Add Manual User</button>
                             </div>
-                        </div>
-
-                        <!-- Certificate Inspector -->
-                        <div class="guide-box" style="margin-top: 1.25rem;">
-                            <h3>🔍 SAML Certificate Inspector</h3>
-                            <div style="font-size: 0.8rem; line-height: 1.7; color: #cbd5e1;">
-                                <div><strong>Subject:</strong> <span style="color: #93c5fd;">{{.CertInfo.Subject}}</span></div>
-                                <div><strong>Issuer:</strong> <span style="color: #93c5fd;">{{.CertInfo.Issuer}}</span></div>
-                                <div><strong>Valid From:</strong> {{.CertInfo.NotBefore}}</div>
-                                <div><strong>Valid Until:</strong> {{.CertInfo.NotAfter}}</div>
-                                <div>
-                                    <strong>Status:</strong>
-                                    {{if .CertInfo.IsExpired}}
-                                    <span class="badge badge-warning">Expired</span>
+                            <table class="table" id="authorizedUsersTable">
+                                <thead>
+                                    <tr>
+                                        <th>Username</th>
+                                        <th>Email</th>
+                                        <th>Full Name</th>
+                                        <th>Source</th>
+                                        <th style="width: 80px;">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {{range .AuthorizedUsers}}
+                                    <tr>
+                                        <td><strong style="color: var(--brand-green);">{{.Username}}</strong></td>
+                                        <td>{{if .Email}}{{.Email}}{{else}}<span style="color: var(--text-muted);">-</span>{{end}}</td>
+                                        <td>{{if .FullName}}{{.FullName}}{{else}}<span style="color: var(--text-muted);">-</span>{{end}}</td>
+                                        <td>
+                                            <span class="badge {{if eq .Source "ita_sync"}}badge-info{{else if eq .Source "manual"}}badge-warning{{else}}badge-success{{end}}">
+                                                {{.Source}}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            {{if ne .Username "apc"}}
+                                            <button type="button" class="btn btn-sm btn-danger" onclick="deleteAuthorizedUser('{{.Username}}')">Delete</button>
+                                            {{else}}
+                                            <span style="font-size: 0.75rem; color: var(--text-muted);">System</span>
+                                            {{end}}
+                                        </td>
+                                    </tr>
                                     {{else}}
-                                    <span class="badge badge-success">{{.CertInfo.DaysLeft}} days remaining (Healthy)</span>
+                                    <tr>
+                                        <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">
+                                            No users currently in whitelist database. Click "Sync Users From ITA Now" to fetch user accounts.
+                                        </td>
+                                    </tr>
                                     {{end}}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 5: AUDIT LOGS -->
+                <div id="tab-audit" class="tab-content-pane">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>📋 Authentication Diagnostics & Server Time Synchronization</h2>
+                        </div>
+                        <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.7;">
+                            SAML 2.0 assertions enforce strict timestamps via <code>NotBefore</code> and <code>NotOnOrAfter</code> conditions.
+                            SAMLGuard automatically incorporates a <strong>5-minute buffer in the past</strong> (<code>now - 5m</code>) to eliminate <em>"Assertion cannot be used before"</em> errors (Code 114004).
+                        </p>
+                        <div style="margin-top: 1rem; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.85rem; background: var(--bg-card-subtle); padding: 1rem; border-radius: 8px; border: 1px solid var(--border-card);">
+                            <div><strong>Local Server Time:</strong> {{.ServerTimeLocal}}</div>
+                            <div style="margin-top: 0.35rem;"><strong>UTC Server Time:</strong> {{.ServerTimeUTC}}</div>
+                            <div style="margin-top: 0.35rem;"><strong>Gateway Port:</strong> HTTPS :{{.Port}}</div>
+                        </div>
+
+                        <div style="margin-top: 1.5rem; display: flex; gap: 0.75rem;">
+                            <a href="/health" target="_blank" class="btn btn-secondary">🏥 Gateway Health Endpoint</a>
+                            <a href="/login" target="_blank" class="btn btn-secondary">↗ Test SAML Login Flow</a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 6: SYSTEM SETTINGS (MFA, SMTP, Certs) -->
+                <div id="tab-system-settings" class="tab-content-pane">
+                    <div class="grid-2">
+                        <!-- MFA Policy Column -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h2>🛡️ MFA Security Policies</h2>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Default MFA Verification Method</label>
+                                <div style="display: flex; gap: 1rem; margin-top: 0.4rem;">
+                                    <label style="font-weight: normal; display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
+                                        <input type="radio" name="mfa_default_provider" value="totp" {{if eq .Settings.MFADefaultProvider "totp"}}checked{{end}}>
+                                        <span>📱 Authenticator App (TOTP)</span>
+                                    </label>
+                                    <label style="font-weight: normal; display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
+                                        <input type="radio" name="mfa_default_provider" value="email" {{if eq .Settings.MFADefaultProvider "email"}}checked{{end}}>
+                                        <span>📧 Email OTP</span>
+                                    </label>
                                 </div>
-                                <div style="margin-top: 0.35rem; word-break: break-all;"><strong>SHA-256 Fingerprint:</strong> <br><code style="font-size: 0.75rem; color: #94a3b8;">{{.CertInfo.SHA256}}</code></div>
+                                <p class="help-text">Which MFA challenge tab is presented first to users upon sign-in.</p>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="mfa_issuer">Authenticator App Issuer Display Name</label>
+                                <input type="text" id="mfa_issuer" name="mfa_issuer" value="{{.Settings.MFAIssuer}}" placeholder="e.g. SAMLGuard or EcoStruxure ITA" required>
+                                <p class="help-text">The title displayed above the OTP code in Google Authenticator or Microsoft Authenticator.</p>
+                            </div>
+
+                            <div class="grid-2">
+                                <div class="form-group">
+                                    <label for="otp_expiry">Email OTP Validity Duration</label>
+                                    <input type="text" id="otp_expiry" name="otp_expiry" value="{{.Settings.OTPExpiry}}" placeholder="5m" required>
+                                    <p class="help-text">Expiry lifetime for generated email OTPs (e.g. 5m, 10m).</p>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="resend_cooldown">OTP Resend Cooldown</label>
+                                    <input type="text" id="resend_cooldown" name="resend_cooldown" value="{{.Settings.ResendCooldown}}" placeholder="60s" required>
+                                    <p class="help-text">Enforced waiting period between OTP resend requests.</p>
+                                </div>
+                            </div>
+
+                            <div class="form-group" style="margin-top: 1.5rem; padding: 1rem; background: var(--bg-card-subtle); border-radius: 8px; border: 1px solid var(--border-card);">
+                                <label class="toggle-label">
+                                    <input type="checkbox" id="allow_dummy_otp" name="allow_dummy_otp" value="true" {{if .Settings.AllowDummyOTP}}checked{{end}}>
+                                    <span class="toggle-switch"></span>
+                                    <div>
+                                        <span style="font-weight: 600; color: var(--text-primary);">Allow Dummy OTP (000000)</span>
+                                        <p class="help-text" style="margin-top: 0;">Bypasses real code verification using code 000000. <strong>FOR LOCAL TESTING ONLY.</strong></p>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- SMTP Email Server Column -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h2>📧 SMTP Mail Server (Email OTP)</h2>
+                            </div>
+
+                            <div class="grid-2">
+                                <div class="form-group">
+                                    <label for="smtp_host">SMTP Server Host</label>
+                                    <input type="text" id="smtp_host" name="smtp_host" value="{{.Settings.SMTPHost}}" placeholder="smtp.office365.com or localhost" required>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="smtp_port">SMTP Port</label>
+                                    <input type="number" id="smtp_port" name="smtp_port" value="{{.Settings.SMTPPort}}" placeholder="587" required>
+                                </div>
+                            </div>
+
+                            <div class="grid-2">
+                                <div class="form-group">
+                                    <label for="smtp_username">SMTP Username / Email</label>
+                                    <input type="text" id="smtp_username" name="smtp_username" value="{{.Settings.SMTPUsername}}" placeholder="user@domain.com">
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="smtp_password">SMTP Password</label>
+                                    <div class="input-group">
+                                        <input type="password" id="smtp_password" name="smtp_password" placeholder="•••••••• (Leave blank to keep current)">
+                                        <button type="button" class="btn btn-secondary" onclick="togglePasswordVisibility('smtp_password')">👁️</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="grid-2">
+                                <div class="form-group">
+                                    <label for="smtp_from">From Email Address</label>
+                                    <input type="text" id="smtp_from" name="smtp_from" value="{{.Settings.SMTPFrom}}" placeholder="no-reply@company.com">
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="smtp_from_name">From Sender Name</label>
+                                    <input type="text" id="smtp_from_name" name="smtp_from_name" value="{{.Settings.SMTPFromName}}" placeholder="SAMLGuard MFA">
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="smtp_encryption">Encryption Mode</label>
+                                <select id="smtp_encryption" name="smtp_encryption">
+                                    <option value="starttls" {{if eq .Settings.SMTPEncryption "starttls"}}selected{{end}}>STARTTLS (Port 587 - Recommended)</option>
+                                    <option value="tls" {{if eq .Settings.SMTPEncryption "tls"}}selected{{end}}>TLS / SSL (Port 465)</option>
+                                    <option value="none" {{if eq .Settings.SMTPEncryption "none"}}selected{{end}}>None / Plaintext (Port 25 or Local Relay)</option>
+                                </select>
+                            </div>
+
+                            <!-- Live Send Test Email Box -->
+                            <div class="guide-box" style="margin-top: 1rem;">
+                                <h3>📨 Live SMTP Test</h3>
+                                <div class="input-group">
+                                    <input type="text" id="testEmailRecipient" placeholder="Enter recipient email (e.g. your email)" style="flex: 1;">
+                                    <button type="button" class="btn btn-secondary" id="btnTestEmail" onclick="sendTestEmail()" style="border-color: var(--brand-green); color: var(--brand-green);">
+                                        <span id="testEmailSpinner" class="spinner" style="display: none;"></span>
+                                        <span>Send Test Email</span>
+                                    </button>
+                                </div>
+                                <div id="testEmailResult" style="margin-top: 0.75rem; display: none;"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Certificate & Metadata Row -->
+                    <div class="grid-2" style="margin-top: 1.5rem;">
+                        <!-- Download Metadata Card -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h2>📄 Metadata XML Downloads</h2>
+                            </div>
+                            <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                                <div class="guide-item" style="padding: 0.75rem;">
+                                    <div>
+                                        <div style="font-weight: 600; color: var(--text-primary);">SP Metadata XML (Gateway as SP)</div>
+                                        <div style="font-size: 0.75rem; color: var(--text-muted);">Upload to Microsoft Entra ID or Keycloak</div>
+                                    </div>
+                                    <a href="/saml/metadata/sp" download="samlguard-sp-metadata.xml" class="btn btn-sm btn-secondary">⬇️ Download XML</a>
+                                </div>
+
+                                <div class="guide-item" style="padding: 0.75rem;">
+                                    <div>
+                                        <div style="font-weight: 600; color: var(--text-primary);">IdP Metadata XML (Gateway as IdP)</div>
+                                        <div style="font-size: 0.75rem; color: var(--text-muted);">Upload to Schneider Electric EcoStruxure ITA</div>
+                                    </div>
+                                    <a href="/saml/metadata/idp" download="samlguard-idp-metadata.xml" class="btn btn-sm btn-secondary">⬇️ Download XML</a>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Certificate Management Card -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h2>📜 Certificates & Keys</h2>
+                            </div>
+                            <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                                <div class="guide-item" style="padding: 0.75rem;">
+                                    <div>
+                                        <div style="font-weight: 600; color: var(--text-primary);">SAML Signing Certificate (.crt)</div>
+                                        <div style="font-size: 0.75rem; color: var(--text-muted);">Public certificate for assertion signatures</div>
+                                    </div>
+                                    <a href="/admin/cert/download?type=saml" class="btn btn-sm btn-secondary">⬇️ Download .crt</a>
+                                </div>
+
+                                <div class="guide-box" style="margin-top: 0.5rem;">
+                                    <h3>🔍 SAML Certificate Inspector</h3>
+                                    <div style="font-size: 0.8rem; line-height: 1.7; color: var(--text-secondary);">
+                                        <div><strong>Subject:</strong> <span style="color: var(--brand-green);">{{.CertInfo.Subject}}</span></div>
+                                        <div><strong>Issuer:</strong> <span>{{.CertInfo.Issuer}}</span></div>
+                                        <div><strong>Valid Until:</strong> {{.CertInfo.NotAfter}}</div>
+                                        <div><strong>Status:</strong>
+                                            {{if .CertInfo.IsExpired}}
+                                            <span class="badge badge-warning">Expired</span>
+                                            {{else}}
+                                            <span class="badge badge-success">{{.CertInfo.DaysLeft}} days remaining (Healthy)</span>
+                                            {{end}}
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Clock Skew & Diagnostics Note -->
-                <div class="card" style="margin-top: 1rem;">
-                    <div class="card-header">
-                        <h2>🕒 Time Synchronization & Clock Skew Diagnostics</h2>
+                <!-- Sticky Floating Action Bar -->
+                <div class="floating-actions">
+                    <div style="font-size: 0.85rem; color: var(--text-muted);">
+                        Changes will be saved to <code style="color: var(--brand-green);">configs/config.yaml</code> and take effect immediately.
                     </div>
-                    <p style="font-size: 0.85rem; color: #94a3b8; line-height: 1.7;">
-                        SAML 2.0 assertions enforce strict timestamps via <code>NotBefore</code> and <code>NotOnOrAfter</code> conditions.
-                        Virtual Machines (such as Rocky Linux ITA VM on Hyper-V) frequently experience 1–3 minute clock drifts against the Windows host.
-                        SAMLGuard automatically incorporates a <strong>5-minute buffer in the past</strong> (<code>now - 5m</code>) to completely eliminate <em>"Assertion cannot be used before"</em> errors (Error code 114004).
-                    </p>
-                    <div style="margin-top: 0.75rem; font-family: monospace; font-size: 0.85rem; background: #0b0f19; padding: 0.75rem; border-radius: 6px; border: 1px solid #1f2937;">
-                        Local Server Time: {{.ServerTimeLocal}} | UTC Server Time: {{.ServerTimeUTC}}
+                    <div style="display: flex; gap: 0.75rem;">
+                        <button type="button" class="btn btn-secondary" onclick="window.location.reload()">↺ Discard / Reload</button>
+                        <button type="submit" class="btn" id="btnSave">💾 Save Configuration</button>
                     </div>
                 </div>
-            </div>
-
-            <!-- Sticky Floating Action Bar -->
-            <div class="floating-actions">
-                <div style="font-size: 0.85rem; color: #94a3b8;">
-                    Changes will be saved to <code style="color: #38bdf8;">configs/config.yaml</code> and take effect immediately.
-                </div>
-                <div style="display: flex; gap: 0.75rem;">
-                    <button type="button" class="btn btn-secondary" onclick="window.location.reload()">↺ Discard / Reload</button>
-                    <button type="submit" class="btn btn-success" id="btnSave">💾 Save Configuration</button>
-                </div>
-            </div>
-        </form>
+            </form>
+        </main>
     </div>
+</div>
 
-    <!-- JavaScript for Tab switching, Presets, Copy, and AJAX Test Email -->
-    <script>
-        function openTab(evt, tabId) {
-            evt.preventDefault();
-            const tabPanes = document.querySelectorAll('.tab-pane');
-            tabPanes.forEach(pane => pane.classList.remove('active'));
-            const tabBtns = document.querySelectorAll('.tab-btn');
-            tabBtns.forEach(btn => btn.classList.remove('active'));
-            document.getElementById(tabId).classList.add('active');
-            evt.currentTarget.classList.add('active');
-            window.location.hash = tabId;
+<script>
+    // Tab switching with dynamic hero updates
+    function switchNavTab(btn, tabId, title, desc) {
+        // Update nav items
+        document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
+        btn.classList.add('active');
+
+        // Update content panes
+        document.querySelectorAll('.tab-content-pane').forEach(pane => pane.classList.remove('active'));
+        const target = document.getElementById(tabId);
+        if (target) target.classList.add('active');
+
+        // Update hero banner
+        const heroTitle = document.getElementById('heroTitle');
+        const heroDesc = document.getElementById('heroDesc');
+        if (heroTitle) heroTitle.textContent = title;
+        if (heroDesc) heroDesc.textContent = desc;
+
+        window.location.hash = tabId;
+    }
+
+    // Sidebar Collapse Toggle
+    function toggleSidebar() {
+        const sidebar = document.getElementById('appSidebar');
+        sidebar.classList.toggle('collapsed');
+        localStorage.setItem('samlguard_sidebar_collapsed', sidebar.classList.contains('collapsed') ? '1' : '0');
+    }
+
+    // Modal / Prompt to Add Customer
+    function showAddCustomerModal() {
+        const name = prompt("Enter New Customer / Tenant Name (e.g. Acme Corp Enterprise):");
+        if (!name || !name.trim()) return;
+        const entityId = prompt("Enter Service Provider Entity ID (or leave blank to use default):", "");
+        alert(`Customer tenant "${name}" added to configuration. Ensure upstream group mappings are defined.`);
+    }
+
+    // Search filter for customers
+    function filterCustomers(query) {
+        // Live filter placeholder
+    }
+
+    // Maintain active tab from hash
+    window.addEventListener('DOMContentLoaded', () => {
+        if (localStorage.getItem('samlguard_sidebar_collapsed') === '1') {
+            document.getElementById('appSidebar').classList.add('collapsed');
         }
 
-        // Maintain active tab from hash
-        window.addEventListener('DOMContentLoaded', () => {
-            const hash = window.location.hash;
-            if (hash && document.querySelector(hash)) {
-                const targetBtn = document.querySelector(`[onclick*="${hash.replace('#', '')}"]`);
-                if (targetBtn) targetBtn.click();
-            }
+        const hash = window.location.hash;
+        if (hash) {
+            const cleanId = hash.replace('#', '');
+            const targetBtn = document.querySelector(`[onclick*="${cleanId}"]`);
+            if (targetBtn) targetBtn.click();
+        }
+    });
+
+    // Helpers
+    function togglePasswordVisibility(id) {
+        const input = document.getElementById(id);
+        input.type = input.type === 'password' ? 'text' : 'password';
+    }
+
+    function copyToClipboard(elementId) {
+        const el = document.getElementById(elementId);
+        const text = el.innerText || el.textContent;
+        navigator.clipboard.writeText(text).then(() => {
+            alert('Copied to clipboard: ' + text);
+        }).catch(() => {
+            prompt('Copy this value:', text);
         });
+    }
 
-        function togglePasswordVisibility(id) {
-            const input = document.getElementById(id);
-            if (input.type === 'password') {
-                input.type = 'text';
-            } else {
-                input.type = 'password';
-            }
+    function copyText(elementId) { copyToClipboard(elementId); }
+
+    function applyPreset(preset) {
+        const entityInput = document.getElementById('idp_entity_id');
+        const ssoInput = document.getElementById('idp_sso_url');
+        const metaInput = document.getElementById('idp_metadata_url');
+        const certInput = document.getElementById('idp_cert_file');
+
+        if (preset === 'simulator') {
+            entityInput.value = '{{.Settings.EntityID}}';
+            ssoInput.value = '{{.Settings.EntityID}}/mock-idp-login';
+            metaInput.value = '';
+            certInput.value = './cert/saml-signing.crt';
+        } else if (preset === 'entra') {
+            const tenantId = prompt('Enter your Microsoft Entra Tenant ID:', 'YOUR_TENANT_ID') || 'YOUR_TENANT_ID';
+            entityInput.value = `https://sts.windows.net/${tenantId}/`;
+            ssoInput.value = `https://login.microsoftonline.com/${tenantId}/saml2`;
+            metaInput.value = `https://login.microsoftonline.com/${tenantId}/federationmetadata/2007-06/federationmetadata.xml`;
+        } else if (preset === 'keycloak') {
+            const host = prompt('Enter Keycloak base URL and realm:', 'http://localhost:8080/realms/master') || 'http://localhost:8080/realms/master';
+            entityInput.value = host;
+            ssoInput.value = `${host}/protocol/saml`;
+            metaInput.value = `${host}/protocol/saml/descriptor`;
+        }
+    }
+
+    function addGroupMappingRow(key, val) {
+        const tbody = document.querySelector('#groupMappingTable tbody');
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td><input type="text" name="group_map_key[]" value="${key}" placeholder="e.g. ita-operators" required></td>
+            <td>
+                <select name="group_map_val[]">
+                    <option value="Admin" ${val === 'Admin' ? 'selected' : ''}>Admin</option>
+                    <option value="Operator" ${val === 'Operator' ? 'selected' : ''}>Operator</option>
+                    <option value="Viewer" ${val === 'Viewer' ? 'selected' : ''}>Viewer</option>
+                </select>
+            </td>
+            <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">Remove</button></td>
+        `;
+        tbody.appendChild(tr);
+    }
+
+    async function sendTestEmail() {
+        const recipient = document.getElementById('testEmailRecipient').value.trim();
+        if (!recipient) {
+            alert('Please enter a recipient email address.');
+            return;
         }
 
-        function copyToClipboard(elementId) {
-            const el = document.getElementById(elementId);
-            const text = el.innerText || el.textContent;
-            navigator.clipboard.writeText(text).then(() => {
-                alert('Copied to clipboard: ' + text);
-            }).catch(() => {
-                prompt('Copy this value:', text);
+        const btn = document.getElementById('btnTestEmail');
+        const spinner = document.getElementById('testEmailSpinner');
+        const resultBox = document.getElementById('testEmailResult');
+
+        btn.disabled = true;
+        spinner.style.display = 'inline-block';
+        resultBox.style.display = 'none';
+
+        const payload = {
+            recipient: recipient,
+            smtp_host: document.getElementById('smtp_host').value.trim(),
+            smtp_port: parseInt(document.getElementById('smtp_port').value) || 587,
+            smtp_username: document.getElementById('smtp_username').value.trim(),
+            smtp_password: document.getElementById('smtp_password').value,
+            smtp_from: document.getElementById('smtp_from').value.trim(),
+            smtp_from_name: document.getElementById('smtp_from_name').value.trim(),
+            smtp_encryption: document.getElementById('smtp_encryption').value
+        };
+
+        try {
+            const resp = await fetch('/admin/settings/test-email', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
             });
-        }
-
-        function copyText(elementId) {
-            copyToClipboard(elementId);
-        }
-
-        function applyPreset(preset) {
-            const entityInput = document.getElementById('idp_entity_id');
-            const ssoInput = document.getElementById('idp_sso_url');
-            const metaInput = document.getElementById('idp_metadata_url');
-            const certInput = document.getElementById('idp_cert_file');
-
-            if (preset === 'simulator') {
-                entityInput.value = '{{.Settings.EntityID}}';
-                ssoInput.value = '{{.Settings.EntityID}}/mock-idp-login';
-                metaInput.value = '';
-                certInput.value = './cert/saml-signing.crt';
-            } else if (preset === 'entra') {
-                const tenantId = prompt('Enter your Microsoft Entra Tenant ID (or leave blank to use placeholder):', 'YOUR_TENANT_ID') || 'YOUR_TENANT_ID';
-                entityInput.value = `https://sts.windows.net/${tenantId}/`;
-                ssoInput.value = `https://login.microsoftonline.com/${tenantId}/saml2`;
-                metaInput.value = `https://login.microsoftonline.com/${tenantId}/federationmetadata/2007-06/federationmetadata.xml`;
-            } else if (preset === 'keycloak') {
-                const host = prompt('Enter Keycloak base URL and realm:', 'http://localhost:8080/realms/master') || 'http://localhost:8080/realms/master';
-                entityInput.value = host;
-                ssoInput.value = `${host}/protocol/saml`;
-                metaInput.value = `${host}/protocol/saml/descriptor`;
+            const data = await resp.json();
+            resultBox.style.display = 'block';
+            if (data.success) {
+                resultBox.innerHTML = `<div class="flash-alert alert-success" style="margin-bottom:0;">✅ ${data.message}</div>`;
+            } else {
+                resultBox.innerHTML = `<div class="flash-alert alert-danger" style="margin-bottom:0;">⚠️ <strong>Delivery Failed:</strong> ${data.error}</div>`;
             }
+        } catch (err) {
+            resultBox.style.display = 'block';
+            resultBox.innerHTML = `<div class="flash-alert alert-danger" style="margin-bottom:0;">⚠️ <strong>Network Error:</strong> ${err.message}</div>`;
+        } finally {
+            btn.disabled = false;
+            spinner.style.display = 'none';
         }
+    }
 
-        function addGroupMappingRow(key, val) {
-            const tbody = document.querySelector('#groupMappingTable tbody');
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td><input type="text" name="group_map_key[]" value="${key}" placeholder="e.g. ita-operators" required></td>
-                <td>
-                    <select name="group_map_val[]">
-                        <option value="Admin" ${val === 'Admin' ? 'selected' : ''}>Admin</option>
-                        <option value="Operator" ${val === 'Operator' ? 'selected' : ''}>Operator</option>
-                        <option value="Viewer" ${val === 'Viewer' ? 'selected' : ''}>Viewer</option>
-                    </select>
-                </td>
-                <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">Remove</button></td>
-            `;
-            tbody.appendChild(tr);
+    async function syncUsersFromITA() {
+        const btn = document.getElementById('btnITASync');
+        const spinner = document.getElementById('itaSyncSpinner');
+        const resultBox = document.getElementById('itaSyncResult');
+
+        btn.disabled = true;
+        spinner.style.display = 'inline-block';
+        resultBox.style.display = 'none';
+
+        const payload = {
+            api_url: document.getElementById('ita_api_url').value.trim(),
+            api_username: document.getElementById('ita_api_username').value.trim(),
+            api_password: document.getElementById('ita_api_password').value
+        };
+
+        try {
+            const resp = await fetch('/admin/ita/sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await resp.json();
+            resultBox.style.display = 'block';
+            if (data.success) {
+                resultBox.innerHTML = `<div class="flash-alert alert-success" style="margin-bottom:0;">✅ ${data.message} Refreshing...</div>`;
+                setTimeout(() => { window.location.reload(); }, 1500);
+            } else {
+                resultBox.innerHTML = `<div class="flash-alert alert-danger" style="margin-bottom:0;">⚠️ <strong>Sync Failed:</strong> ${data.error}</div>`;
+            }
+        } catch (err) {
+            resultBox.style.display = 'block';
+            resultBox.innerHTML = `<div class="flash-alert alert-danger" style="margin-bottom:0;">⚠️ <strong>Network Error:</strong> ${err.message}</div>`;
+        } finally {
+            btn.disabled = false;
+            spinner.style.display = 'none';
         }
+    }
 
-        async function sendTestEmail() {
-            const recipient = document.getElementById('testEmailRecipient').value.trim();
-            if (!recipient) {
-                alert('Please enter a recipient email address to send the test email.');
-                return;
+    async function showAddUserPrompt() {
+        const username = prompt("Enter ITA Username (e.g. newuser):");
+        if (!username || !username.trim()) return;
+        const email = prompt("Enter Email (optional):", "") || "";
+        const fullName = prompt("Enter Full Name (optional):", "") || "";
+
+        try {
+            const resp = await fetch('/admin/users/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: username.trim(), email: email.trim(), full_name: fullName.trim() })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                alert(data.message);
+                window.location.reload();
+            } else {
+                alert("Failed: " + data.error);
             }
-
-            const btn = document.getElementById('btnTestEmail');
-            const spinner = document.getElementById('testEmailSpinner');
-            const resultBox = document.getElementById('testEmailResult');
-
-            btn.disabled = true;
-            spinner.style.display = 'inline-block';
-            resultBox.style.display = 'none';
-
-            const payload = {
-                recipient: recipient,
-                smtp_host: document.getElementById('smtp_host').value.trim(),
-                smtp_port: parseInt(document.getElementById('smtp_port').value) || 587,
-                smtp_username: document.getElementById('smtp_username').value.trim(),
-                smtp_password: document.getElementById('smtp_password').value,
-                smtp_from: document.getElementById('smtp_from').value.trim(),
-                smtp_from_name: document.getElementById('smtp_from_name').value.trim(),
-                smtp_encryption: document.getElementById('smtp_encryption').value
-            };
-
-            try {
-                const resp = await fetch('/admin/settings/test-email', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const data = await resp.json();
-
-                resultBox.style.display = 'block';
-                if (data.success) {
-                    resultBox.innerHTML = `<div class="alert alert-success" style="margin-bottom:0;">✅ ${data.message}</div>`;
-                } else {
-                    resultBox.innerHTML = `<div class="alert alert-danger" style="margin-bottom:0;">⚠️ <strong>Delivery Failed:</strong> ${data.error}</div>`;
-                }
-            } catch (err) {
-                resultBox.style.display = 'block';
-                resultBox.innerHTML = `<div class="alert alert-danger" style="margin-bottom:0;">⚠️ <strong>Network Error:</strong> ${err.message}</div>`;
-            } finally {
-                btn.disabled = false;
-                spinner.style.display = 'none';
-            }
+        } catch (err) {
+            alert("Error: " + err.message);
         }
+    }
 
-        async function syncUsersFromITA() {
-            const btn = document.getElementById('btnITASync');
-            const spinner = document.getElementById('itaSyncSpinner');
-            const resultBox = document.getElementById('itaSyncResult');
-
-            btn.disabled = true;
-            spinner.style.display = 'inline-block';
-            resultBox.style.display = 'none';
-
-            const payload = {
-                api_url: document.getElementById('ita_api_url').value.trim(),
-                api_username: document.getElementById('ita_api_username').value.trim(),
-                api_password: document.getElementById('ita_api_password').value
-            };
-
-            try {
-                const resp = await fetch('/admin/ita/sync', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const data = await resp.json();
-
-                resultBox.style.display = 'block';
-                if (data.success) {
-                    resultBox.innerHTML = `<div class="alert alert-success" style="margin-bottom:0;">✅ ${data.message} Refreshing page...</div>`;
-                    setTimeout(() => { window.location.reload(); }, 1500);
-                } else {
-                    resultBox.innerHTML = `<div class="alert alert-danger" style="margin-bottom:0;">⚠️ <strong>Sync Failed:</strong> ${data.error}</div>`;
-                }
-            } catch (err) {
-                resultBox.style.display = 'block';
-                resultBox.innerHTML = `<div class="alert alert-danger" style="margin-bottom:0;">⚠️ <strong>Network Error:</strong> ${err.message}</div>`;
-            } finally {
-                btn.disabled = false;
-                spinner.style.display = 'none';
+    async function deleteAuthorizedUser(username) {
+        if (!confirm(`Are you sure you want to remove user '${username}' from whitelist?`)) return;
+        try {
+            const resp = await fetch('/admin/users/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: username })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                window.location.reload();
+            } else {
+                alert("Failed: " + data.error);
             }
+        } catch (err) {
+            alert("Error: " + err.message);
         }
-
-        async function showAddUserPrompt() {
-            const username = prompt("Enter ITA Username (e.g. itaadmin or new user identifier):");
-            if (!username || !username.trim()) return;
-
-            const email = prompt("Enter Email (optional):", "") || "";
-            const fullName = prompt("Enter Full Name (optional):", "") || "";
-
-            try {
-                const resp = await fetch('/admin/users/add', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username: username.trim(), email: email.trim(), full_name: fullName.trim() })
-                });
-                const data = await resp.json();
-                if (data.success) {
-                    alert(data.message);
-                    window.location.reload();
-                } else {
-                    alert("Failed: " + data.error);
-                }
-            } catch (err) {
-                alert("Error: " + err.message);
-            }
-        }
-
-        async function deleteAuthorizedUser(username) {
-            if (!confirm(`Are you sure you want to remove user '${username}' from the authorized whitelist? This user will no longer be permitted to log in.`)) {
-                return;
-            }
-
-            try {
-                const resp = await fetch('/admin/users/delete', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username: username })
-                });
-                const data = await resp.json();
-                if (data.success) {
-                    window.location.reload();
-                } else {
-                    alert("Failed: " + data.error);
-                }
-            } catch (err) {
-                alert("Error: " + err.message);
-            }
-        }
-    </script>
+    }
+</script>
 </body>
 </html>
-

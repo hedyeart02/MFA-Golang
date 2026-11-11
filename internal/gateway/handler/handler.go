@@ -28,14 +28,23 @@ import (
 )
 
 type SAMLHandler struct {
-	pipeline         pipeline.AuthnPipeline
-	mfaService       *mfa.Service
-	responseGen      *gateway.ResponseGenerator
-	correlationStore *CorrelationStore
-	idpCertStore     *goxmldsig.MemoryX509CertificateStore
-	cfg              *config.Config
-	templates        *template.Template
-	logger           *zap.Logger
+	pipeline           pipeline.AuthnPipeline
+	mfaService         *mfa.Service
+	responseGen        *gateway.ResponseGenerator
+	correlationStore   *CorrelationStore
+	idpCertStore       *goxmldsig.MemoryX509CertificateStore
+	cfg                *config.Config
+	templates          *template.Template
+	corporateLoginTmpl *template.Template
+	logger             *zap.Logger
+}
+
+type CorporateLoginViewModel struct {
+	SessionID         string
+	OutboundID        string
+	SAMLResponseInput template.HTML
+	Username          string
+	ErrorMessage      string
 }
 
 type ChallengeViewModel struct {
@@ -81,6 +90,14 @@ func NewSAMLHandler(
 		tmpl = embeddedTmpl
 	}
 
+	var corpTmpl *template.Template
+	corpTemplatePath := filepath.Join("web", "templates", "corporate_login.html")
+	if t, err := template.ParseFiles(corpTemplatePath); err == nil {
+		corpTmpl = t
+	} else if embeddedCorpTmpl, err := web.ParseCorporateLoginTemplate(); err == nil {
+		corpTmpl = embeddedCorpTmpl
+	}
+
 	var idpCertStore *goxmldsig.MemoryX509CertificateStore
 	certPath := cfg.SAML.IdPCertFile
 	if certPath == "" {
@@ -112,14 +129,15 @@ func NewSAMLHandler(
 	}
 
 	return &SAMLHandler{
-		pipeline:         p,
-		mfaService:       mfaSvc,
-		responseGen:      respGen,
-		correlationStore: NewCorrelationStore(15 * time.Minute),
-		idpCertStore:     idpCertStore,
-		cfg:              cfg,
-		templates:        tmpl,
-		logger:           log,
+		pipeline:           p,
+		mfaService:         mfaSvc,
+		responseGen:        respGen,
+		correlationStore:   NewCorrelationStore(15 * time.Minute),
+		idpCertStore:       idpCertStore,
+		cfg:                cfg,
+		templates:          tmpl,
+		corporateLoginTmpl: corpTmpl,
+		logger:             log,
 	}, nil
 }
 
@@ -868,50 +886,28 @@ func (h *SAMLHandler) renderMockUpstreamLogin(c *gin.Context, sessionID, outboun
 		defaultSAMLResponse = result.SAMLResponse
 	}
 
-	errorBanner := ""
-	if errorMessage != "" {
-		errorBanner = fmt.Sprintf(`<div style="background: #450a0a; border: 1px solid #b91c1c; color: #fecaca; padding: 0.8rem 1rem; border-radius: 8px; margin-bottom: 1.25rem; font-size: 0.875rem; text-align: left; line-height: 1.4;">⚠️ <strong>Access Denied:</strong> %s</div>`, errorMessage)
+	vm := CorporateLoginViewModel{
+		SessionID:         sessionID,
+		OutboundID:        outboundID,
+		SAMLResponseInput: template.HTML(fmt.Sprintf(`<input type="hidden" name="SAMLResponse" value="%s"/>`, defaultSAMLResponse)),
+		Username:          prefillUser,
+		ErrorMessage:      errorMessage,
 	}
 
-	html := fmt.Sprintf(`<!DOCTYPE html>
-<html>
-<head>
-	<meta charset="UTF-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<title>SAMLGuard - Corporate Sign In</title>
-	<style>
-		body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-		.card { background: #1e293b; padding: 2.5rem; border-radius: 16px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); max-width: 440px; width: 90%%%%; border: 1px solid #334155; text-align: center; }
-		.logo { font-size: 2.2rem; margin-bottom: 0.5rem; }
-		h1 { color: #38bdf8; font-size: 1.4rem; font-weight: 700; margin-bottom: 0.5rem; }
-		.subtitle { color: #94a3b8; font-size: 0.85rem; margin-bottom: 1.5rem; }
-		label { display: block; font-size: 0.875rem; font-weight: 500; color: #94a3b8; margin-bottom: 0.5rem; text-align: left; }
-		input[type=text] { width: 100%%%%; padding: 0.875rem; border: 2px solid #334155; border-radius: 10px; background: #0f172a; color: #e2e8f0; font-size: 1rem; box-sizing: border-box; margin-bottom: 1.25rem; transition: border-color 0.2s; }
-		input[type=text]:focus { outline: none; border-color: #38bdf8; }
-		button.submit-btn { width: 100%%%%; padding: 0.875rem; border: none; border-radius: 10px; background: linear-gradient(135deg, #2563eb, #1d4ed8); color: white; font-size: 1rem; font-weight: 600; cursor: pointer; transition: transform 0.1s, box-shadow 0.2s; }
-		button.submit-btn:hover { background: #1d4ed8; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4); }
-		.footer { margin-top: 1.5rem; font-size: 0.75rem; color: #64748b; }
-	</style>
-</head>
-<body>
-	<div class="card">
-		<div class="logo">🛡️</div>
-		<h1>Corporate Sign In</h1>
-		<p class="subtitle">Enter your Schneider Electric IT Advisor account</p>
-		%s
-		<form method="POST" action="/mock-idp/submit">
-			<input type="hidden" name="session_id" value="%s"/>
-			<input type="hidden" name="outbound_id" value="%s"/>
-			<input type="hidden" name="SAMLResponse" value="%s"/>
-			<label for="username">Username or Corporate Email</label>
-			<input type="text" id="username" name="username" value="%s" placeholder="e.g. itaadmin or user@domain.com" required autofocus autocomplete="username"/>
-			<button type="submit" class="submit-btn">Continue to Verification &rarr;</button>
-		</form>
-		<div class="footer">SAMLGuard Enterprise MFA Gateway</div>
-	</div>
-</body>
-</html>`, errorBanner, sessionID, outboundID, defaultSAMLResponse, prefillUser)
-	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
+	tmpl := h.corporateLoginTmpl
+	if tmpl == nil {
+		tmpl, _ = web.ParseCorporateLoginTemplate()
+	}
+
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	if tmpl != nil {
+		c.Status(http.StatusOK)
+		if err := tmpl.Execute(c.Writer, vm); err == nil {
+			return
+		}
+	}
+
+	c.String(http.StatusInternalServerError, "Failed to render corporate login page")
 }
 
 // HandleMockIDPSubmit processes the user's entered username or email and generates the SAML response

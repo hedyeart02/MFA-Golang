@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/hidayat-SE/samlguard/internal/config"
 	"github.com/hidayat-SE/samlguard/pkg/logger"
+	"github.com/hidayat-SE/samlguard/web"
 	"go.uber.org/zap"
 )
 
@@ -335,6 +337,109 @@ func TestSetupApp_MetadataRoutes(t *testing.T) {
 		}
 		if !strings.Contains(w.Body.String(), tc.expectedContent) {
 			t.Errorf("expected %s to contain %s", tc.path, tc.expectedContent)
+		}
+	}
+}
+
+func TestSetupApp_StaticLogosAndLoginAssets(t *testing.T) {
+	app, cleanup, err := SetupAppWithCleanup(testConfig(t), testLogger())
+	if err != nil {
+		t.Fatalf("unexpected setup error: %v", err)
+	}
+	defer cleanup()
+
+	assets := []string{
+		"/static/img/ecostruxure-dark.png",
+		"/static/img/ecostruxure-light.png",
+		"/static/img/schneider-electric.png",
+		"/assets/backgrounds/bg-login-dark.png",
+		"/assets/backgrounds/bg-login-light.png",
+		"/assets/backgrounds/bg-console-dark.png",
+		"/assets/backgrounds/bg-console-light.png",
+	}
+
+	for _, asset := range assets {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, asset, nil)
+		app.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("expected %s to return 200, got %d", asset, w.Code)
+		}
+		if !strings.HasPrefix(w.Body.String(), "\x89PNG") {
+			t.Errorf("expected %s to return PNG image payload", asset)
+		}
+		if cc := w.Header().Get("Cache-Control"); !strings.Contains(cc, "max-age=") {
+			t.Errorf("expected %s to set Cache-Control max-age header, got %q", asset, cc)
+		}
+	}
+
+	wTheme := httptest.NewRecorder()
+	reqTheme, _ := http.NewRequest(http.MethodGet, "/static/js/theme.js", nil)
+	app.ServeHTTP(wTheme, reqTheme)
+	if wTheme.Code != http.StatusOK {
+		t.Fatalf("expected /static/js/theme.js to return 200, got %d", wTheme.Code)
+	}
+	if !strings.Contains(wTheme.Body.String(), "samlguard.theme") || !strings.Contains(wTheme.Body.String(), "system") {
+		t.Errorf("expected /static/js/theme.js to use samlguard.theme key and system default")
+	}
+
+	wLogin := httptest.NewRecorder()
+	reqLogin, _ := http.NewRequest(http.MethodGet, "/admin/login", nil)
+	app.ServeHTTP(wLogin, reqLogin)
+	if wLogin.Code != http.StatusOK {
+		t.Fatalf("expected /admin/login to return 200, got %d", wLogin.Code)
+	}
+	body := wLogin.Body.String()
+	for _, ref := range []string{
+		"/static/img/ecostruxure-dark.png",
+		"/static/img/ecostruxure-light.png",
+		"/static/img/schneider-electric.png",
+		"/static/js/theme.js",
+		"/assets/backgrounds/bg-login-dark.png",
+		"/assets/backgrounds/bg-login-light.png",
+	} {
+		if !strings.Contains(body, ref) {
+			t.Errorf("expected /admin/login HTML to reference %s", ref)
+		}
+	}
+
+	rawCorpReqXML := `<samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_corp_ui_test_1" Version="2.0" IssueInstant="2026-11-04T12:00:00Z" Destination="http://localhost:8080/saml/sso" AssertionConsumerServiceURL="https://192.168.0.119/api/current/authentication/saml2-callback"><saml:Issuer>https://192.168.0.119</saml:Issuer></samlp:AuthnRequest>`
+	encodedCorpReq, err := encodeSAMLRequest(rawCorpReqXML)
+	if err != nil {
+		t.Fatalf("failed to encode SAMLRequest for /login: %v", err)
+	}
+	wCorpLogin := httptest.NewRecorder()
+	reqCorpLogin, _ := http.NewRequest(http.MethodGet, "/saml/sso?SAMLRequest="+url.QueryEscape(encodedCorpReq)+"&RelayState=corp-ui-test", nil)
+	app.ServeHTTP(wCorpLogin, reqCorpLogin)
+	if wCorpLogin.Code != http.StatusOK {
+		t.Fatalf("expected /saml/sso to return 200, got %d (body: %s)", wCorpLogin.Code, wCorpLogin.Body.String())
+	}
+	corpBody := wCorpLogin.Body.String()
+	for _, ref := range []string{
+		"Corporate Sign In",
+		"Secure access to Schneider Electric IT Advisor",
+		"Continue to Verification",
+		"/static/img/ecostruxure-dark.png",
+		"/static/img/ecostruxure-light.png",
+		"/static/img/schneider-electric.png",
+		"/static/js/theme.js",
+		"/assets/backgrounds/bg-login-dark.png",
+		"/assets/backgrounds/bg-login-light.png",
+		"#00B050",
+	} {
+		if !strings.Contains(corpBody, ref) {
+			t.Errorf("expected /login HTML to reference %q", ref)
+		}
+	}
+
+	for _, ref := range []string{
+		"/static/js/theme.js",
+		"/assets/backgrounds/bg-console-dark.png",
+		"/assets/backgrounds/bg-console-light.png",
+	} {
+		if !strings.Contains(web.DefaultAdminSettingsHTML, ref) {
+			t.Errorf("expected admin_settings.html to reference %s", ref)
 		}
 	}
 }
