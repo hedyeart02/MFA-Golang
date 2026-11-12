@@ -42,10 +42,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"golang.org/x/crypto/acme/autocert"
 )
 
 // Version string populated at build time
-var Version = "v1.1.0"
+var Version = "v1.1.1"
 
 // SetupAppWithCleanup constructs and wires all runtime dependencies into the Gin engine
 // and returns a resource cleanup function to be invoked on server shutdown.
@@ -460,21 +461,99 @@ func main() {
 	runInteractive(srv, cfg, appLogger, cleanup)
 }
 
+// prepareTLSAndChallengeServer validates static TLS keypairs or configures Let's Encrypt autocert
+// (and starts its HTTP-01 challenge listener when enabled).
+func prepareTLSAndChallengeServer(cfg *config.Config, srv *http.Server, appLogger *logger.Logger) (*http.Server, error) {
+	if cfg == nil || !cfg.TLS.Enabled {
+		return nil, nil
+	}
+
+	if cfg.TLS.AutoTLS.Enabled {
+		domains := config.NormalizeAutoTLSDomains(cfg.TLS.AutoTLS.Domains)
+		if len(domains) == 0 {
+			return nil, errors.New("tls.auto_tls.domains is required when automatic Let's Encrypt TLS is enabled")
+		}
+		cacheDir := cfg.TLS.AutoTLS.EffectiveCacheDir()
+		if err := os.MkdirAll(cacheDir, 0700); err != nil {
+			return nil, fmt.Errorf("creating autocert cache directory %q: %w", cacheDir, err)
+		}
+
+		mgr := &autocert.Manager{
+			Prompt:     autocert.AcceptTOS,
+			HostPolicy: autocert.HostWhitelist(domains...),
+			Cache:      autocert.DirCache(cacheDir),
+			Email:      strings.TrimSpace(cfg.TLS.AutoTLS.Email),
+		}
+		if srv.TLSConfig == nil {
+			srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+		}
+		srv.TLSConfig.GetCertificate = mgr.GetCertificate
+		srv.TLSConfig.NextProtos = []string{"h2", "http/1.1", "acme-tls/1"}
+
+		appLogger.System().Info("automatic Let's Encrypt TLS (autocert) configured",
+			zap.Strings("domains", domains),
+			zap.String("cache_dir", cacheDir),
+		)
+
+		challengeAddr := cfg.TLS.AutoTLS.EffectiveHTTPChallengeAddr()
+		challengeLn, err := net.Listen("tcp", challengeAddr)
+		if err != nil {
+			appLogger.System().Warn("could not bind HTTP-01 ACME challenge listener; TLS-ALPN-01 on port 443 will still be used if reachable",
+				zap.String("address", challengeAddr),
+				zap.Error(err),
+			)
+			return nil, nil
+		}
+
+		challengeSrv := &http.Server{
+			Addr:              challengeAddr,
+			Handler:           mgr.HTTPHandler(nil),
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       15 * time.Second,
+			WriteTimeout:      15 * time.Second,
+			IdleTimeout:       60 * time.Second,
+		}
+		go func() {
+			appLogger.System().Info("listening for ACME HTTP-01 challenges and HTTPS redirects", zap.String("address", challengeAddr))
+			if err := challengeSrv.Serve(challengeLn); err != nil && err != http.ErrServerClosed {
+				appLogger.System().Warn("ACME HTTP-01 challenge server stopped", zap.Error(err))
+			}
+		}()
+		return challengeSrv, nil
+	}
+
+	if _, err := tls.LoadX509KeyPair(cfg.TLS.CertFile, cfg.TLS.KeyFile); err != nil {
+		return nil, fmt.Errorf("loading TLS certificate or key: %w", err)
+	}
+	return nil, nil
+}
+
+func serveGatewayListener(srv *http.Server, ln net.Listener, cfg *config.Config) error {
+	if cfg != nil && cfg.TLS.Enabled {
+		if cfg.TLS.AutoTLS.Enabled {
+			return srv.ServeTLS(ln, "", "")
+		}
+		return srv.ServeTLS(ln, cfg.TLS.CertFile, cfg.TLS.KeyFile)
+	}
+	return srv.Serve(ln)
+}
+
 // runInteractive runs the HTTP server for console execution and listens for OS interrupt signals.
 func runInteractive(srv *http.Server, cfg *config.Config, appLogger *logger.Logger, cleanup func()) {
-	// Synchronously validate TLS keypair upfront if TLS is enabled
-	if cfg.TLS.Enabled {
-		if _, err := tls.LoadX509KeyPair(cfg.TLS.CertFile, cfg.TLS.KeyFile); err != nil {
-			if cleanup != nil {
-				cleanup()
-			}
-			appLogger.System().Fatal("failed to load TLS certificate or key", zap.Error(err))
+	challengeSrv, err := prepareTLSAndChallengeServer(cfg, srv, appLogger)
+	if err != nil {
+		if cleanup != nil {
+			cleanup()
 		}
+		appLogger.System().Fatal("failed to initialize TLS configuration", zap.Error(err))
 	}
 
 	// Synchronously bind the TCP listener to detect port collisions or socket errors immediately
 	ln, err := net.Listen("tcp", srv.Addr)
 	if err != nil {
+		if challengeSrv != nil {
+			_ = challengeSrv.Close()
+		}
 		if cleanup != nil {
 			cleanup()
 		}
@@ -486,14 +565,8 @@ func runInteractive(srv *http.Server, cfg *config.Config, appLogger *logger.Logg
 	serverErrors := make(chan error, 1)
 
 	go func() {
-		if cfg.TLS.Enabled {
-			if err := srv.ServeTLS(ln, cfg.TLS.CertFile, cfg.TLS.KeyFile); err != nil && err != http.ErrServerClosed {
-				serverErrors <- err
-			}
-		} else {
-			if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
-				serverErrors <- err
-			}
+		if err := serveGatewayListener(srv, ln, cfg); err != nil && err != http.ErrServerClosed {
+			serverErrors <- err
 		}
 	}()
 
@@ -503,6 +576,9 @@ func runInteractive(srv *http.Server, cfg *config.Config, appLogger *logger.Logg
 
 	select {
 	case err := <-serverErrors:
+		if challengeSrv != nil {
+			_ = challengeSrv.Close()
+		}
 		if cleanup != nil {
 			cleanup()
 		}
@@ -517,6 +593,9 @@ func runInteractive(srv *http.Server, cfg *config.Config, appLogger *logger.Logg
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
 
+		if challengeSrv != nil {
+			_ = challengeSrv.Shutdown(shutdownCtx)
+		}
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			appLogger.System().Error("server forced to stop after shutdown timeout", zap.Error(err))
 		} else {

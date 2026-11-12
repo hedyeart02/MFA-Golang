@@ -1473,7 +1473,7 @@
                     <span class="status-dot"></span>
                     <span>Gateway Online</span>
                 </div>
-                <span>v1.1.0</span>
+                <span>v1.1.1</span>
             </div>
         </div>
     </aside>
@@ -1628,7 +1628,7 @@
                         <input type="text" id="heroSearchInput" placeholder="Search customers..." onkeyup="filterCustomers(this.value)">
                     </div>
 
-                    <button type="button" class="hero-filter-btn" title="Filter" onclick="alert('Filter options: Active tenants, Whitelisted users, Connected IdPs.')">
+                    <button type="button" id="heroFilterBtn" class="hero-filter-btn" title="Filter: All tenants" onclick="cycleCustomerStatusFilter()">
                         <svg viewBox="0 0 24 24" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
                     </button>
                 </div>
@@ -1657,11 +1657,19 @@
 
                 <!-- TAB 1: CUSTOMERS (Matching the Mockup empty state & customer tenants) -->
                 <div id="tab-customers" class="tab-content-pane active">
+                    <input type="hidden" name="customer_tenants_submitted" value="1">
+                    <input type="hidden" id="customer_tenants_json" name="customer_tenants_json" value="">
                     <div class="card">
                         <div class="card-header">
                             <h2>👥 Customer Tenants & Single Sign-On Environments</h2>
-                            <span class="badge badge-success">● 1 Connected SP Environment</span>
+                            <span class="badge badge-success" id="connectedSPBadge">● {{.ConnectedSPEnvironmentsCount}} Connected SP Environment{{if ne .ConnectedSPEnvironmentsCount 1}}s{{end}}</span>
                         </div>
+
+                        <div id="customerTenantsUnsavedBanner" style="display: none; margin-bottom: 1rem; padding: 0.75rem 1rem; border-radius: 8px; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); color: #f59e0b; font-size: 0.85rem; justify-content: space-between; align-items: center;">
+                            <span>Customer tenant list modified. Click <strong>Save Configuration</strong> below to persist changes to SAMLGuard.</span>
+                        </div>
+
+                        <div id="customerTenantsList" style="display: grid; gap: 1rem;"></div>
 
                         <!-- Empty State Section exactly like mockup -->
                         <div class="empty-state-card" id="emptyCustomerBlock">
@@ -1690,7 +1698,7 @@
                         </div>
 
                         <!-- Primary Configured Tenant Card -->
-                        <div style="margin-top: 1.5rem; background: var(--bg-card-subtle); border: 1px solid var(--border-card); border-radius: 10px; padding: 1.25rem;">
+                        <div id="defaultTenantCard" data-search="schneider electric ecostruxure it advisor default tenant {{.Settings.ACSURL}} {{.Settings.SSOURL}}" style="margin-top: 1.5rem; background: var(--bg-card-subtle); border: 1px solid var(--border-card); border-radius: 10px; padding: 1.25rem;">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
                                 <div>
                                     <strong style="font-size: 1rem; color: var(--text-primary);">Schneider Electric EcoStruxure IT Advisor (Default Tenant)</strong>
@@ -2472,6 +2480,46 @@
                                         </div>
                                     </div>
                                 </div>
+
+                                <!-- Automatic HTTPS / Let's Encrypt -->
+                                <div class="guide-box" style="margin-top: 0.5rem;">
+                                    <input type="hidden" name="tls_submitted" value="1">
+                                    <h3>🔒 Automatic HTTPS (Let's Encrypt / ACME)</h3>
+                                    <p class="help-text" style="margin-bottom: 0.75rem;">
+                                        Automatically issue and renew browser-trusted SSL certificates via Let's Encrypt for cloud or internet-facing deployments. Requires a public DNS domain pointing to this host with ports <strong>80</strong> and/or <strong>443</strong> reachable. Changes take effect after server restart.
+                                    </p>
+                                    <div style="display: flex; flex-direction: column; gap: 0.55rem; margin-bottom: 0.85rem;">
+                                        <label class="toggle-label" style="margin: 0; display: flex; align-items: center; gap: 0.6rem;">
+                                            <input type="checkbox" id="tls_enabled" name="tls_enabled" {{if .Settings.TLSEnabled}}checked{{end}}>
+                                            <span>Enable HTTPS (TLS) on Gateway Listener</span>
+                                        </label>
+                                        <label class="toggle-label" style="margin: 0; display: flex; align-items: center; gap: 0.6rem;">
+                                            <input type="checkbox" id="auto_tls_enabled" name="auto_tls_enabled" {{if .Settings.AutoTLSEnabled}}checked{{end}}>
+                                            <span>Auto-generate &amp; renew SSL via Let's Encrypt (ACME)</span>
+                                        </label>
+                                    </div>
+                                    <div class="grid-2">
+                                        <div class="form-group">
+                                            <label for="auto_tls_domains_str">Public Domain(s) (Comma-Separated)</label>
+                                            <input type="text" id="auto_tls_domains_str" name="auto_tls_domains_str" value="{{.AutoTLSDomainsStr}}" placeholder="sso.yourdomain.com">
+                                            <p class="help-text">Must be DNS domain names (not raw IP addresses).</p>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="auto_tls_email">Let's Encrypt Notification Email</label>
+                                            <input type="email" id="auto_tls_email" name="auto_tls_email" value="{{.Settings.AutoTLSEmail}}" placeholder="admin@yourdomain.com">
+                                        </div>
+                                    </div>
+                                    <div class="grid-2">
+                                        <div class="form-group" style="margin-bottom: 0;">
+                                            <label for="auto_tls_cache_dir">Certificate Cache Directory</label>
+                                            <input type="text" id="auto_tls_cache_dir" name="auto_tls_cache_dir" value="{{.Settings.AutoTLSCacheDir}}" placeholder="certs/autocert">
+                                        </div>
+                                        <div class="form-group" style="margin-bottom: 0;">
+                                            <label for="auto_tls_http_challenge_addr">HTTP-01 Challenge Listen Address</label>
+                                            <input type="text" id="auto_tls_http_challenge_addr" name="auto_tls_http_challenge_addr" value="{{.Settings.AutoTLSHTTPChallengeAddr}}" placeholder=":80">
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -2597,10 +2645,17 @@
         // Update hero banner
         const heroTitle = document.getElementById('heroTitle');
         const heroDesc = document.getElementById('heroDesc');
+        const heroActions = document.getElementById('heroActions');
         if (heroTitle) heroTitle.textContent = title;
         if (heroDesc) heroDesc.textContent = desc;
+        if (heroActions) heroActions.style.display = (tabId === 'tab-customers') ? 'flex' : 'none';
 
-        window.location.hash = tabId;
+        if (history.replaceState) {
+            history.replaceState(null, '', '#' + tabId);
+        } else {
+            window.location.hash = tabId;
+        }
+        window.scrollTo(0, 0);
     }
 
     // Sidebar Collapse Toggle
@@ -2610,17 +2665,258 @@
         localStorage.setItem('samlguard_sidebar_collapsed', sidebar.classList.contains('collapsed') ? '1' : '0');
     }
 
-    // Modal / Prompt to Add Customer
-    function showAddCustomerModal() {
-        const name = prompt("Enter New Customer / Tenant Name (e.g. Acme Corp Enterprise):");
-        if (!name || !name.trim()) return;
-        const entityId = prompt("Enter Service Provider Entity ID (or leave blank to use default):", "");
-        alert(`Customer tenant "${name}" added to configuration. Ensure upstream group mappings are defined.`);
+    // Customer Tenants State & UI
+    let customerTenants = {{.CustomerTenantsJSON}} || [];
+    let editingCustomerIndex = -1;
+    let customerSearchQuery = '';
+    let customerStatusFilter = 'all'; // 'all' | 'enabled' | 'disabled'
+
+    function escapeHtml(str) {
+        return String(str || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
-    // Search filter for customers
+    function syncCustomerTenantsInput() {
+        const hiddenInput = document.getElementById('customer_tenants_json');
+        if (hiddenInput) {
+            hiddenInput.value = JSON.stringify(customerTenants || []);
+        }
+        const badge = document.getElementById('connectedSPBadge');
+        if (badge) {
+            const enabledCount = (customerTenants || []).filter(t => t && t.enabled).length;
+            const totalCount = 1 + enabledCount;
+            badge.textContent = `● ${totalCount} Connected SP Environment${totalCount === 1 ? '' : 's'}`;
+        }
+    }
+
+    function markCustomerTenantsDirty() {
+        const banner = document.getElementById('customerTenantsUnsavedBanner');
+        if (banner) {
+            banner.style.display = 'flex';
+        }
+    }
+
+    function renderCustomerTenants() {
+        syncCustomerTenantsInput();
+        const listEl = document.getElementById('customerTenantsList');
+        const emptyEl = document.getElementById('emptyCustomerBlock');
+        const defaultCard = document.getElementById('defaultTenantCard');
+        const query = (customerSearchQuery || '').trim().toLowerCase();
+
+        if (!listEl || !emptyEl) return;
+
+        if (!Array.isArray(customerTenants) || customerTenants.length === 0) {
+            listEl.innerHTML = '';
+            emptyEl.style.display = '';
+        } else {
+            emptyEl.style.display = 'none';
+            const filtered = customerTenants
+                .map((tenant, idx) => ({ tenant, idx }))
+                .filter(({ tenant }) => {
+                    const isEnabled = tenant.enabled !== false;
+                    if (customerStatusFilter === 'enabled' && !isEnabled) return false;
+                    if (customerStatusFilter === 'disabled' && isEnabled) return false;
+                    if (!query) return true;
+                    const haystack = `${tenant.name || ''} ${tenant.sp_entity_id || ''} ${tenant.acs_url || ''} ${tenant.notes || ''}`.toLowerCase();
+                    return haystack.includes(query);
+                });
+
+            if (filtered.length === 0) {
+                listEl.innerHTML = `<div style="padding: 1.5rem; text-align: center; color: var(--text-muted); border: 1px dashed var(--border-card); border-radius: 10px;">No customer tenants match "${escapeHtml(customerSearchQuery)}".</div>`;
+            } else {
+                listEl.innerHTML = filtered.map(({ tenant, idx }) => {
+                    const isEnabled = tenant.enabled !== false;
+                    const statusBadge = isEnabled
+                        ? '<span class="badge badge-success">● Enabled</span>'
+                        : '<span class="badge" style="background: rgba(148, 163, 184, 0.16); color: var(--text-muted);">○ Disabled</span>';
+                    const entityLine = tenant.sp_entity_id
+                        ? `<div>SP Entity ID: <code>${escapeHtml(tenant.sp_entity_id)}</code></div>`
+                        : `<div style="color: var(--text-muted);">SP Entity ID: <em>Uses Gateway Default</em></div>`;
+                    const acsLine = tenant.acs_url
+                        ? `<div>ACS Callback URL: <code>${escapeHtml(tenant.acs_url)}</code></div>`
+                        : '';
+                    const notesLine = tenant.notes
+                        ? `<div style="margin-top: 0.4rem; color: var(--text-secondary);">${escapeHtml(tenant.notes)}</div>`
+                        : '';
+
+                    return `
+                        <div style="background: var(--bg-card-subtle); border: 1px solid var(--border-card); border-radius: 10px; padding: 1.15rem 1.25rem;">
+                            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap;">
+                                <div>
+                                    <div style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
+                                        <strong style="font-size: 1rem; color: var(--text-primary);">${escapeHtml(tenant.name)}</strong>
+                                        ${statusBadge}
+                                    </div>
+                                    <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.35rem; line-height: 1.6;">
+                                        ${entityLine}
+                                        ${acsLine}
+                                        ${notesLine}
+                                    </div>
+                                </div>
+                                <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                                    <button type="button" class="btn btn-sm btn-secondary" onclick="toggleCustomerTenant(${idx})">${isEnabled ? 'Disable' : 'Enable'}</button>
+                                    <button type="button" class="btn btn-sm btn-secondary" onclick="editCustomerTenant(${idx})">Edit</button>
+                                    <button type="button" class="btn btn-sm btn-secondary" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.35);" onclick="deleteCustomerTenant(${idx})">Delete</button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+        }
+
+        if (defaultCard) {
+            if (!query) {
+                defaultCard.style.display = '';
+            } else {
+                const defaultSearch = (defaultCard.getAttribute('data-search') || '').toLowerCase();
+                defaultCard.style.display = defaultSearch.includes(query) ? '' : 'none';
+            }
+        }
+    }
+
+    function openCustomerTenantModal(index) {
+        editingCustomerIndex = typeof index === 'number' ? index : -1;
+        const modal = document.getElementById('customerTenantModal');
+        const titleEl = document.getElementById('ctModalTitle');
+        const nameEl = document.getElementById('ctModalName');
+        const entityEl = document.getElementById('ctModalEntityId');
+        const acsEl = document.getElementById('ctModalACSURL');
+        const notesEl = document.getElementById('ctModalNotes');
+        const enabledEl = document.getElementById('ctModalEnabled');
+        const errEl = document.getElementById('ctModalError');
+
+        if (!modal) return;
+        if (errEl) {
+            errEl.style.display = 'none';
+            errEl.textContent = '';
+        }
+
+        if (editingCustomerIndex >= 0 && customerTenants[editingCustomerIndex]) {
+            const t = customerTenants[editingCustomerIndex];
+            if (titleEl) titleEl.textContent = 'Edit Customer Tenant';
+            if (nameEl) nameEl.value = t.name || '';
+            if (entityEl) entityEl.value = t.sp_entity_id || '';
+            if (acsEl) acsEl.value = t.acs_url || '';
+            if (notesEl) notesEl.value = t.notes || '';
+            if (enabledEl) enabledEl.checked = t.enabled !== false;
+        } else {
+            if (titleEl) titleEl.textContent = 'Add New Customer Tenant';
+            if (nameEl) nameEl.value = '';
+            if (entityEl) entityEl.value = '';
+            if (acsEl) acsEl.value = '';
+            if (notesEl) notesEl.value = '';
+            if (enabledEl) enabledEl.checked = true;
+        }
+
+        modal.style.display = 'flex';
+        if (nameEl) nameEl.focus();
+    }
+
+    function closeCustomerTenantModal() {
+        const modal = document.getElementById('customerTenantModal');
+        if (modal) modal.style.display = 'none';
+    }
+
+    function saveCustomerTenantModal() {
+        const name = (document.getElementById('ctModalName')?.value || '').trim();
+        const spEntityId = (document.getElementById('ctModalEntityId')?.value || '').trim();
+        const acsUrl = (document.getElementById('ctModalACSURL')?.value || '').trim();
+        const notes = (document.getElementById('ctModalNotes')?.value || '').trim();
+        const enabled = !!document.getElementById('ctModalEnabled')?.checked;
+        const errEl = document.getElementById('ctModalError');
+
+        if (!name) {
+            if (errEl) {
+                errEl.textContent = 'Customer / Tenant Name is required.';
+                errEl.style.display = 'block';
+            }
+            return;
+        }
+
+        if (acsUrl && !/^https?:\/\//i.test(acsUrl)) {
+            if (errEl) {
+                errEl.textContent = 'ACS Callback URL must start with http:// or https://';
+                errEl.style.display = 'block';
+            }
+            return;
+        }
+
+        if (editingCustomerIndex >= 0 && customerTenants[editingCustomerIndex]) {
+            customerTenants[editingCustomerIndex] = {
+                ...customerTenants[editingCustomerIndex],
+                name,
+                sp_entity_id: spEntityId,
+                acs_url: acsUrl,
+                notes,
+                enabled
+            };
+        } else {
+            customerTenants.push({
+                id: '',
+                name,
+                sp_entity_id: spEntityId,
+                acs_url: acsUrl,
+                notes,
+                enabled
+            });
+        }
+
+        closeCustomerTenantModal();
+        renderCustomerTenants();
+        markCustomerTenantsDirty();
+    }
+
+    function showAddCustomerModal() {
+        openCustomerTenantModal(-1);
+    }
+
+    function editCustomerTenant(index) {
+        openCustomerTenantModal(index);
+    }
+
+    function toggleCustomerTenant(index) {
+        if (!customerTenants[index]) return;
+        customerTenants[index].enabled = !customerTenants[index].enabled;
+        renderCustomerTenants();
+        markCustomerTenantsDirty();
+    }
+
+    function deleteCustomerTenant(index) {
+        const target = customerTenants[index];
+        if (!target) return;
+        if (!confirm(`Remove customer tenant "${target.name}"?`)) return;
+        customerTenants.splice(index, 1);
+        renderCustomerTenants();
+        markCustomerTenantsDirty();
+    }
+
+    // Search & status filter for customers
     function filterCustomers(query) {
-        // Live filter placeholder
+        customerSearchQuery = query || '';
+        renderCustomerTenants();
+    }
+
+    function cycleCustomerStatusFilter() {
+        const order = ['all', 'enabled', 'disabled'];
+        const nextIdx = (order.indexOf(customerStatusFilter) + 1) % order.length;
+        customerStatusFilter = order[nextIdx];
+        const btn = document.getElementById('heroFilterBtn');
+        if (btn) {
+            const labels = {
+                all: 'Filter: All tenants',
+                enabled: 'Filter: Enabled only',
+                disabled: 'Filter: Disabled only'
+            };
+            btn.title = labels[customerStatusFilter];
+            btn.style.borderColor = customerStatusFilter === 'all' ? '' : 'var(--brand-green)';
+            btn.style.color = customerStatusFilter === 'all' ? '' : 'var(--brand-green)';
+        }
+        renderCustomerTenants();
     }
 
     const idpProfiles = {{.IdPProfilesJSON}} || {};
@@ -3022,6 +3318,7 @@
             const cleanId = hash.replace('#', '');
             const targetBtn = document.querySelector(`[onclick*="${cleanId}"]`);
             if (targetBtn) targetBtn.click();
+            requestAnimationFrame(() => window.scrollTo(0, 0));
         }
 
         snapshotActiveIdPProfile();
@@ -3030,6 +3327,7 @@
         syncSMSProviderUI();
         syncOTPProviderState();
         initBrandingProfilesUI();
+        renderCustomerTenants();
 
         ['idp_entity_id', 'idp_sso_url', 'idp_metadata_url', 'idp_cert_file'].forEach(id => {
             const el = document.getElementById(id);
@@ -3050,6 +3348,7 @@
                 snapshotActiveIdPProfile();
                 snapshotActiveSMSProfile();
                 snapshotActiveBrandingProfile();
+                syncCustomerTenantsInput();
                 if (window.location.hash) {
                     settingsForm.action = '/admin/settings' + window.location.hash;
                 }
@@ -3776,5 +4075,42 @@
         loadBrandingProfileIntoEditor('default');
     }
 </script>
+
+<!-- Customer Tenant Modal -->
+<div id="customerTenantModal" style="display: none; position: fixed; inset: 0; z-index: 9999; background: rgba(10, 18, 30, 0.72); backdrop-filter: blur(4px); align-items: center; justify-content: center; padding: 1rem;" onclick="if (event.target === this) closeCustomerTenantModal()">
+    <div style="width: 100%; max-width: 520px; background: var(--bg-card); border: 1px solid var(--border-card); border-radius: 14px; padding: 1.5rem; box-shadow: 0 20px 50px rgba(0,0,0,0.4);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+            <h3 id="ctModalTitle" style="font-size: 1.1rem; color: var(--text-primary); margin: 0;">Add New Customer Tenant</h3>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="closeCustomerTenantModal()">✕</button>
+        </div>
+        <div id="ctModalError" style="display: none; margin-bottom: 0.85rem; padding: 0.6rem 0.8rem; border-radius: 8px; background: rgba(239, 68, 68, 0.14); border: 1px solid rgba(239, 68, 68, 0.35); color: #ef4444; font-size: 0.84rem;"></div>
+        <div class="form-group">
+            <label for="ctModalName">Customer / Tenant Name <span style="color: #ef4444;">*</span></label>
+            <input type="text" id="ctModalName" placeholder="e.g. Acme Corp Enterprise">
+        </div>
+        <div class="form-group">
+            <label for="ctModalEntityId">Service Provider Entity ID (Optional)</label>
+            <input type="text" id="ctModalEntityId" placeholder="e.g. https://acme.example.com/saml/metadata">
+            <p class="help-text">Leave blank to inherit the gateway default Entity ID.</p>
+        </div>
+        <div class="form-group">
+            <label for="ctModalACSURL">Downstream ACS Callback URL (Optional)</label>
+            <input type="text" id="ctModalACSURL" placeholder="https://acme.example.com/api/current/authentication/saml2-callback">
+            <p class="help-text">When provided and enabled, this URL and its origin are automatically allowlisted.</p>
+        </div>
+        <div class="form-group">
+            <label for="ctModalNotes">Notes / Description (Optional)</label>
+            <input type="text" id="ctModalNotes" placeholder="Environment notes, region, or contact">
+        </div>
+        <div class="form-group" style="display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1.25rem;">
+            <input type="checkbox" id="ctModalEnabled" checked style="width: auto; accent-color: var(--brand-green);">
+            <label for="ctModalEnabled" style="margin: 0; cursor: pointer;">Enable this customer tenant</label>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 0.6rem;">
+            <button type="button" class="btn btn-secondary" onclick="closeCustomerTenantModal()">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="saveCustomerTenantModal()">Apply Tenant</button>
+        </div>
+    </div>
+</div>
 </body>
 </html>

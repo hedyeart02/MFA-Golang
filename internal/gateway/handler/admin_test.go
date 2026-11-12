@@ -1018,3 +1018,117 @@ func TestAdminSettings_CustomThemeProfilesAndBrandingAssets(t *testing.T) {
 	}
 }
 
+func TestAdminCustomerTenants_SaveAndRender(t *testing.T) {
+	r, h, _ := setupTestAdminHandler(t)
+
+	form := url.Values{
+		"customer_tenants_submitted": {"1"},
+		"customer_tenants_json": {`[
+			{"name":"Acme Corp","sp_entity_id":"https://acme.example.com/sp","acs_url":"https://acme.example.com/acs","notes":"Primary customer","enabled":true},
+			{"name":"Beta LLC","sp_entity_id":"https://beta.example.com/sp","acs_url":"https://beta.example.com/acs","enabled":false}
+		]`},
+		"idp_entity_id":        {h.cfg.SAML.IdPEntityID},
+		"idp_sso_url":          {h.cfg.SAML.IdPSSOURL},
+		"entity_id":            {h.cfg.SAML.EntityID},
+		"acs_url":              {h.cfg.SAML.ACSURL},
+		"mfa_default_provider": {"totp"},
+		"mfa_issuer":           {"SAMLGuard"},
+		"otp_expiry":           {"5m"},
+		"resend_cooldown":      {"60s"},
+		"smtp_host":            {"localhost"},
+		"smtp_port":            {"1025"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/settings", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on settings POST, got %d: %s", w.Code, w.Body.String())
+	}
+	if len(h.cfg.SAML.CustomerTenants) != 2 {
+		t.Fatalf("expected 2 customer tenants in config, got %d", len(h.cfg.SAML.CustomerTenants))
+	}
+	if h.cfg.SAML.CustomerTenants[0].ID != "acme-corp" {
+		t.Errorf("expected normalized id 'acme-corp', got %q", h.cfg.SAML.CustomerTenants[0].ID)
+	}
+
+	wGet := httptest.NewRecorder()
+	r.ServeHTTP(wGet, httptest.NewRequest(http.MethodGet, "/admin/settings", nil))
+	if wGet.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on settings GET, got %d", wGet.Code)
+	}
+	body := wGet.Body.String()
+	for _, want := range []string{
+		"2 Connected SP Environments",
+		"Acme Corp",
+		"https://acme.example.com/acs",
+		"Beta LLC",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected settings HTML to contain %q", want)
+		}
+	}
+}
+
+func TestAdminAutoTLS_SaveAndValidation(t *testing.T) {
+	r, h, _ := setupTestAdminHandler(t)
+
+	// 1. Reject raw IP address for Let's Encrypt domain
+	badForm := url.Values{
+		"tls_submitted":        {"1"},
+		"tls_enabled":          {"on"},
+		"auto_tls_enabled":     {"on"},
+		"auto_tls_domains_str": {"192.168.0.178"},
+		"idp_entity_id":        {h.cfg.SAML.IdPEntityID},
+		"idp_sso_url":          {h.cfg.SAML.IdPSSOURL},
+		"entity_id":            {h.cfg.SAML.EntityID},
+		"acs_url":              {h.cfg.SAML.ACSURL},
+		"mfa_default_provider": {"totp"},
+		"mfa_issuer":           {"SAMLGuard"},
+		"otp_expiry":           {"5m"},
+		"resend_cooldown":      {"60s"},
+		"smtp_host":            {"localhost"},
+		"smtp_port":            {"1025"},
+	}
+	reqBad := httptest.NewRequest(http.MethodPost, "/admin/settings", strings.NewReader(badForm.Encode()))
+	reqBad.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	wBad := httptest.NewRecorder()
+	r.ServeHTTP(wBad, reqBad)
+	if !strings.Contains(wBad.Body.String(), "not an IP address") {
+		t.Fatalf("expected IP rejection message, got: %s", wBad.Body.String())
+	}
+
+	// 2. Accept valid public DNS domain
+	goodForm := url.Values{
+		"tls_submitted":               {"1"},
+		"tls_enabled":                 {"on"},
+		"auto_tls_enabled":            {"on"},
+		"auto_tls_domains_str":        {"sso.example.com"},
+		"auto_tls_email":              {"admin@example.com"},
+		"auto_tls_cache_dir":          {"certs/autocert"},
+		"auto_tls_http_challenge_addr": {":80"},
+		"idp_entity_id":               {h.cfg.SAML.IdPEntityID},
+		"idp_sso_url":                 {h.cfg.SAML.IdPSSOURL},
+		"entity_id":                   {h.cfg.SAML.EntityID},
+		"acs_url":                     {h.cfg.SAML.ACSURL},
+		"mfa_default_provider":        {"totp"},
+		"mfa_issuer":                  {"SAMLGuard"},
+		"otp_expiry":                  {"5m"},
+		"resend_cooldown":             {"60s"},
+		"smtp_host":                   {"localhost"},
+		"smtp_port":                   {"1025"},
+	}
+	reqGood := httptest.NewRequest(http.MethodPost, "/admin/settings", strings.NewReader(goodForm.Encode()))
+	reqGood.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	wGood := httptest.NewRecorder()
+	r.ServeHTTP(wGood, reqGood)
+	if wGood.Code != http.StatusOK || !strings.Contains(wGood.Body.String(), "Configuration updated successfully") {
+		t.Fatalf("expected 200 OK on valid AutoTLS settings, got %d", wGood.Code)
+	}
+	if !h.cfg.TLS.Enabled || !h.cfg.TLS.AutoTLS.Enabled || len(h.cfg.TLS.AutoTLS.Domains) != 1 || h.cfg.TLS.AutoTLS.Domains[0] != "sso.example.com" {
+		t.Fatalf("unexpected AutoTLS config state: %+v", h.cfg.TLS)
+	}
+}
+

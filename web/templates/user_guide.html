@@ -783,16 +783,16 @@
             <!-- 5. Service Providers & Groups -->
             <section class="guide-card" id="section-sp-groups">
                 <div class="guide-card-header">
-                    <h2>5. Service Providers, Audiences &amp; Group Mapping</h2>
-                    <a href="/admin/settings#tab-sp" class="btn btn-secondary">Open Service Providers &rarr;</a>
+                    <h2>5. Customer Tenants, Service Providers &amp; Group Mapping</h2>
+                    <a href="/admin/settings#tab-customers" class="btn btn-secondary">Open Customers &rarr;</a>
                 </div>
                 <div class="grid-2">
                     <div class="sub-box">
-                        <h3>Downstream SAML App Integration</h3>
+                        <h3>Customer Tenants &amp; Downstream SPs</h3>
                         <ul class="guide-list">
-                            <li>Import SAMLGuard's IdP Metadata from <code>/saml/metadata/idp</code> (or <code>/metadata</code>) into your target application.</li>
-                            <li>Add every downstream application's SP Entity ID to <strong>Allowed Audiences</strong> (comma-separated) so SAMLGuard accepts its AuthnRequests.</li>
-                            <li>Verify <strong>Downstream ACS URLs</strong> include the target app's SAML callback URL.</li>
+                            <li>Use the <strong>Customers</strong> tab (<strong>+ Add New Customer</strong>) to register additional downstream Service Provider tenants with their SP Entity ID, ACS Callback URL, and notes, and toggle or filter them live.</li>
+                            <li>Enabled customer tenants automatically have their ACS URLs and origins allowlisted for SAML redirects and Content-Security-Policy (<code>form-action</code>).</li>
+                            <li>Import SAMLGuard's IdP Metadata from <code>/saml/metadata/idp</code> (or <code>/metadata</code>) into your target application, and add any extra SP Entity IDs to <strong>Allowed Audiences</strong> under <strong>Service Providers</strong>.</li>
                         </ul>
                     </div>
                     <div class="sub-box">
@@ -854,6 +854,9 @@
                     <a href="/admin/settings#tab-system-settings" class="btn btn-secondary">View Certificates &rarr;</a>
                 </div>
                 <p>Current signing certificate subject: <code>{{.CertInfo.Subject}}</code> &bull; Valid until: <code>{{.CertInfo.NotAfter}}</code></p>
+                <p style="margin-top: 0.5rem; color: var(--text-secondary); font-size: 0.92rem;">
+                    <strong>Automatic HTTPS (Let's Encrypt / ACME):</strong> For cloud or internet-facing deployments with a public DNS domain (ports <code>80</code>/<code>443</code> reachable), enable <strong>Automatic Let's Encrypt SSL</strong> under <strong>System Settings &rarr; Certificates &amp; Keys</strong> (or <code>tls.auto_tls</code> in <code>config.yaml</code>) to auto-issue and renew browser-trusted TLS certificates.
+                </p>
                 <table class="guide-table">
                     <thead>
                         <tr>

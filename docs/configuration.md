@@ -54,8 +54,14 @@ server:
 
 tls:
   enabled: true
-  cert_file: "./cert/server.crt"
-  key_file: "./cert/server.key"
+  cert_file: "./cert/server.crt"   # Required when auto_tls.enabled is false
+  key_file: "./cert/server.key"    # Required when auto_tls.enabled is false
+  auto_tls:
+    enabled: false                 # Enable automatic Let's Encrypt SSL for public DNS domains
+    domains: []                    # e.g. ["sso.yourdomain.com"] (no raw IP addresses)
+    email: ""                      # Let's Encrypt expiration/account notification email
+    cache_dir: "certs/autocert"    # Directory to cache issued ACME certificates
+    http_challenge_addr: ":80"     # HTTP-01 challenge + HTTPS redirect listener address
 ```
 *(Legacy keys `server.tls_enabled`, `server.tls_cert_file`, and `server.tls_key_file` are also supported for backward compatibility.)*
 
@@ -99,6 +105,13 @@ saml:
     "ITAdvisor-Admins": "Admin"
     "ITAdvisor-Operators": "Operator"
   default_groups: []
+  customer_tenants:
+    - id: "acme-corp"
+      name: "Acme Corp Enterprise"
+      sp_entity_id: "https://acme.example.com/saml/metadata"
+      acs_url: "https://acme.example.com/api/current/authentication/saml2-callback"
+      notes: "Production tenant"
+      enabled: true
 ```
 
 ### `mfa`

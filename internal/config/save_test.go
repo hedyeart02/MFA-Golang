@@ -274,3 +274,120 @@ func TestSaveConfig_SMSProfilesAndMultiOTP(t *testing.T) {
 	}
 }
 
+func TestSaveConfig_CustomerTenantsAndAllowlist(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgFile := filepath.Join(tmpDir, "config.yaml")
+
+	initialYAML := `server:
+  host: "0.0.0.0"
+  port: 18080
+saml:
+  entity_id: "https://samlguard.example.com:8443"
+  acs_url: "https://ita.example.com/api/current/authentication/saml2-callback"
+`
+	if err := os.WriteFile(cfgFile, []byte(initialYAML), 0644); err != nil {
+		t.Fatalf("failed to write initial config: %v", err)
+	}
+
+	cfg, err := Load(cfgFile)
+	if err != nil {
+		t.Fatalf("failed to load initial config: %v", err)
+	}
+
+	payload := &AdminSettingsPayload{
+		CustomerTenantsSubmitted: true,
+		CustomerTenants: []CustomerTenant{
+			{
+				Name:       "Acme Corp Enterprise",
+				SPEntityID: "https://acme.example.com/saml/metadata",
+				ACSURL:     "https://acme.example.com/api/current/authentication/saml2-callback",
+				Notes:      "Production tenant",
+				Enabled:    true,
+			},
+			{
+				Name:       "Disabled Tenant",
+				SPEntityID: "https://disabled.example.com/saml/metadata",
+				ACSURL:     "https://disabled.example.com/callback",
+				Enabled:    false,
+			},
+		},
+	}
+
+	if err := SaveConfig(cfgFile, cfg, payload); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	reloaded, err := Load(cfgFile)
+	if err != nil {
+		t.Fatalf("Load after save failed: %v", err)
+	}
+
+	if len(reloaded.SAML.CustomerTenants) != 2 {
+		t.Fatalf("expected 2 customer tenants, got %d", len(reloaded.SAML.CustomerTenants))
+	}
+	if reloaded.SAML.CustomerTenants[0].ID != "acme-corp-enterprise" {
+		t.Errorf("expected generated slug id 'acme-corp-enterprise', got %q", reloaded.SAML.CustomerTenants[0].ID)
+	}
+	if reloaded.SAML.EnabledCustomerTenantsCount() != 1 {
+		t.Errorf("expected 1 enabled customer tenant, got %d", reloaded.SAML.EnabledCustomerTenantsCount())
+	}
+	if !reloaded.IsAllowedDownstreamACSURL("https://acme.example.com/api/current/authentication/saml2-callback") {
+		t.Errorf("expected enabled customer tenant ACSURL to be allowlisted")
+	}
+	if reloaded.IsAllowedDownstreamACSURL("https://disabled.example.com/callback") {
+		t.Errorf("expected disabled customer tenant ACSURL not to be allowlisted")
+	}
+}
+
+func TestSaveConfig_AutoTLS(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgFile := filepath.Join(tmpDir, "config.yaml")
+
+	initialYAML := `server:
+  host: "0.0.0.0"
+  port: 443
+saml:
+  entity_id: "https://sso.example.com"
+  acs_url: "https://ita.example.com/api/current/authentication/saml2-callback"
+database:
+  driver: "sqlite"
+  path: "samlguard.db"
+`
+	if err := os.WriteFile(cfgFile, []byte(initialYAML), 0644); err != nil {
+		t.Fatalf("failed to write initial config: %v", err)
+	}
+
+	cfg, err := Load(cfgFile)
+	if err != nil {
+		t.Fatalf("failed to load initial config: %v", err)
+	}
+
+	payload := &AdminSettingsPayload{
+		TLSSubmitted:             true,
+		TLSEnabled:               true,
+		AutoTLSEnabled:           true,
+		AutoTLSDomains:           []string{"SSO.Example.com", "sso.example.com"},
+		AutoTLSEmail:             "admin@example.com",
+		AutoTLSCacheDir:          filepath.Join(tmpDir, "autocert"),
+		AutoTLSHTTPChallengeAddr: ":80",
+	}
+
+	if err := SaveConfig(cfgFile, cfg, payload); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	reloaded, err := Load(cfgFile)
+	if err != nil {
+		t.Fatalf("Load after save failed: %v", err)
+	}
+	if !reloaded.TLS.Enabled || !reloaded.TLS.AutoTLS.Enabled {
+		t.Fatalf("expected TLS and AutoTLS enabled, got %+v", reloaded.TLS)
+	}
+	if len(reloaded.TLS.AutoTLS.Domains) != 1 || reloaded.TLS.AutoTLS.Domains[0] != "sso.example.com" {
+		t.Errorf("expected normalized domain ['sso.example.com'], got %v", reloaded.TLS.AutoTLS.Domains)
+	}
+	if err := reloaded.Validate(); err != nil {
+		t.Errorf("expected AutoTLS config without cert_file/key_file to validate, got: %v", err)
+	}
+}
+

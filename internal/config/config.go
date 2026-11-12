@@ -62,10 +62,52 @@ func (s ServerConfig) Address() string {
 	return fmt.Sprintf("%s:%d", s.Host, s.Port)
 }
 
+type AutoTLSConfig struct {
+	Enabled           bool     `mapstructure:"enabled"`
+	Domains           []string `mapstructure:"domains"`
+	Email             string   `mapstructure:"email"`
+	CacheDir          string   `mapstructure:"cache_dir"`
+	HTTPChallengeAddr string   `mapstructure:"http_challenge_addr"`
+}
+
+// EffectiveCacheDir returns the directory used to cache ACME/Let's Encrypt certificates.
+func (a AutoTLSConfig) EffectiveCacheDir() string {
+	if d := strings.TrimSpace(a.CacheDir); d != "" {
+		return d
+	}
+	return "certs/autocert"
+}
+
+// EffectiveHTTPChallengeAddr returns the HTTP-01 ACME challenge listener address (default ":80").
+func (a AutoTLSConfig) EffectiveHTTPChallengeAddr() string {
+	if addr := strings.TrimSpace(a.HTTPChallengeAddr); addr != "" {
+		return addr
+	}
+	return ":80"
+}
+
+// NormalizeAutoTLSDomains trims, lowercases, and deduplicates configured AutoTLS domains.
+func NormalizeAutoTLSDomains(domains []string) []string {
+	seen := make(map[string]struct{}, len(domains))
+	out := make([]string, 0, len(domains))
+	for _, d := range domains {
+		norm := strings.ToLower(strings.TrimSpace(d))
+		if norm == "" {
+			continue
+		}
+		if _, ok := seen[norm]; !ok {
+			seen[norm] = struct{}{}
+			out = append(out, norm)
+		}
+	}
+	return out
+}
+
 type TLSConfig struct {
-	Enabled  bool   `mapstructure:"enabled"`
-	CertFile string `mapstructure:"cert_file"`
-	KeyFile  string `mapstructure:"key_file"`
+	Enabled  bool          `mapstructure:"enabled"`
+	CertFile string        `mapstructure:"cert_file"`
+	KeyFile  string        `mapstructure:"key_file"`
+	AutoTLS  AutoTLSConfig `mapstructure:"auto_tls"`
 }
 
 type UpstreamIdPProfile struct {
@@ -73,6 +115,16 @@ type UpstreamIdPProfile struct {
 	SSOURL      string `json:"sso_url" mapstructure:"sso_url" yaml:"sso_url"`
 	MetadataURL string `json:"metadata_url" mapstructure:"metadata_url" yaml:"metadata_url"`
 	CertFile    string `json:"cert_file" mapstructure:"cert_file" yaml:"cert_file"`
+}
+
+// CustomerTenant represents a downstream customer SP environment managed in Admin Settings.
+type CustomerTenant struct {
+	ID         string `json:"id" mapstructure:"id" yaml:"id"`
+	Name       string `json:"name" mapstructure:"name" yaml:"name"`
+	SPEntityID string `json:"sp_entity_id" mapstructure:"sp_entity_id" yaml:"sp_entity_id"`
+	ACSURL     string `json:"acs_url" mapstructure:"acs_url" yaml:"acs_url"`
+	Notes      string `json:"notes,omitempty" mapstructure:"notes,omitempty" yaml:"notes,omitempty"`
+	Enabled    bool   `json:"enabled" mapstructure:"enabled" yaml:"enabled"`
 }
 
 type SAMLConfig struct {
@@ -100,6 +152,7 @@ type SAMLConfig struct {
 	DefaultGroups         []string                      `mapstructure:"default_groups"`
 	AuthnContextClassRef  string                        `mapstructure:"authn_context_class_ref"`
 	SPEntityID            string                        `mapstructure:"sp_entity_id"`
+	CustomerTenants       []CustomerTenant              `mapstructure:"customer_tenants"`
 }
 
 // EffectiveActiveIdP returns the active upstream SAML IdP identifier ("simulator", "entra", "keycloak", or "custom").
@@ -182,6 +235,66 @@ func (s SAMLConfig) ProfileForIdP(id string) UpstreamIdPProfile {
 		}
 	}
 	return UpstreamIdPProfile{}
+}
+
+// NormalizeCustomerTenants trims, assigns default IDs, and deduplicates customer tenants.
+func NormalizeCustomerTenants(tenants []CustomerTenant) []CustomerTenant {
+	out := make([]CustomerTenant, 0, len(tenants))
+	seen := make(map[string]struct{}, len(tenants))
+	for _, t := range tenants {
+		name := strings.TrimSpace(t.Name)
+		if name == "" {
+			continue
+		}
+		id := strings.ToLower(strings.TrimSpace(t.ID))
+		if id == "" {
+			var b strings.Builder
+			prevDash := false
+			for _, r := range strings.ToLower(name) {
+				if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+					b.WriteRune(r)
+					prevDash = false
+				} else if !prevDash && b.Len() > 0 {
+					b.WriteByte('-')
+					prevDash = true
+				}
+			}
+			id = strings.Trim(b.String(), "-")
+			if id == "" {
+				id = fmt.Sprintf("tenant-%d", len(out)+1)
+			}
+		}
+		baseID := id
+		suffix := 2
+		for {
+			if _, exists := seen[id]; !exists {
+				break
+			}
+			id = fmt.Sprintf("%s-%d", baseID, suffix)
+			suffix++
+		}
+		seen[id] = struct{}{}
+		out = append(out, CustomerTenant{
+			ID:         id,
+			Name:       name,
+			SPEntityID: strings.TrimSpace(t.SPEntityID),
+			ACSURL:     strings.TrimSpace(t.ACSURL),
+			Notes:      strings.TrimSpace(t.Notes),
+			Enabled:    t.Enabled,
+		})
+	}
+	return out
+}
+
+// EnabledCustomerTenantsCount returns the number of enabled customer tenants.
+func (s SAMLConfig) EnabledCustomerTenantsCount() int {
+	count := 0
+	for _, t := range s.CustomerTenants {
+		if t.Enabled {
+			count++
+		}
+	}
+	return count
 }
 
 type DatabaseConfig struct {
@@ -1071,11 +1184,17 @@ func (c *Config) Validate() error {
 	}
 
 	if c.TLS.Enabled {
-		if strings.TrimSpace(c.TLS.CertFile) == "" {
-			return errors.New("tls.cert_file is required when TLS is enabled")
-		}
-		if strings.TrimSpace(c.TLS.KeyFile) == "" {
-			return errors.New("tls.key_file is required when TLS is enabled")
+		if c.TLS.AutoTLS.Enabled {
+			if len(NormalizeAutoTLSDomains(c.TLS.AutoTLS.Domains)) == 0 {
+				return errors.New("tls.auto_tls.domains is required when automatic Let's Encrypt TLS is enabled")
+			}
+		} else {
+			if strings.TrimSpace(c.TLS.CertFile) == "" {
+				return errors.New("tls.cert_file is required when TLS is enabled")
+			}
+			if strings.TrimSpace(c.TLS.KeyFile) == "" {
+				return errors.New("tls.key_file is required when TLS is enabled")
+			}
 		}
 	}
 
@@ -1384,6 +1503,14 @@ func (c *Config) IsAllowedDownstreamACSURL(candidate string, metadataEndpoints .
 	if acs := strings.TrimRight(strings.TrimSpace(c.SAML.ACSURL), "/"); acs != "" && acs == normCandidate {
 		return true
 	}
+	for _, t := range c.SAML.CustomerTenants {
+		if !t.Enabled {
+			continue
+		}
+		if acs := strings.TrimRight(strings.TrimSpace(t.ACSURL), "/"); acs != "" && acs == normCandidate {
+			return true
+		}
+	}
 
 	// 2. Trusted downstream SP origin matches
 	allowedOrigins := make(map[string]struct{})
@@ -1399,6 +1526,13 @@ func (c *Config) IsAllowedDownstreamACSURL(candidate string, metadataEndpoints .
 	}
 	for _, acs := range c.SAML.DownstreamACSURLs {
 		addOrigin(acs)
+	}
+	for _, t := range c.SAML.CustomerTenants {
+		if !t.Enabled {
+			continue
+		}
+		addOrigin(t.SPEntityID)
+		addOrigin(t.ACSURL)
 	}
 	for _, ep := range metadataEndpoints {
 		addOrigin(ep)
@@ -1459,6 +1593,13 @@ func (c *Config) AllowedCSPFormAction() string {
 	}
 	for _, acs := range c.SAML.DownstreamACSURLs {
 		addOrigin(acs)
+	}
+	for _, t := range c.SAML.CustomerTenants {
+		if !t.Enabled {
+			continue
+		}
+		addOrigin(t.SPEntityID)
+		addOrigin(t.ACSURL)
 	}
 
 	return strings.Join(directives, " ")

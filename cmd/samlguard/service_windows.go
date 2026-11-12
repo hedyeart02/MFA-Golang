@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"net"
 	"net/http"
 	"time"
@@ -37,16 +36,15 @@ func (s *samlguardService) Execute(args []string, r <-chan svc.ChangeRequest, ch
 	const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown
 	changes <- svc.Status{State: svc.StartPending}
 
-	// 1. Validate TLS certificate and key up-front if TLS is enabled
-	if s.cfg != nil && s.cfg.TLS.Enabled {
-		if _, err := tls.LoadX509KeyPair(s.cfg.TLS.CertFile, s.cfg.TLS.KeyFile); err != nil {
-			s.appLogger.System().Error("failed to load TLS certificate or key in Windows service", zap.Error(err))
-			if s.cleanup != nil {
-				s.cleanup()
-			}
-			changes <- svc.Status{State: svc.Stopped}
-			return false, 1
+	// 1. Validate static TLS keypair or configure Let's Encrypt autocert if TLS is enabled
+	challengeSrv, err := prepareTLSAndChallengeServer(s.cfg, s.srv, s.appLogger)
+	if err != nil {
+		s.appLogger.System().Error("failed to initialize TLS in Windows service", zap.Error(err))
+		if s.cleanup != nil {
+			s.cleanup()
 		}
+		changes <- svc.Status{State: svc.Stopped}
+		return false, 1
 	}
 
 	// 2. Synchronously create and bind the TCP listener before reporting Running to SCM
@@ -56,6 +54,9 @@ func (s *samlguardService) Execute(args []string, r <-chan svc.ChangeRequest, ch
 			zap.Error(err),
 			zap.String("address", s.srv.Addr),
 		)
+		if challengeSrv != nil {
+			_ = challengeSrv.Close()
+		}
 		if s.cleanup != nil {
 			s.cleanup()
 		}
@@ -70,14 +71,8 @@ func (s *samlguardService) Execute(args []string, r <-chan svc.ChangeRequest, ch
 			zap.String("address", ln.Addr().String()),
 			zap.Bool("tls_enabled", s.cfg != nil && s.cfg.TLS.Enabled),
 		)
-		if s.cfg != nil && s.cfg.TLS.Enabled {
-			if err := s.srv.ServeTLS(ln, s.cfg.TLS.CertFile, s.cfg.TLS.KeyFile); err != nil && err != http.ErrServerClosed {
-				serverErrors <- err
-			}
-		} else {
-			if err := s.srv.Serve(ln); err != nil && err != http.ErrServerClosed {
-				serverErrors <- err
-			}
+		if err := serveGatewayListener(s.srv, ln, s.cfg); err != nil && err != http.ErrServerClosed {
+			serverErrors <- err
 		}
 	}()
 
@@ -89,6 +84,9 @@ func (s *samlguardService) Execute(args []string, r <-chan svc.ChangeRequest, ch
 		select {
 		case err := <-serverErrors:
 			s.appLogger.System().Error("HTTP server failed unexpectedly in Windows service", zap.Error(err))
+			if challengeSrv != nil {
+				_ = challengeSrv.Close()
+			}
 			if s.cleanup != nil {
 				s.cleanup()
 			}
@@ -112,6 +110,9 @@ func (s *samlguardService) Execute(args []string, r <-chan svc.ChangeRequest, ch
 				shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 				defer cancel()
 
+				if challengeSrv != nil {
+					_ = challengeSrv.Shutdown(shutdownCtx)
+				}
 				if err := s.srv.Shutdown(shutdownCtx); err != nil {
 					s.appLogger.System().Error("Windows service server forced to stop after timeout", zap.Error(err))
 				} else {

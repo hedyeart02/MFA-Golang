@@ -1,6 +1,6 @@
 # SAMLGuard
 
-**Enterprise Pure-Go SAML 2.0 MFA Proxy Gateway (`v1.1.0`)**
+**Enterprise Pure-Go SAML 2.0 MFA Proxy Gateway (`v1.1.1`)**
 
 SAMLGuard is a standalone, cross-platform SAML 2.0 Identity Provider Proxy (Proxy IdP) written in Go (`CGO_ENABLED=0`). It sits between Service Providers — such as **Schneider Electric EcoStruxure™ IT Advisor** — and upstream Enterprise Identity Providers (Microsoft Entra ID, Okta, Keycloak, ADFS), enforcing Multi-Factor Authentication (TOTP, Email OTP, and/or SMS OTP) and user authorization before issuing a signed SAML 2.0 assertion downstream.
 
@@ -11,6 +11,8 @@ SAMLGuard is a standalone, cross-platform SAML 2.0 Identity Provider Proxy (Prox
 - **Native OS Service Integration** — Runs natively under **Windows Service Control Manager (SCM)** on Windows and **`systemd`** on Linux, plus an integrated **Webmin management suite** (`.wbm.gz`).
 - **SAML 2.0 Proxy Federation** — Handles HTTP-Redirect and HTTP-POST bindings, XML signature & schema validation, replay protection, role/group claim mapping, and signed SAML assertions.
 - **Multi-Factor Authentication** — Activate one or multiple OTP methods simultaneously with interactive sign-in method selection: Authenticator app **TOTP** (QR enrollment, AES-256-GCM encrypted secrets at rest), **Email OTP** (HMAC-SHA256 digests, SMTP STARTTLS/TLS), and **SMS OTP** (Cloud APIs: Twilio, iSMS, Vonage; Hardware Appliances: SendQuick, SMSEagle, MultiTech iSMS, Teltonika RUT/TRB, Custom HTTP/JSON relays).
+- **Customer Tenants & Multi-SP Support** — Manage multiple downstream Service Provider customer tenants (Entity ID, ACS callback URL, enable/disable, search & status filter) directly in the Admin Console with automatic ACS/CSP allowlisting.
+- **Automatic HTTPS (Let's Encrypt / ACME)** — Built-in `autocert` support (`tls.auto_tls`) for cloud and internet-facing deployments to automatically issue and renew browser-trusted SSL certificates over HTTP-01 and TLS-ALPN-01.
 - **EcoStruxure™ IT Advisor & Multi-App SAML Branding** — Optional API user whitelist synchronization, access control management, and **Custom Theme & Branding Profiles** (per-application app names, icons, dark/light logos, favicons, accent colors, and backgrounds stored in SQLite).
 - **Built-In Admin Console & User Guide** — Web UI at `/admin/settings` and interactive User Guide at `/admin/guide` (`(?)` button) with runtime settings persisted to SQLite (`gateway_settings`), dark/light/system theme toggle, test email/SMS diagnostics, ITA user sync, and certificate downloads.
 
@@ -18,9 +20,9 @@ SAMLGuard is a standalone, cross-platform SAML 2.0 Identity Provider Proxy (Prox
 
 | Platform | Architecture | Binary / Package | Service Manager |
 |----------|--------------|------------------|-----------------|
-| Windows | `amd64` (x86_64) | `samlguard.exe` / `samlguard-v1.1.0-windows-amd64.zip` | Windows Service (`SAMLGuard` via SCM) |
-| Linux | `amd64` (x86_64) | `samlguard` / `samlguard-v1.1.0-linux-amd64.tar.gz` | `systemd` (`samlguard.service`) + Webmin |
-| Linux | `arm64` (aarch64) | `samlguard` / `samlguard-v1.1.0-linux-arm64.tar.gz` | `systemd` (`samlguard.service`) + Webmin |
+| Windows | `amd64` (x86_64) | `samlguard.exe` / `samlguard-v1.1.1-windows-amd64.zip` | Windows Service (`SAMLGuard` via SCM) |
+| Linux | `amd64` (x86_64) | `samlguard` / `samlguard-v1.1.1-linux-amd64.tar.gz` | `systemd` (`samlguard.service`) + Webmin |
+| Linux | `arm64` (aarch64) | `samlguard` / `samlguard-v1.1.1-linux-arm64.tar.gz` | `systemd` (`samlguard.service`) + Webmin |
 
 > **Development Note:** On macOS/Linux/Windows workstations, SAMLGuard can also run directly from any terminal via `go run ./cmd/samlguard`.
 
@@ -125,7 +127,7 @@ go tool cover -func=coverage.out
 | Embedded Assets | `embed.FS` (`web/` templates & static icons, `public/` backgrounds) |
 | Database | SQLite via pure-Go `modernc.org/sqlite` |
 | SAML & XML Signing | `crewjam/saml`, `beevik/etree`, `russellhaering/goxmldsig`, `mattermost/xml-roundtrip-validator` |
-| Cryptography | `golang.org/x/crypto` (bcrypt), Go stdlib AES-256-GCM, HMAC-SHA256, RSA/X.509 |
+| Cryptography | `golang.org/x/crypto` (bcrypt, ACME `autocert`), Go stdlib AES-256-GCM, HMAC-SHA256, RSA/X.509 |
 | Configuration | Viper (`configs/*.yaml` + `SAMLGUARD_*` env vars + SQLite `gateway_settings`) |
 | Logging & Metrics | Uber Zap (`go.uber.org/zap`) + Prometheus (`client_golang`) |
 | OS Integration | `golang.org/x/sys/windows/svc` (Windows SCM), `systemd` + Webmin Perl/CGI (Linux) |

@@ -22,12 +22,14 @@ type AdminSettingsPayload struct {
 	IdPCertFile    string                        `json:"idp_cert_file" form:"idp_cert_file"`
 
 	// Downstream SP (Schneider ITA) & Gateway
-	EntityID         string            `json:"entity_id" form:"entity_id"`
-	ACSURL           string            `json:"acs_url" form:"acs_url"`
-	SSOURL           string            `json:"sso_url" form:"sso_url"`
-	SLOURL           string            `json:"slo_url" form:"slo_url"`
-	AllowedAudiences []string          `json:"allowed_audiences" form:"allowed_audiences"`
-	GroupMapping     map[string]string `json:"group_mapping" form:"group_mapping"`
+	EntityID                 string            `json:"entity_id" form:"entity_id"`
+	ACSURL                   string            `json:"acs_url" form:"acs_url"`
+	SSOURL                   string            `json:"sso_url" form:"sso_url"`
+	SLOURL                   string            `json:"slo_url" form:"slo_url"`
+	AllowedAudiences         []string          `json:"allowed_audiences" form:"allowed_audiences"`
+	GroupMapping             map[string]string `json:"group_mapping" form:"group_mapping"`
+	CustomerTenants          []CustomerTenant  `json:"customer_tenants,omitempty"`
+	CustomerTenantsSubmitted bool              `json:"-"`
 
 	// MFA & Policies
 	MFAEnabledProviders []string      `json:"mfa_enabled_providers" form:"mfa_enabled_providers"`
@@ -66,6 +68,15 @@ type AdminSettingsPayload struct {
 	// Custom Theme & Branding Profiles
 	BrandingActiveProfile string                  `json:"branding_active_profile" form:"branding_active_profile"`
 	BrandingProfiles      map[string]ThemeProfile `json:"branding_profiles,omitempty"`
+
+	// Automatic HTTPS / Let's Encrypt (requires server restart)
+	TLSSubmitted             bool     `json:"-"`
+	TLSEnabled               bool     `json:"tls_enabled" form:"tls_enabled"`
+	AutoTLSEnabled           bool     `json:"auto_tls_enabled" form:"auto_tls_enabled"`
+	AutoTLSDomains           []string `json:"auto_tls_domains" form:"auto_tls_domains"`
+	AutoTLSEmail             string   `json:"auto_tls_email" form:"auto_tls_email"`
+	AutoTLSCacheDir          string   `json:"auto_tls_cache_dir" form:"auto_tls_cache_dir"`
+	AutoTLSHTTPChallengeAddr string   `json:"auto_tls_http_challenge_addr" form:"auto_tls_http_challenge_addr"`
 }
 
 // ApplyAdminSettings updates the in-memory Config from an AdminSettingsPayload without touching disk.
@@ -181,6 +192,10 @@ func ApplyAdminSettings(cfg *Config, payload *AdminSettingsPayload) {
 			}
 		}
 		cfg.SAML.GroupMapping = gm
+	}
+
+	if payload.CustomerTenantsSubmitted || payload.CustomerTenants != nil {
+		cfg.SAML.CustomerTenants = NormalizeCustomerTenants(payload.CustomerTenants)
 	}
 
 	if normProviders := NormalizeMFAProviders(payload.MFAEnabledProviders); len(normProviders) > 0 {
@@ -340,6 +355,19 @@ func ApplyAdminSettings(cfg *Config, payload *AdminSettingsPayload) {
 		}
 		cfg.Branding.ActiveProfile = active
 	}
+
+	if payload.TLSSubmitted {
+		cfg.TLS.Enabled = payload.TLSEnabled
+		cfg.TLS.AutoTLS.Enabled = payload.AutoTLSEnabled
+		cfg.TLS.AutoTLS.Domains = NormalizeAutoTLSDomains(payload.AutoTLSDomains)
+		cfg.TLS.AutoTLS.Email = strings.TrimSpace(payload.AutoTLSEmail)
+		if d := strings.TrimSpace(payload.AutoTLSCacheDir); d != "" {
+			cfg.TLS.AutoTLS.CacheDir = d
+		}
+		if addr := strings.TrimSpace(payload.AutoTLSHTTPChallengeAddr); addr != "" {
+			cfg.TLS.AutoTLS.HTTPChallengeAddr = addr
+		}
+	}
 }
 
 // SaveConfig updates the in-memory Config and persists the changes to the specified YAML file.
@@ -428,6 +456,28 @@ func SaveConfig(filePath string, cfg *Config, payload *AdminSettingsPayload) err
 			gm[k] = v
 		}
 		samlMap["group_mapping"] = gm
+	}
+
+	if payload.CustomerTenantsSubmitted || len(cfg.SAML.CustomerTenants) > 0 {
+		if len(cfg.SAML.CustomerTenants) == 0 {
+			delete(samlMap, "customer_tenants")
+		} else {
+			tenantsList := make([]map[string]interface{}, 0, len(cfg.SAML.CustomerTenants))
+			for _, t := range cfg.SAML.CustomerTenants {
+				entry := map[string]interface{}{
+					"id":           t.ID,
+					"name":         t.Name,
+					"sp_entity_id": t.SPEntityID,
+					"acs_url":      t.ACSURL,
+					"enabled":      t.Enabled,
+				}
+				if t.Notes != "" {
+					entry["notes"] = t.Notes
+				}
+				tenantsList = append(tenantsList, entry)
+			}
+			samlMap["customer_tenants"] = tenantsList
+		}
 	}
 
 	// Update MFA section
@@ -561,6 +611,27 @@ func SaveConfig(filePath string, cfg *Config, payload *AdminSettingsPayload) err
 			}
 			brandingMap["profiles"] = profilesMap
 		}
+	}
+
+	// Update TLS / AutoTLS section when submitted
+	if payload.TLSSubmitted {
+		tlsMap, _ := raw["tls"].(map[string]interface{})
+		if tlsMap == nil {
+			tlsMap = make(map[string]interface{})
+			raw["tls"] = tlsMap
+		}
+		tlsMap["enabled"] = cfg.TLS.Enabled
+
+		autoTLSMap, _ := tlsMap["auto_tls"].(map[string]interface{})
+		if autoTLSMap == nil {
+			autoTLSMap = make(map[string]interface{})
+			tlsMap["auto_tls"] = autoTLSMap
+		}
+		autoTLSMap["enabled"] = cfg.TLS.AutoTLS.Enabled
+		autoTLSMap["domains"] = cfg.TLS.AutoTLS.Domains
+		autoTLSMap["email"] = cfg.TLS.AutoTLS.Email
+		autoTLSMap["cache_dir"] = cfg.TLS.AutoTLS.EffectiveCacheDir()
+		autoTLSMap["http_challenge_addr"] = cfg.TLS.AutoTLS.EffectiveHTTPChallengeAddr()
 	}
 
 	// 3. Write back cleanly

@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -80,6 +81,9 @@ type AdminSettingsViewModel struct {
 	Branding              config.ResolvedBranding
 	BrandingActiveProfile string
 	BrandingProfilesJSON  template.JS
+	CustomerTenantsJSON          template.JS
+	ConnectedSPEnvironmentsCount int
+	AutoTLSDomainsStr            string
 }
 
 // --- Session & Security Helpers ---
@@ -611,6 +615,22 @@ func (cHandler *SAMLHandler) HandleAdminSettingsPost(c *gin.Context) {
 		}
 	}
 
+	// Customer Tenants
+	if c.PostForm("customer_tenants_submitted") == "1" {
+		payload.CustomerTenantsSubmitted = true
+		if rawTenants := strings.TrimSpace(c.PostForm("customer_tenants_json")); rawTenants != "" {
+			var parsedTenants []config.CustomerTenant
+			if err := json.Unmarshal([]byte(rawTenants), &parsedTenants); err != nil {
+				vm := cHandler.buildAdminViewModel(adminUsername, "", "Invalid customer tenants payload: "+err.Error())
+				cHandler.renderAdminSettings(c, vm)
+				return
+			}
+			payload.CustomerTenants = config.NormalizeCustomerTenants(parsedTenants)
+		}
+	} else if cHandler.cfg != nil {
+		payload.CustomerTenants = append([]config.CustomerTenant(nil), cHandler.cfg.SAML.CustomerTenants...)
+	}
+
 	// MFA Policies & Active OTP Providers
 	if c.PostForm("mfa_providers_submitted") == "1" {
 		rawProviders := c.PostFormArray("mfa_enabled_providers[]")
@@ -727,6 +747,38 @@ func (cHandler *SAMLHandler) HandleAdminSettingsPost(c *gin.Context) {
 		payload.BrandingProfiles = make(map[string]config.ThemeProfile, len(cHandler.cfg.Branding.Profiles))
 		for k, v := range cHandler.cfg.Branding.Profiles {
 			payload.BrandingProfiles[k] = v
+		}
+	}
+
+	// Automatic HTTPS / Let's Encrypt (ACME)
+	if c.PostForm("tls_submitted") == "1" {
+		payload.TLSSubmitted = true
+		payload.TLSEnabled = c.PostForm("tls_enabled") == "on" || c.PostForm("tls_enabled") == "true" || c.PostForm("tls_enabled") == "1"
+		payload.AutoTLSEnabled = c.PostForm("auto_tls_enabled") == "on" || c.PostForm("auto_tls_enabled") == "true" || c.PostForm("auto_tls_enabled") == "1"
+		payload.AutoTLSEmail = strings.TrimSpace(c.PostForm("auto_tls_email"))
+		payload.AutoTLSCacheDir = strings.TrimSpace(c.PostForm("auto_tls_cache_dir"))
+		payload.AutoTLSHTTPChallengeAddr = strings.TrimSpace(c.PostForm("auto_tls_http_challenge_addr"))
+		if rawDomains := strings.TrimSpace(c.PostForm("auto_tls_domains_str")); rawDomains != "" {
+			for _, part := range strings.Split(rawDomains, ",") {
+				if trimmed := strings.TrimSpace(part); trimmed != "" {
+					payload.AutoTLSDomains = append(payload.AutoTLSDomains, trimmed)
+				}
+			}
+		}
+		payload.AutoTLSDomains = config.NormalizeAutoTLSDomains(payload.AutoTLSDomains)
+		if payload.TLSEnabled && payload.AutoTLSEnabled {
+			if len(payload.AutoTLSDomains) == 0 {
+				vm := cHandler.buildAdminViewModel(adminUsername, "", "Invalid configuration: at least one public domain is required when Automatic Let's Encrypt SSL is enabled.")
+				cHandler.renderAdminSettings(c, vm)
+				return
+			}
+			for _, dom := range payload.AutoTLSDomains {
+				if net.ParseIP(dom) != nil {
+					vm := cHandler.buildAdminViewModel(adminUsername, "", fmt.Sprintf("Invalid Let's Encrypt domain %q: Let's Encrypt requires a DNS domain name, not an IP address.", dom))
+					cHandler.renderAdminSettings(c, vm)
+					return
+				}
+			}
 		}
 	}
 
@@ -1460,6 +1512,13 @@ func (h *SAMLHandler) buildAdminViewModel(adminUsername, successMsg, errorMsg st
 	}
 	resolvedBrand := h.cfg.Branding.Resolve()
 
+	customerTenants := config.NormalizeCustomerTenants(h.cfg.SAML.CustomerTenants)
+	customerTenantsJSON := "[]"
+	if b, err := json.Marshal(customerTenants); err == nil {
+		customerTenantsJSON = string(b)
+	}
+	connectedSPCount := 1 + h.cfg.SAML.EnabledCustomerTenantsCount()
+
 	payload := &config.AdminSettingsPayload{
 		ActiveIdP:             activeIdP,
 		EnabledIdPs:           enabledIdPs,
@@ -1474,6 +1533,7 @@ func (h *SAMLHandler) buildAdminViewModel(adminUsername, successMsg, errorMsg st
 		SLOURL:                h.cfg.SAML.SLOURL,
 		AllowedAudiences:      h.cfg.SAML.AllowedAudiences,
 		GroupMapping:          h.cfg.SAML.GroupMapping,
+		CustomerTenants:       customerTenants,
 		MFAEnabledProviders:   h.cfg.MFA.ActiveProviders(),
 		MFADefaultProvider:    mfaDefaultProvider,
 		MFAIssuer:             h.cfg.MFA.Issuer,
@@ -1499,6 +1559,12 @@ func (h *SAMLHandler) buildAdminViewModel(adminUsername, successMsg, errorMsg st
 		ITAManualAllowedUsers: h.cfg.ITA.ManualAllowedUsers,
 		BrandingActiveProfile: brandingActive,
 		BrandingProfiles:      brandingProfiles,
+		TLSEnabled:            h.cfg.TLS.Enabled,
+		AutoTLSEnabled:        h.cfg.TLS.AutoTLS.Enabled,
+		AutoTLSDomains:        h.cfg.TLS.AutoTLS.Domains,
+		AutoTLSEmail:          h.cfg.TLS.AutoTLS.Email,
+		AutoTLSCacheDir:       h.cfg.TLS.AutoTLS.EffectiveCacheDir(),
+		AutoTLSHTTPChallengeAddr: h.cfg.TLS.AutoTLS.EffectiveHTTPChallengeAddr(),
 	}
 
 	now := time.Now()
@@ -1538,6 +1604,9 @@ func (h *SAMLHandler) buildAdminViewModel(adminUsername, successMsg, errorMsg st
 		Branding:              resolvedBrand,
 		BrandingActiveProfile: brandingActive,
 		BrandingProfilesJSON:  template.JS(brandingProfilesJSON),
+		CustomerTenantsJSON:          template.JS(customerTenantsJSON),
+		ConnectedSPEnvironmentsCount: connectedSPCount,
+		AutoTLSDomainsStr:            strings.Join(h.cfg.TLS.AutoTLS.Domains, ", "),
 	}
 }
 
