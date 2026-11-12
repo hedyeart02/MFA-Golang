@@ -218,3 +218,59 @@ saml:
 	}
 }
 
+func TestSaveConfig_SMSProfilesAndMultiOTP(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgFile := filepath.Join(tmpDir, "config.yaml")
+
+	if err := os.WriteFile(cfgFile, []byte("env: \"development\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cfgFile)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	payload := &AdminSettingsPayload{
+		ActiveIdP:           "simulator",
+		EntityID:            "https://samlguard.local",
+		ACSURL:              "https://ita.local/callback",
+		MFAEnabledProviders: []string{"totp", "email", "sms"},
+		MFADefaultProvider:  "select",
+		SMSProvider:         "isms",
+		SMSAPIURL:           "https://www.isms.com.my/isms_send_all_id.php",
+		SMSAccountID:        "isms_user",
+		SMSAuthToken:        "isms_secret",
+		SMSSenderID:         "SAMLGuard",
+		SMSHTTPMethod:       "POST",
+		SMSMessageTemplate:  "Your code is {code}",
+		SMSProfiles: map[string]SMSGatewayProfile{
+			"sendquick": {
+				APIURL:     "https://sq.corp.local/sendmsg.php",
+				AccountID:  "sq_user",
+				AuthToken:  "sq_pass",
+				SenderID:   "SAMLGuard",
+				HTTPMethod: "POST",
+			},
+		},
+	}
+
+	if err := SaveConfig(cfgFile, cfg, payload); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	reloaded, err := Load(cfgFile)
+	if err != nil {
+		t.Fatalf("Load after save failed: %v", err)
+	}
+	if !reloaded.MFA.IsProviderEnabled("sms") || len(reloaded.MFA.ActiveProviders()) != 3 {
+		t.Errorf("expected 3 active MFA providers including sms, got %v", reloaded.MFA.ActiveProviders())
+	}
+	if reloaded.SMS.Provider != "isms" || reloaded.SMS.AuthToken != "isms_secret" {
+		t.Errorf("expected iSMS active profile saved, got %+v", reloaded.SMS)
+	}
+	if reloaded.SMS.ProfileForProvider("sendquick").APIURL != "https://sq.corp.local/sendmsg.php" {
+		t.Errorf("expected SendQuick standby profile saved, got %+v", reloaded.SMS.Profiles)
+	}
+}
+

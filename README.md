@@ -1,8 +1,8 @@
 # SAMLGuard
 
-**Enterprise Pure-Go SAML 2.0 MFA Proxy Gateway (`v1.0.3`)**
+**Enterprise Pure-Go SAML 2.0 MFA Proxy Gateway (`v1.0.4`)**
 
-SAMLGuard is a standalone, cross-platform SAML 2.0 Identity Provider Proxy (Proxy IdP) written in Go (`CGO_ENABLED=0`). It sits between Service Providers — such as **Schneider Electric EcoStruxure™ IT Advisor** — and upstream Enterprise Identity Providers (Microsoft Entra ID, Okta, Keycloak, ADFS), enforcing Multi-Factor Authentication (TOTP or Email OTP) and user authorization before issuing a signed SAML 2.0 assertion downstream.
+SAMLGuard is a standalone, cross-platform SAML 2.0 Identity Provider Proxy (Proxy IdP) written in Go (`CGO_ENABLED=0`). It sits between Service Providers — such as **Schneider Electric EcoStruxure™ IT Advisor** — and upstream Enterprise Identity Providers (Microsoft Entra ID, Okta, Keycloak, ADFS), enforcing Multi-Factor Authentication (TOTP, Email OTP, and/or SMS OTP) and user authorization before issuing a signed SAML 2.0 assertion downstream.
 
 ## Key Capabilities
 
@@ -10,7 +10,7 @@ SAMLGuard is a standalone, cross-platform SAML 2.0 Identity Provider Proxy (Prox
 - **Multi-Platform & Multi-Architecture** — Official release builds for **Windows (AMD64)**, **Linux (AMD64)**, and **Linux (ARM64)**.
 - **Native OS Service Integration** — Runs natively under **Windows Service Control Manager (SCM)** on Windows and **`systemd`** on Linux, plus an integrated **Webmin management suite** (`.wbm.gz`).
 - **SAML 2.0 Proxy Federation** — Handles HTTP-Redirect and HTTP-POST bindings, XML signature & schema validation, replay protection, role/group claim mapping, and signed SAML assertions.
-- **Multi-Factor Authentication** — Authenticator app **TOTP** (QR enrollment, AES-256-GCM encrypted secrets at rest) and **Email OTP** (HMAC-SHA256 digests, SMTP STARTTLS/TLS, configurable cooldown & retry lockout).
+- **Multi-Factor Authentication** — Activate one or multiple OTP methods simultaneously with interactive sign-in method selection: Authenticator app **TOTP** (QR enrollment, AES-256-GCM encrypted secrets at rest), **Email OTP** (HMAC-SHA256 digests, SMTP STARTTLS/TLS), and **SMS OTP** (Cloud APIs: Twilio, iSMS, Vonage; Hardware Appliances: SendQuick, SMSEagle, MultiTech iSMS, Teltonika RUT/TRB, Custom HTTP/JSON relays).
 - **EcoStruxure™ IT Advisor Integration** — Optional API user whitelist synchronization and access control management.
 - **Built-In Admin Console** — Web UI at `/admin/settings` with runtime settings persisted to SQLite (`gateway_settings`), dark/light/system theme toggle, test email diagnostics, ITA user sync, and certificate downloads.
 
@@ -18,9 +18,9 @@ SAMLGuard is a standalone, cross-platform SAML 2.0 Identity Provider Proxy (Prox
 
 | Platform | Architecture | Binary / Package | Service Manager |
 |----------|--------------|------------------|-----------------|
-| Windows | `amd64` (x86_64) | `samlguard.exe` / `samlguard-v1.0.3-windows-amd64.zip` | Windows Service (`SAMLGuard` via SCM) |
-| Linux | `amd64` (x86_64) | `samlguard` / `samlguard-v1.0.3-linux-amd64.tar.gz` | `systemd` (`samlguard.service`) + Webmin |
-| Linux | `arm64` (aarch64) | `samlguard` / `samlguard-v1.0.3-linux-arm64.tar.gz` | `systemd` (`samlguard.service`) + Webmin |
+| Windows | `amd64` (x86_64) | `samlguard.exe` / `samlguard-v1.0.4-windows-amd64.zip` | Windows Service (`SAMLGuard` via SCM) |
+| Linux | `amd64` (x86_64) | `samlguard` / `samlguard-v1.0.4-linux-amd64.tar.gz` | `systemd` (`samlguard.service`) + Webmin |
+| Linux | `arm64` (aarch64) | `samlguard` / `samlguard-v1.0.4-linux-arm64.tar.gz` | `systemd` (`samlguard.service`) + Webmin |
 
 > **Development Note:** On macOS/Linux/Windows workstations, SAMLGuard can also run directly from any terminal via `go run ./cmd/samlguard`.
 
@@ -93,10 +93,10 @@ go run ./scripts/webmin/build-wbm.go -src scripts/webmin/modules -out dist/samlg
 | **SAML Federation** | `GET` / `POST` | `/saml/sso`, `/login` | Initiate SSO / display corporate login or redirect to upstream IdP |
 | **SAML Federation** | `POST` / `GET` | `/saml/acs`, `/acs` | Consume upstream IdP SAML Response and initiate MFA step |
 | **SAML Metadata** | `GET` | `/saml/metadata`, `/metadata` | Proxy SP/IdP SAML 2.0 XML metadata (`/metadata/idp`, `/metadata/sp`) |
-| **MFA Flow** | `POST` | `/mfa/verify`, `/mfa/resend`, `/mfa/re-enroll` | Verify TOTP/Email code, resend Email OTP, or reset TOTP enrollment |
+| **MFA Flow** | `POST` | `/mfa/verify`, `/mfa/resend`, `/mfa/re-enroll` | Verify TOTP/Email/SMS code, resend Email/SMS OTP, or reset TOTP enrollment |
 | **Admin Console** | `GET` / `POST` | `/admin/login`, `/admin/change-password`, `/admin/logout` | Admin authentication and first-login password change |
-| **Admin Settings** | `GET` / `POST` | `/admin/settings` | Manage SAML, MFA, SMTP, and ITA configuration (persisted to SQLite) |
-| **Admin Operations** | `POST` / `GET` | `/admin/ita/sync`, `/admin/settings/test-email`, `/admin/users/*`, `/admin/cert/download` | Synchronize ITA users, test SMTP, manage allowlist, download signing cert |
+| **Admin Settings** | `GET` / `POST` | `/admin/settings` | Manage SAML, Multi-OTP, SMTP, SMS Gateway, and ITA configuration (persisted to SQLite) |
+| **Admin Operations** | `POST` / `GET` | `/admin/ita/sync`, `/admin/settings/test-email`, `/admin/settings/test-sms`, `/admin/users/*`, `/admin/cert/download` | Synchronize ITA users, test SMTP/SMS, manage allowlist & user phones, download signing cert |
 | **Operations** | `GET` | `/health`, `/ready`, `/live`, `/version`, `/metrics` | Probes, build version JSON, and Prometheus metrics |
 | **Assets** | `GET` | `/static/*`, `/assets/*`, `/favicon.ico` | Embedded images, JS theme switcher, backgrounds, and favicons |
 
@@ -135,6 +135,7 @@ go tool cover -func=coverage.out
 - [Architecture Guide](docs/architecture.md)
 - [API Documentation](docs/api.md)
 - [Configuration Guide](docs/configuration.md)
+- [SMS Gateway & Multi-OTP Manual](docs/sms-gateway-manual.md)
 - [Deployment Guide](docs/deployment.md)
 - [Security Guide](docs/security.md)
 - [Troubleshooting Guide](docs/troubleshooting.md)

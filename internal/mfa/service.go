@@ -27,6 +27,7 @@ import (
 type Service struct {
 	storage         Storage
 	smtpSender      *SMTPSender
+	smsSender       *SMSSender
 	cfg             *config.Config
 	logger          *zap.Logger
 	ephemeralEncKey []byte
@@ -41,9 +42,16 @@ type EnrollmentData struct {
 }
 
 func NewService(storage Storage, smtpSender *SMTPSender, cfg *config.Config, logger *zap.Logger) *Service {
+	var env string
+	var smsCfg config.SMSConfig
+	if cfg != nil {
+		env = cfg.Env
+		smsCfg = cfg.SMS
+	}
 	svc := &Service{
 		storage:    storage,
 		smtpSender: smtpSender,
+		smsSender:  NewSMSSender(smsCfg, env, logger),
 		cfg:        cfg,
 		logger:     logger,
 	}
@@ -78,6 +86,16 @@ func (s *Service) SMTPSender() *SMTPSender {
 // UpdateSMTPSender safely swaps the active SMTPSender.
 func (s *Service) UpdateSMTPSender(sender *SMTPSender) {
 	s.smtpSender = sender
+}
+
+// SMSSender returns the active SMSSender instance.
+func (s *Service) SMSSender() *SMSSender {
+	return s.smsSender
+}
+
+// UpdateSMSSender safely swaps the active SMSSender.
+func (s *Service) UpdateSMSSender(sender *SMSSender) {
+	s.smsSender = sender
 }
 
 // Storage returns the underlying Storage instance.
@@ -147,6 +165,42 @@ func (s *Service) TestEmail(ctx context.Context, host string, port int, username
 
 	sender := NewSMTPSender(host, port, username, password, from, fromName, encryption, s.logger)
 	return sender.SendTestEmail(ctx, recipient)
+}
+
+// TestSMS sends a diagnostic test SMS using either provided parameters or active settings.
+func (s *Service) TestSMS(ctx context.Context, smsCfg config.SMSConfig, recipient string) error {
+	if smsCfg.Provider == "" && s.cfg != nil {
+		smsCfg.Provider = s.cfg.SMS.Provider
+	}
+	if smsCfg.AuthToken == "" && s.cfg != nil {
+		prov := smsCfg.EffectiveProvider()
+		if prof := s.cfg.SMS.ProfileForProvider(prov); prof.AuthToken != "" {
+			smsCfg.AuthToken = prof.AuthToken
+		} else if prov == s.cfg.SMS.EffectiveProvider() {
+			smsCfg.AuthToken = s.cfg.SMS.AuthToken
+		}
+	}
+	if smsCfg.MessageTemplate == "" && s.cfg != nil {
+		smsCfg.MessageTemplate = s.cfg.SMS.MessageTemplate
+	}
+	env := ""
+	if s.cfg != nil {
+		env = s.cfg.Env
+	}
+	sender := NewSMSSender(smsCfg, env, s.logger)
+	return sender.SendTestSMS(ctx, recipient)
+}
+
+// LookupUserPhone finds a registered phone number for any of the given identifiers from authorized_users.
+func (s *Service) LookupUserPhone(ctx context.Context, identifiers ...string) string {
+	if s.storage == nil {
+		return ""
+	}
+	phone, err := s.storage.LookupAuthorizedUserPhone(ctx, identifiers...)
+	if err != nil {
+		return ""
+	}
+	return phone
 }
 
 // CheckDummyOTP validates if the dummy OTP 000000 was supplied.
@@ -388,27 +442,24 @@ func generateHOTP(secret []byte, counter uint64) string {
 	return fmt.Sprintf("%06d", otpCode)
 }
 
-// --- Email OTP Implementation ---
+// --- Email & SMS OTP Implementation ---
 
-// GenerateAndSendEmailOTP creates a secure random OTP and dispatches it via SMTP
-func (s *Service) GenerateAndSendEmailOTP(ctx context.Context, userKey, recipientEmail string) error {
-	if recipientEmail == "" {
-		return errors.New("recipient email is required")
-	}
-
-	// 1. Enforce resend cooldown
-	remaining, err := s.storage.CheckEmailOTPResend(ctx, userKey)
-	if err != nil && errors.Is(err, ErrCooldownActive) {
+func (s *Service) generateAndDispatchOTP(
+	ctx context.Context,
+	userKey string,
+	checkResend func(context.Context, string) (time.Duration, error),
+	saveOTP func(context.Context, string, []byte, time.Time, time.Time) error,
+	dispatch func(string) error,
+) error {
+	if remaining, err := checkResend(ctx, userKey); err != nil && errors.Is(err, ErrCooldownActive) {
 		return fmt.Errorf("%w: wait %d seconds before requesting a new code", ErrCooldownActive, int(remaining.Seconds()))
 	}
 
-	// 2. Cryptographically secure random 6-digit OTP
 	code, err := generateSecureNumericOTP(6)
 	if err != nil {
 		return fmt.Errorf("generating secure otp: %w", err)
 	}
 
-	// 3. Digest code with HMAC-SHA256 using server pepper
 	pepper, err := s.getServerPepper()
 	if err != nil {
 		return err
@@ -428,24 +479,14 @@ func (s *Service) GenerateAndSendEmailOTP(ctx context.Context, userKey, recipien
 	}
 
 	now := time.Now().UTC()
-	expiresAt := now.Add(expiry)
-	resendAfter := now.Add(cooldown)
-
-	// 4. Save to database
-	if err := s.storage.SaveEmailOTP(ctx, userKey, digest, expiresAt, resendAfter); err != nil {
-		return fmt.Errorf("persisting email otp: %w", err)
+	if err := saveOTP(ctx, userKey, digest, now.Add(expiry), now.Add(cooldown)); err != nil {
+		return fmt.Errorf("persisting otp: %w", err)
 	}
 
-	// 5. Send via SMTP
-	if err := s.smtpSender.Send(ctx, recipientEmail, code); err != nil {
-		return fmt.Errorf("smtp delivery failed: %w", err)
-	}
-
-	return nil
+	return dispatch(code)
 }
 
-// VerifyEmailOTP validates an email OTP atomically
-func (s *Service) VerifyEmailOTP(ctx context.Context, userKey, code string) (bool, error) {
+func (s *Service) verifyChallengeOTP(ctx context.Context, userKey, code string, verifyFn func(context.Context, string, string, string, int) (bool, error)) (bool, error) {
 	if bypass, err := s.CheckDummyOTP(code); bypass || err != nil {
 		return bypass, err
 	}
@@ -460,7 +501,56 @@ func (s *Service) VerifyEmailOTP(ctx context.Context, userKey, code string) (boo
 		maxRetries = 5
 	}
 
-	return s.storage.VerifyAndConsumeEmailOTP(ctx, userKey, code, pepper, maxRetries)
+	return verifyFn(ctx, userKey, code, pepper, maxRetries)
+}
+
+// GenerateAndSendEmailOTP creates a secure random OTP and dispatches it via SMTP
+func (s *Service) GenerateAndSendEmailOTP(ctx context.Context, userKey, recipientEmail string) error {
+	if recipientEmail == "" {
+		return errors.New("recipient email is required")
+	}
+	return s.generateAndDispatchOTP(
+		ctx,
+		userKey,
+		s.storage.CheckEmailOTPResend,
+		s.storage.SaveEmailOTP,
+		func(code string) error {
+			if err := s.smtpSender.Send(ctx, recipientEmail, code); err != nil {
+				return fmt.Errorf("smtp delivery failed: %w", err)
+			}
+			return nil
+		},
+	)
+}
+
+// VerifyEmailOTP validates an email OTP atomically
+func (s *Service) VerifyEmailOTP(ctx context.Context, userKey, code string) (bool, error) {
+	return s.verifyChallengeOTP(ctx, userKey, code, s.storage.VerifyAndConsumeEmailOTP)
+}
+
+// GenerateAndSendSMSOTP creates a secure random OTP and dispatches it via the active SMS gateway
+func (s *Service) GenerateAndSendSMSOTP(ctx context.Context, userKey, recipientPhone string) error {
+	normPhone := NormalizePhoneNumber(recipientPhone)
+	if normPhone == "" {
+		return errors.New("no mobile phone number is registered for this account")
+	}
+	return s.generateAndDispatchOTP(
+		ctx,
+		userKey,
+		s.storage.CheckSMSOTPResend,
+		s.storage.SaveSMSOTP,
+		func(code string) error {
+			if err := s.smsSender.Send(ctx, normPhone, code); err != nil {
+				return fmt.Errorf("sms delivery failed: %w", err)
+			}
+			return nil
+		},
+	)
+}
+
+// VerifySMSOTP validates an SMS OTP atomically
+func (s *Service) VerifySMSOTP(ctx context.Context, userKey, code string) (bool, error) {
+	return s.verifyChallengeOTP(ctx, userKey, code, s.storage.VerifyAndConsumeSMSOTP)
 }
 
 func (s *Service) getServerPepper() (string, error) {

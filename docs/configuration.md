@@ -104,7 +104,8 @@ saml:
 ### `mfa`
 ```yaml
 mfa:
-  default_provider: "totp"    # "totp" or "email"
+  default_provider: "select"  # "totp", "email", "sms", or "select" (chooser on login)
+  enabled_providers: ["totp", "email"] # Any subset of ["totp", "email", "sms"]
   issuer: "SAMLGuard"
   timeout: 5m
   otp_expiry: 5m
@@ -116,6 +117,22 @@ mfa:
   allow_dummy_otp: false      # Must be false in production
   encryption_key: "<64-char-hex-aes-256-key>"
   server_pepper: "<high-entropy-secret-string>"
+```
+
+### `sms`
+Configure SMS OTP delivery via Cloud SMS APIs (`twilio`, `isms`, `vonage`) or on-premises hardware gateways (`sendquick`, `smseagle`, `multitech`, `teltonika`, `custom`). See the full [SMS Gateway & Multi-OTP Manual](sms-gateway-manual.md) for provider wire formats, hardware presets, and phone number resolution.
+
+```yaml
+sms:
+  provider: "sendquick"       # twilio | isms | vonage | sendquick | smseagle | multitech | teltonika | custom
+  api_url: "https://sendquick.internal.local/sq/sendmsg.php"
+  account_id: "samlguard-api"
+  auth_token: "${SMS_AUTH_TOKEN}"
+  sender_id: "SAMLGuard"
+  http_method: "POST"         # "POST" or "GET"
+  message_template: "Your SAMLGuard verification code is {code}. Valid for 5 minutes."
+  timeout: 10s
+  profiles: {}                # Optional per-provider saved standby profiles
 ```
 
 ### `smtp`
@@ -172,6 +189,8 @@ When `env: "production"` (or `SAMLGUARD_ENV=production` / `APP_ENV=production`),
 | `mfa.encryption_key` | Required; must be a valid 64-character hex-encoded 32-byte AES-256 key |
 | `mfa.server_pepper` | Required non-empty string |
 | `smtp.host` | Required; cannot be empty, `localhost`, or `127.0.0.1` |
+| `sms.api_url` | When `"sms"` is enabled, must use `https://` for `sendquick`, `smseagle`, `multitech`, `teltonika`, or `custom`; cannot use `mock://`, `localhost`, or `127.0.0.1` |
+| `sms.account_id` / `sms.auth_token` | When `"sms"` is enabled, `auth_token` is required; `account_id` is also required for all providers except token-only `smseagle` and `custom` |
 | `saml.idp_entity_id` | Required; cannot use `https://mock-idp.samlguard.local` |
 | `saml.idp_sso_url` | Required absolute `https://` URL; cannot reference `mock-idp` |
 | `saml.acs_url` & `saml.sso_url` | Required absolute `https://` URLs (`http://` or relative URLs rejected) |

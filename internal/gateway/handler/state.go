@@ -29,6 +29,7 @@ type AuthSessionState struct {
 	SubjectNameIDFormat string
 	UserIdentityKey     string
 	UserEmail           string
+	UserPhone           string
 	UserDisplayName     string
 	UserGroups          []string
 	AssertionConsumed   bool

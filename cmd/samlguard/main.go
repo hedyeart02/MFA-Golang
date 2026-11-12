@@ -45,7 +45,7 @@ import (
 )
 
 // Version string populated at build time
-var Version = "v1.0.3"
+var Version = "v1.0.4"
 
 // SetupAppWithCleanup constructs and wires all runtime dependencies into the Gin engine
 // and returns a resource cleanup function to be invoked on server shutdown.
@@ -289,8 +289,10 @@ func SetupAppWithCleanup(cfg *config.Config, appLogger *logger.Logger) (*gin.Eng
 		adminProtected.GET("/settings", samlHandler.HandleAdminSettingsGet)
 		adminProtected.POST("/settings", samlHandler.HandleAdminSettingsPost)
 		adminProtected.POST("/settings/test-email", samlHandler.HandleAdminTestEmailPost)
+		adminProtected.POST("/settings/test-sms", samlHandler.HandleAdminTestSMSPost)
 		adminProtected.POST("/ita/sync", samlHandler.HandleAdminITASyncPost)
 		adminProtected.POST("/users/add", samlHandler.HandleAdminUserAddPost)
+		adminProtected.POST("/users/update-phone", samlHandler.HandleAdminUserUpdatePhonePost)
 		adminProtected.POST("/users/delete", samlHandler.HandleAdminUserDeletePost)
 		adminProtected.POST("/users/reset-mfa", samlHandler.HandleAdminUserResetMFAPost)
 		adminProtected.GET("/cert/download", samlHandler.HandleAdminCertDownload)

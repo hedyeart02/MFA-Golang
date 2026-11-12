@@ -71,11 +71,11 @@ saml:
   default_groups: []
 
 mfa:
-  # Activate one or multiple OTP providers simultaneously ("totp", "email")
+  # Activate one or multiple OTP providers simultaneously ("totp", "email", "sms")
   enabled_providers:
     - "totp"
     - "email"
-  # "totp", "email", or "select" (shows "Select a method to verify your identity" list first when multiple OTPs are active)
+  # "totp", "email", "sms", or "select" (shows "Select a method to verify your identity" list first when multiple OTPs are active)
   default_provider: "totp"
   issuer: "SAMLGuard"
   max_retries: 5
@@ -102,6 +102,40 @@ smtp:
   from: "no-reply@samlguard.example.com"
   from_name: "SAMLGuard MFA Security"
   encryption: "starttls"
+
+sms:
+  # Cloud APIs: "twilio", "isms", "vonage"
+  # Hardware Appliances & Cellular Gateways: "sendquick", "smseagle", "multitech", "teltonika"
+  # Generic Webhook / USB Modem Bridge / Dev Mock: "custom"
+  provider: "twilio"
+  api_url: "https://api.twilio.com/2010-04-01"
+  account_id: "YOUR_TWILIO_ACCOUNT_SID_OR_GATEWAY_USERNAME"
+  auth_token: "YOUR_SMS_AUTH_TOKEN_OR_PASSWORD"
+  sender_id: "+15551234567"
+  http_method: "POST"
+  message_template: "Your SAMLGuard verification code is {code}. Valid for 5 minutes."
+  profiles:
+    twilio:
+      api_url: "https://api.twilio.com/2010-04-01"
+      sender_id: "+15551234567"
+    isms:
+      api_url: "https://www.isms.com.my/isms_send_all_id.php"
+      sender_id: "SAMLGuard"
+    sendquick:
+      api_url: "https://sendquick.example.local/sq/sendmsg.php"
+      sender_id: "SAMLGuard"
+    smseagle:
+      api_url: "https://smseagle.example.local/index.php/http_api/send_sms"
+      http_method: "POST"
+    multitech:
+      api_url: "https://multitech.example.local/sendmsg"
+      http_method: "GET"
+    teltonika:
+      api_url: "https://teltonika.example.local/cgi-bin/sms_send"
+      http_method: "GET"
+    vonage:
+      api_url: "https://rest.nexmo.com/sms/json"
+      sender_id: "SAMLGuard"
 
 security:
   # Dedicated high-entropy HMAC secret for Admin Console sessions and CSRF tokens

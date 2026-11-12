@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"encoding/xml"
 	"errors"
+	"io"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -895,5 +896,127 @@ func TestFrontEnd_MultiIdPChooserAndMFAMethodList(t *testing.T) {
 		if !strings.Contains(totpBody, want) {
 			t.Errorf("expected totp challenge HTML to contain %q", want)
 		}
+	}
+}
+
+type smsRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f smsRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestFrontEnd_SMSMethodSelectSendVerifyAndResend(t *testing.T) {
+	if got := DetermineAuthnContextClassRef("sms", "urn:oasis:names:tc:SAML:2.0:ac:classes:TimeSyncToken"); got != "urn:oasis:names:tc:SAML:2.0:ac:classes:unspecified" {
+		t.Fatalf("expected SMS AuthnContextClassRef to never claim TimeSyncToken, got %q", got)
+	}
+
+	h, cfg := setupTestHandler(t, &mockPipeline{})
+	cfg.MFA.EnabledProviders = []string{"totp", "email", "sms"}
+	cfg.MFA.DefaultProvider = "select"
+
+	// Capture dispatched SMS OTP via in-memory HTTP transport (zero TCP socket bind)
+	var lastSMSCode, lastSMSTarget string
+	smsSender := mfa.NewSMSSender(config.SMSConfig{
+		Provider: "custom",
+		APIURL:   "https://sms-capture.test/send",
+	}, "production", zap.NewNop())
+	smsSender.SetHTTPClient(&http.Client{Transport: smsRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		rawBytes, _ := io.ReadAll(r.Body)
+		raw := string(rawBytes)
+		if idx := strings.Index(raw, `"code":"`); idx >= 0 {
+			rest := raw[idx+8:]
+			if end := strings.Index(rest, `"`); end >= 0 {
+				lastSMSCode = rest[:end]
+			}
+		}
+		if idx := strings.Index(raw, `"to":"`); idx >= 0 {
+			rest := raw[idx+6:]
+			if end := strings.Index(rest, `"`); end >= 0 {
+				lastSMSTarget = rest[:end]
+			}
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"ok":true}`)),
+			Header:     make(http.Header),
+		}, nil
+	})})
+	h.mfaService.UpdateSMSSender(smsSender)
+
+	state := &AuthSessionState{
+		UpstreamEntityID:  "https://mock-idp.samlguard.local",
+		SubjectNameID:     "smsuser",
+		UserIdentityKey:   "https://mock-idp.samlguard.local|smsuser",
+		UserEmail:         "smsuser@example.com",
+		UserPhone:         "+60123456789",
+		ITAACSURL:         cfg.SAML.ACSURL,
+		ITARelayState:     "relay-1",
+		AssertionConsumed: true,
+	}
+	sessionID, err := h.correlationStore.Create(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	csrfToken := state.CSRFToken
+
+	r := gin.New()
+	r.GET("/saml/acs", h.HandleACSGet)
+	r.POST("/mfa/resend", h.HandleMFAResend)
+	r.POST("/mfa/verify", h.HandleMFAVerify)
+
+	// 1. Method selection screen lists Authenticator App, Email, and SMS (masked phone)
+	wSelect := httptest.NewRecorder()
+	r.ServeHTTP(wSelect, httptest.NewRequest(http.MethodGet, "/saml/acs?session_id="+sessionID, nil))
+	if wSelect.Code != http.StatusOK {
+		t.Fatalf("expected 200 for /saml/acs select, got %d", wSelect.Code)
+	}
+	selectBody := wSelect.Body.String()
+	for _, want := range []string{"Authenticator App", "Email", "SMS", "&#43;60*****6789", "?method=sms&amp;session_id=" + sessionID} {
+		if !strings.Contains(selectBody, want) {
+			t.Errorf("expected method selection screen to contain %q", want)
+		}
+	}
+
+	// 2. Choose ?method=sms -> dispatches OTP to +60123456789 and renders Resend form with method=sms
+	wSMS := httptest.NewRecorder()
+	r.ServeHTTP(wSMS, httptest.NewRequest(http.MethodGet, "/saml/acs?session_id="+sessionID+"&method=sms", nil))
+	if wSMS.Code != http.StatusOK {
+		t.Fatalf("expected 200 for ?method=sms, got %d", wSMS.Code)
+	}
+	if lastSMSTarget != "+60123456789" || len(lastSMSCode) != 6 {
+		t.Fatalf("expected SMS OTP dispatched to +60123456789, got target=%q code=%q", lastSMSTarget, lastSMSCode)
+	}
+	smsBody := wSMS.Body.String()
+	if !strings.Contains(smsBody, `<input type="hidden" name="method" value="sms"/>`) || !strings.Contains(smsBody, "Resend OTP Code") {
+		t.Errorf("expected SMS challenge view to include Resend OTP form with method=sms")
+	}
+
+	// 3. Immediate /mfa/resend with method=sms respects cooldown cleanly (re-renders SMS tab)
+	resendForm := url.Values{
+		"session_id": {sessionID},
+		"csrf_token": {csrfToken},
+		"method":     {"sms"},
+	}
+	reqResend := httptest.NewRequest(http.MethodPost, "/mfa/resend", strings.NewReader(resendForm.Encode()))
+	reqResend.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	wResend := httptest.NewRecorder()
+	r.ServeHTTP(wResend, reqResend)
+	if wResend.Code != http.StatusOK || !strings.Contains(strings.ToLower(wResend.Body.String()), "cooldown") {
+		t.Errorf("expected cooldown message on immediate SMS resend, got %d: %s", wResend.Code, wResend.Body.String())
+	}
+
+	// 4. Verify with dispatched SMS OTP code succeeds and emits SAML response
+	verifyForm := url.Values{
+		"session_id": {sessionID},
+		"csrf_token": {csrfToken},
+		"method":     {"sms"},
+		"code":       {lastSMSCode},
+	}
+	reqVerify := httptest.NewRequest(http.MethodPost, "/mfa/verify", strings.NewReader(verifyForm.Encode()))
+	reqVerify.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	wVerify := httptest.NewRecorder()
+	r.ServeHTTP(wVerify, reqVerify)
+	if wVerify.Code != http.StatusOK || !strings.Contains(wVerify.Body.String(), "SAMLResponse") {
+		t.Fatalf("expected SMS OTP verify to emit SAMLResponse, got status %d: %s", wVerify.Code, wVerify.Body.String())
 	}
 }

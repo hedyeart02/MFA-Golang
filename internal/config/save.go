@@ -46,6 +46,16 @@ type AdminSettingsPayload struct {
 	SMTPFromName   string `json:"smtp_from_name" form:"smtp_from_name"`
 	SMTPEncryption string `json:"smtp_encryption" form:"smtp_encryption"`
 
+	// SMS Gateway Delivery
+	SMSProvider        string                       `json:"sms_provider" form:"sms_provider"`
+	SMSAPIURL          string                       `json:"sms_api_url" form:"sms_api_url"`
+	SMSAccountID       string                       `json:"sms_account_id" form:"sms_account_id"`
+	SMSAuthToken       string                       `json:"sms_auth_token" form:"sms_auth_token"` // If empty, keep existing token
+	SMSSenderID        string                       `json:"sms_sender_id" form:"sms_sender_id"`
+	SMSHTTPMethod      string                       `json:"sms_http_method" form:"sms_http_method"`
+	SMSMessageTemplate string                       `json:"sms_message_template" form:"sms_message_template"`
+	SMSProfiles        map[string]SMSGatewayProfile `json:"sms_profiles" form:"sms_profiles"`
+
 	// ITA User Sync & Whitelist Guard
 	ITAAPIURL             string   `json:"ita_api_url" form:"ita_api_url"`
 	ITAAPIUsername        string   `json:"ita_api_username" form:"ita_api_username"`
@@ -205,6 +215,86 @@ func ApplyAdminSettings(cfg *Config, payload *AdminSettingsPayload) {
 	}
 	if v := strings.ToLower(strings.TrimSpace(payload.SMTPEncryption)); v != "" {
 		cfg.SMTP.Encryption = v
+	}
+
+	// SMS Gateway settings & per-provider profile snapshot
+	if normSMS := NormalizeSMSProvider(payload.SMSProvider); normSMS != "" {
+		cfg.SMS.Provider = normSMS
+	}
+	if payload.SMSProfiles != nil {
+		if cfg.SMS.Profiles == nil {
+			cfg.SMS.Profiles = make(map[string]SMSGatewayProfile)
+		}
+		for k, prof := range payload.SMSProfiles {
+			nk := NormalizeSMSProvider(k)
+			if nk == "" {
+				continue
+			}
+			prev := cfg.SMS.Profiles[nk]
+			token := prof.AuthToken
+			if token == "" {
+				token = prev.AuthToken
+			}
+			cfg.SMS.Profiles[nk] = SMSGatewayProfile{
+				APIURL:     strings.TrimSpace(prof.APIURL),
+				AccountID:  strings.TrimSpace(prof.AccountID),
+				AuthToken:  token,
+				SenderID:   strings.TrimSpace(prof.SenderID),
+				HTTPMethod: strings.ToUpper(strings.TrimSpace(prof.HTTPMethod)),
+			}
+		}
+	}
+	if normSMS := NormalizeSMSProvider(payload.SMSProvider); normSMS != "" &&
+		(payload.SMSAPIURL != "" || payload.SMSAccountID != "" || payload.SMSAuthToken != "" || payload.SMSSenderID != "") {
+		if cfg.SMS.Profiles == nil {
+			cfg.SMS.Profiles = make(map[string]SMSGatewayProfile)
+		}
+		prev := cfg.SMS.Profiles[normSMS]
+		token := payload.SMSAuthToken
+		if token == "" {
+			token = prev.AuthToken
+		}
+		if token == "" && normSMS == cfg.SMS.EffectiveProvider() {
+			token = cfg.SMS.AuthToken
+		}
+		cfg.SMS.Profiles[normSMS] = SMSGatewayProfile{
+			APIURL:     strings.TrimSpace(payload.SMSAPIURL),
+			AccountID:  strings.TrimSpace(payload.SMSAccountID),
+			AuthToken:  token,
+			SenderID:   strings.TrimSpace(payload.SMSSenderID),
+			HTTPMethod: strings.ToUpper(strings.TrimSpace(payload.SMSHTTPMethod)),
+		}
+	}
+	activeSMSKey := cfg.SMS.EffectiveProvider()
+	if prof, ok := cfg.SMS.Profiles[activeSMSKey]; ok && (prof.APIURL != "" || prof.AccountID != "" || prof.AuthToken != "" || prof.SenderID != "") {
+		cfg.SMS.APIURL = prof.APIURL
+		cfg.SMS.AccountID = prof.AccountID
+		if prof.AuthToken != "" {
+			cfg.SMS.AuthToken = prof.AuthToken
+		}
+		cfg.SMS.SenderID = prof.SenderID
+		if prof.HTTPMethod != "" {
+			cfg.SMS.HTTPMethod = prof.HTTPMethod
+		}
+	} else {
+		if payload.SMSAPIURL != "" || payload.SMSProvider != "" {
+			cfg.SMS.APIURL = strings.TrimSpace(payload.SMSAPIURL)
+		}
+		if payload.SMSAccountID != "" || payload.SMSProvider != "" {
+			cfg.SMS.AccountID = strings.TrimSpace(payload.SMSAccountID)
+		}
+		if payload.SMSAuthToken != "" {
+			cfg.SMS.AuthToken = payload.SMSAuthToken
+		}
+		if payload.SMSSenderID != "" || payload.SMSProvider != "" {
+			cfg.SMS.SenderID = strings.TrimSpace(payload.SMSSenderID)
+		}
+		if v := strings.ToUpper(strings.TrimSpace(payload.SMSHTTPMethod)); v != "" {
+			cfg.SMS.HTTPMethod = v
+		}
+	}
+	if v := strings.TrimSpace(payload.SMSMessageTemplate); v != "" {
+		cfg.SMS.MessageTemplate = v
 	}
 
 	if v := strings.TrimSpace(payload.ITAAPIURL); v != "" {
@@ -370,6 +460,44 @@ func SaveConfig(filePath string, cfg *Config, payload *AdminSettingsPayload) err
 	}
 	if payload.SMTPEncryption != "" {
 		smtpMap["encryption"] = cfg.SMTP.Encryption
+	}
+
+	// Update SMS section
+	if cfg.SMS.Provider != "" || len(cfg.SMS.Profiles) > 0 || payload.SMSProvider != "" {
+		smsMap, _ := raw["sms"].(map[string]interface{})
+		if smsMap == nil {
+			smsMap = make(map[string]interface{})
+			raw["sms"] = smsMap
+		}
+		smsMap["provider"] = cfg.SMS.EffectiveProvider()
+		smsMap["api_url"] = cfg.SMS.APIURL
+		smsMap["account_id"] = cfg.SMS.AccountID
+		if cfg.SMS.AuthToken != "" {
+			smsMap["auth_token"] = cfg.SMS.AuthToken
+		}
+		smsMap["sender_id"] = cfg.SMS.SenderID
+		if cfg.SMS.HTTPMethod != "" {
+			smsMap["http_method"] = cfg.SMS.HTTPMethod
+		}
+		if cfg.SMS.MessageTemplate != "" {
+			smsMap["message_template"] = cfg.SMS.MessageTemplate
+		}
+		if len(cfg.SMS.Profiles) > 0 {
+			smsProfilesMap := make(map[string]interface{}, len(cfg.SMS.Profiles))
+			for k, prof := range cfg.SMS.Profiles {
+				entry := map[string]interface{}{
+					"api_url":     prof.APIURL,
+					"account_id":  prof.AccountID,
+					"sender_id":   prof.SenderID,
+					"http_method": prof.HTTPMethod,
+				}
+				if prof.AuthToken != "" {
+					entry["auth_token"] = prof.AuthToken
+				}
+				smsProfilesMap[k] = entry
+			}
+			smsMap["profiles"] = smsProfilesMap
+		}
 	}
 
 	// Update ITA section

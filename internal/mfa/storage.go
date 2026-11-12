@@ -52,6 +52,7 @@ type AuthorizedUser struct {
 	ID        int64     `json:"id"`
 	Username  string    `json:"username"`
 	Email     string    `json:"email"`
+	Phone     string    `json:"phone"`
 	FullName  string    `json:"full_name"`
 	Source    string    `json:"source"` // "ita_sync" or "manual"
 	CreatedAt time.Time `json:"created_at"`
@@ -89,12 +90,19 @@ type Storage interface {
 	VerifyAndConsumeEmailOTP(ctx context.Context, userKey string, code string, pepper string, maxAttempts int) (bool, error)
 	CheckEmailOTPResend(ctx context.Context, userKey string) (time.Duration, error)
 
+	// SMS OTP methods
+	SaveSMSOTP(ctx context.Context, userKey string, hmacDigest []byte, expiresAt, resendAfter time.Time) error
+	VerifyAndConsumeSMSOTP(ctx context.Context, userKey string, code string, pepper string, maxAttempts int) (bool, error)
+	CheckSMSOTPResend(ctx context.Context, userKey string) (time.Duration, error)
+
 	// User Whitelist / Authorization methods
 	IsUserAuthorized(ctx context.Context, identifier string) (bool, error)
 	SaveAuthorizedUsers(ctx context.Context, users []AuthorizedUser) error
 	ListAuthorizedUsers(ctx context.Context) ([]AuthorizedUser, error)
 	AddAuthorizedUser(ctx context.Context, user AuthorizedUser) error
 	DeleteAuthorizedUser(ctx context.Context, username string) error
+	LookupAuthorizedUserPhone(ctx context.Context, identifiers ...string) (string, error)
+	UpdateAuthorizedUserPhone(ctx context.Context, username, phone string) error
 
 	// Admin Authentication methods
 	GetAdminUser(ctx context.Context, username string) (*AdminUser, error)
@@ -268,10 +276,23 @@ func (s *SQLiteStorage) Init(ctx context.Context) error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_email_otps_expiry ON email_otps(expires_at);
 
+	CREATE TABLE IF NOT EXISTS sms_otps (
+		user_key TEXT PRIMARY KEY,
+		hmac_digest BLOB NOT NULL,
+		expires_at DATETIME NOT NULL,
+		resend_after DATETIME NOT NULL,
+		attempts INTEGER DEFAULT 0,
+		consumed INTEGER DEFAULT 0,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_sms_otps_expiry ON sms_otps(expires_at);
+
 	CREATE TABLE IF NOT EXISTS authorized_users (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		username TEXT NOT NULL COLLATE NOCASE,
 		email TEXT COLLATE NOCASE,
+		phone TEXT DEFAULT '',
 		full_name TEXT,
 		source TEXT NOT NULL DEFAULT 'ita_sync',
 		created_at DATETIME NOT NULL,
@@ -307,6 +328,7 @@ func (s *SQLiteStorage) Init(ctx context.Context) error {
 	// Schema migrations for existing databases
 	_, _ = s.db.ExecContext(ctx, "ALTER TABLE mfa_secrets ADD COLUMN failed_attempts INTEGER DEFAULT 0;")
 	_, _ = s.db.ExecContext(ctx, "ALTER TABLE mfa_secrets ADD COLUMN locked_until DATETIME;")
+	_, _ = s.db.ExecContext(ctx, "ALTER TABLE authorized_users ADD COLUMN phone TEXT DEFAULT '';")
 	_, _ = s.db.ExecContext(ctx, "DROP INDEX IF EXISTS idx_mfa_secrets_user_status;")
 	_, _ = s.db.ExecContext(ctx, "CREATE UNIQUE INDEX IF NOT EXISTS idx_mfa_secrets_user_status ON mfa_secrets(user_key, status);")
 
@@ -522,11 +544,35 @@ func (s *SQLiteStorage) DeleteUserTOTPSecrets(ctx context.Context, identifier st
 }
 
 func (s *SQLiteStorage) SaveEmailOTP(ctx context.Context, userKey string, hmacDigest []byte, expiresAt, resendAfter time.Time) error {
+	return s.saveChallengeOTP(ctx, "email_otps", userKey, hmacDigest, expiresAt, resendAfter)
+}
+
+func (s *SQLiteStorage) CheckEmailOTPResend(ctx context.Context, userKey string) (time.Duration, error) {
+	return s.checkChallengeOTPResend(ctx, "email_otps", userKey)
+}
+
+func (s *SQLiteStorage) VerifyAndConsumeEmailOTP(ctx context.Context, userKey string, code string, pepper string, maxAttempts int) (bool, error) {
+	return s.verifyAndConsumeChallengeOTP(ctx, "email_otps", userKey, code, pepper, maxAttempts)
+}
+
+func (s *SQLiteStorage) SaveSMSOTP(ctx context.Context, userKey string, hmacDigest []byte, expiresAt, resendAfter time.Time) error {
+	return s.saveChallengeOTP(ctx, "sms_otps", userKey, hmacDigest, expiresAt, resendAfter)
+}
+
+func (s *SQLiteStorage) CheckSMSOTPResend(ctx context.Context, userKey string) (time.Duration, error) {
+	return s.checkChallengeOTPResend(ctx, "sms_otps", userKey)
+}
+
+func (s *SQLiteStorage) VerifyAndConsumeSMSOTP(ctx context.Context, userKey string, code string, pepper string, maxAttempts int) (bool, error) {
+	return s.verifyAndConsumeChallengeOTP(ctx, "sms_otps", userKey, code, pepper, maxAttempts)
+}
+
+func (s *SQLiteStorage) saveChallengeOTP(ctx context.Context, table, userKey string, hmacDigest []byte, expiresAt, resendAfter time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	now := time.Now().UTC()
-	query := `INSERT INTO email_otps (user_key, hmac_digest, expires_at, resend_after, attempts, consumed, created_at, updated_at)
+	query := fmt.Sprintf(`INSERT INTO %s (user_key, hmac_digest, expires_at, resend_after, attempts, consumed, created_at, updated_at)
 	          VALUES (?, ?, ?, ?, 0, 0, ?, ?)
 	          ON CONFLICT(user_key) DO UPDATE SET
 	              hmac_digest = excluded.hmac_digest,
@@ -534,17 +580,17 @@ func (s *SQLiteStorage) SaveEmailOTP(ctx context.Context, userKey string, hmacDi
 	              resend_after = excluded.resend_after,
 	              attempts = 0,
 	              consumed = 0,
-	              updated_at = excluded.updated_at`
+	              updated_at = excluded.updated_at`, table)
 
 	_, err := s.db.ExecContext(ctx, query, userKey, hmacDigest, expiresAt, resendAfter, now, now)
 	return err
 }
 
-func (s *SQLiteStorage) CheckEmailOTPResend(ctx context.Context, userKey string) (time.Duration, error) {
+func (s *SQLiteStorage) checkChallengeOTPResend(ctx context.Context, table, userKey string) (time.Duration, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	query := `SELECT resend_after FROM email_otps WHERE user_key = ? LIMIT 1`
+	query := fmt.Sprintf(`SELECT resend_after FROM %s WHERE user_key = ? LIMIT 1`, table)
 	var resendAfter time.Time
 	err := s.db.QueryRowContext(ctx, query, userKey).Scan(&resendAfter)
 	if err != nil {
@@ -561,7 +607,7 @@ func (s *SQLiteStorage) CheckEmailOTPResend(ctx context.Context, userKey string)
 	return 0, nil
 }
 
-func (s *SQLiteStorage) VerifyAndConsumeEmailOTP(ctx context.Context, userKey string, code string, pepper string, maxAttempts int) (bool, error) {
+func (s *SQLiteStorage) verifyAndConsumeChallengeOTP(ctx context.Context, table, userKey string, code string, pepper string, maxAttempts int) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -571,7 +617,7 @@ func (s *SQLiteStorage) VerifyAndConsumeEmailOTP(ctx context.Context, userKey st
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	query := `SELECT hmac_digest, expires_at, attempts, consumed FROM email_otps WHERE user_key = ? LIMIT 1`
+	query := fmt.Sprintf(`SELECT hmac_digest, expires_at, attempts, consumed FROM %s WHERE user_key = ? LIMIT 1`, table)
 	var storedDigest []byte
 	var expiresAt time.Time
 	var attempts int
@@ -582,7 +628,7 @@ func (s *SQLiteStorage) VerifyAndConsumeEmailOTP(ctx context.Context, userKey st
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, ErrNotFound
 		}
-		return false, fmt.Errorf("querying email otp: %w", err)
+		return false, fmt.Errorf("querying otp from %s: %w", table, err)
 	}
 
 	now := time.Now().UTC()
@@ -610,13 +656,13 @@ func (s *SQLiteStorage) VerifyAndConsumeEmailOTP(ctx context.Context, userKey st
 	// Constant-time comparison
 	if subtle.ConstantTimeCompare(storedDigest, expectedDigest) != 1 {
 		// Increment attempts
-		_, _ = tx.ExecContext(ctx, `UPDATE email_otps SET attempts = attempts + 1, updated_at = ? WHERE user_key = ?`, now, userKey)
+		_, _ = tx.ExecContext(ctx, fmt.Sprintf(`UPDATE %s SET attempts = attempts + 1, updated_at = ? WHERE user_key = ?`, table), now, userKey)
 		_ = tx.Commit()
 		return false, ErrInvalidCode
 	}
 
 	// 5. Successful match: Atomically mark consumed
-	_, err = tx.ExecContext(ctx, `UPDATE email_otps SET consumed = 1, updated_at = ? WHERE user_key = ?`, now, userKey)
+	_, err = tx.ExecContext(ctx, fmt.Sprintf(`UPDATE %s SET consumed = 1, updated_at = ? WHERE user_key = ?`, table), now, userKey)
 	if err != nil {
 		return false, fmt.Errorf("marking otp consumed: %w", err)
 	}
@@ -669,10 +715,11 @@ func (s *SQLiteStorage) SaveAuthorizedUsers(ctx context.Context, users []Authori
 
 	now := time.Now()
 	stmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO authorized_users (username, email, full_name, source, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO authorized_users (username, email, phone, full_name, source, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(username) DO UPDATE SET
 			email = CASE WHEN excluded.email != '' THEN excluded.email ELSE authorized_users.email END,
+			phone = CASE WHEN excluded.phone != '' THEN excluded.phone ELSE authorized_users.phone END,
 			full_name = CASE WHEN excluded.full_name != '' THEN excluded.full_name ELSE authorized_users.full_name END,
 			source = excluded.source,
 			updated_at = excluded.updated_at
@@ -691,7 +738,7 @@ func (s *SQLiteStorage) SaveAuthorizedUsers(ctx context.Context, users []Authori
 		if source == "" {
 			source = "ita_sync"
 		}
-		if _, err := stmt.ExecContext(ctx, uname, strings.TrimSpace(u.Email), strings.TrimSpace(u.FullName), source, now, now); err != nil {
+		if _, err := stmt.ExecContext(ctx, uname, strings.TrimSpace(u.Email), NormalizePhoneNumber(u.Phone), strings.TrimSpace(u.FullName), source, now, now); err != nil {
 			return err
 		}
 	}
@@ -701,7 +748,7 @@ func (s *SQLiteStorage) SaveAuthorizedUsers(ctx context.Context, users []Authori
 
 // ListAuthorizedUsers retrieves all authorized users from the database.
 func (s *SQLiteStorage) ListAuthorizedUsers(ctx context.Context) ([]AuthorizedUser, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, username, COALESCE(email, ''), COALESCE(full_name, ''), source, created_at, updated_at FROM authorized_users ORDER BY username ASC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, username, COALESCE(email, ''), COALESCE(phone, ''), COALESCE(full_name, ''), source, created_at, updated_at FROM authorized_users ORDER BY username ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -710,7 +757,7 @@ func (s *SQLiteStorage) ListAuthorizedUsers(ctx context.Context) ([]AuthorizedUs
 	var list []AuthorizedUser
 	for rows.Next() {
 		var u AuthorizedUser
-		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.FullName, &u.Source, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.Phone, &u.FullName, &u.Source, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, u)
@@ -734,16 +781,70 @@ func (s *SQLiteStorage) AddAuthorizedUser(ctx context.Context, user AuthorizedUs
 
 	now := time.Now()
 	query := `
-		INSERT INTO authorized_users (username, email, full_name, source, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO authorized_users (username, email, phone, full_name, source, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(username) DO UPDATE SET
 			email = excluded.email,
+			phone = CASE WHEN excluded.phone != '' THEN excluded.phone ELSE authorized_users.phone END,
 			full_name = excluded.full_name,
 			source = excluded.source,
 			updated_at = excluded.updated_at
 	`
-	_, err := s.db.ExecContext(ctx, query, uname, strings.TrimSpace(user.Email), strings.TrimSpace(user.FullName), source, now, now)
+	_, err := s.db.ExecContext(ctx, query, uname, strings.TrimSpace(user.Email), NormalizePhoneNumber(user.Phone), strings.TrimSpace(user.FullName), source, now, now)
 	return err
+}
+
+// LookupAuthorizedUserPhone looks up the stored mobile phone number matching any of the given identifiers (username or email).
+func (s *SQLiteStorage) LookupAuthorizedUserPhone(ctx context.Context, identifiers ...string) (string, error) {
+	for _, raw := range identifiers {
+		trimmed := strings.ToLower(strings.TrimSpace(raw))
+		if trimmed == "" {
+			continue
+		}
+		var phone string
+		err := s.db.QueryRowContext(ctx,
+			`SELECT COALESCE(phone, '') FROM authorized_users WHERE (LOWER(username) = ? OR LOWER(email) = ?) AND COALESCE(phone, '') != '' LIMIT 1`,
+			trimmed, trimmed,
+		).Scan(&phone)
+		if err == nil && strings.TrimSpace(phone) != "" {
+			return strings.TrimSpace(phone), nil
+		}
+		if atIdx := strings.Index(trimmed, "@"); atIdx > 0 {
+			prefix := trimmed[:atIdx]
+			err = s.db.QueryRowContext(ctx,
+				`SELECT COALESCE(phone, '') FROM authorized_users WHERE LOWER(username) = ? AND COALESCE(phone, '') != '' LIMIT 1`,
+				prefix,
+			).Scan(&phone)
+			if err == nil && strings.TrimSpace(phone) != "" {
+				return strings.TrimSpace(phone), nil
+			}
+		}
+	}
+	return "", ErrNotFound
+}
+
+// UpdateAuthorizedUserPhone updates the mobile phone number for an existing user in authorized_users.
+func (s *SQLiteStorage) UpdateAuthorizedUserPhone(ctx context.Context, username, phone string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	trimmed := strings.TrimSpace(username)
+	if trimmed == "" {
+		return errors.New("username cannot be empty")
+	}
+	normPhone := NormalizePhoneNumber(phone)
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE authorized_users SET phone = ?, updated_at = ? WHERE LOWER(username) = LOWER(?)`,
+		normPhone, time.Now(), trimmed,
+	)
+	if err != nil {
+		return err
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // DeleteAuthorizedUser removes a user from the authorized users table.
@@ -905,6 +1006,23 @@ func (s *SQLiteStorage) SaveAdminSettings(ctx context.Context, settings *config.
 	if toStore.SMTPPassword, err = s.encryptSettingSecret(toStore.SMTPPassword); err != nil {
 		return fmt.Errorf("encrypting smtp password: %w", err)
 	}
+	if toStore.SMSAuthToken, err = s.encryptSettingSecret(toStore.SMSAuthToken); err != nil {
+		return fmt.Errorf("encrypting sms auth token: %w", err)
+	}
+	if len(toStore.SMSProfiles) > 0 {
+		encProfiles := make(map[string]config.SMSGatewayProfile, len(toStore.SMSProfiles))
+		for k, prof := range toStore.SMSProfiles {
+			if prof.AuthToken != "" {
+				encTok, tokErr := s.encryptSettingSecret(prof.AuthToken)
+				if tokErr != nil {
+					return fmt.Errorf("encrypting sms profile %s auth token: %w", k, tokErr)
+				}
+				prof.AuthToken = encTok
+			}
+			encProfiles[k] = prof
+		}
+		toStore.SMSProfiles = encProfiles
+	}
 	if toStore.ITAAPIPassword, err = s.encryptSettingSecret(toStore.ITAAPIPassword); err != nil {
 		return fmt.Errorf("encrypting ita api password: %w", err)
 	}
@@ -946,6 +1064,19 @@ func (s *SQLiteStorage) GetAdminSettings(ctx context.Context) (*config.AdminSett
 
 	if settings.SMTPPassword, err = s.decryptSettingSecret(settings.SMTPPassword); err != nil {
 		return nil, err
+	}
+	if settings.SMSAuthToken, err = s.decryptSettingSecret(settings.SMSAuthToken); err != nil {
+		return nil, err
+	}
+	for k, prof := range settings.SMSProfiles {
+		if prof.AuthToken != "" {
+			decTok, decErr := s.decryptSettingSecret(prof.AuthToken)
+			if decErr != nil {
+				return nil, decErr
+			}
+			prof.AuthToken = decTok
+			settings.SMSProfiles[k] = prof
+		}
 	}
 	if settings.ITAAPIPassword, err = s.decryptSettingSecret(settings.ITAAPIPassword); err != nil {
 		return nil, err

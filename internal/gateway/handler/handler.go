@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"crypto/x509"
@@ -84,11 +85,14 @@ type ChallengeViewModel struct {
 	CSRFToken           string
 	Email               string
 	MaskedEmail         string
-	Method              string // "totp", "email"
+	Phone               string
+	MaskedPhone         string
+	Method              string // "totp", "email", "sms"
 	MethodSelectView    bool
 	VerificationMethods []MFAVerificationOption
 	TotpEnabled         bool
 	EmailEnabled        bool
+	SMSEnabled          bool
 	MultiOTPEnabled     bool
 	EnrollmentRequired  bool
 	SecretKey           string
@@ -102,6 +106,7 @@ type UpstreamClaims struct {
 	SubjectNameID       string
 	SubjectNameIDFormat string
 	Email               string
+	Phone               string
 	DisplayName         string
 	Groups              []string
 }
@@ -287,7 +292,7 @@ func (h *SAMLHandler) isHTTPSRequest(c *gin.Context) bool {
 }
 
 // DetermineAuthnContextClassRef resolves the appropriate AuthnContextClassRef for the verified MFA method.
-// Enforces that Email OTP can NEVER claim TimeSyncToken or any other time-synchronized hardware/software token class.
+// Enforces that Email/SMS OTP can NEVER claim TimeSyncToken or any other time-synchronized hardware/software token class.
 func DetermineAuthnContextClassRef(method string, globalConfig string) string {
 	const (
 		TimeSyncToken = "urn:oasis:names:tc:SAML:2.0:ac:classes:TimeSyncToken"
@@ -791,7 +796,7 @@ func (h *SAMLHandler) validateUpstreamSAMLResponseForSession(rawB64, expectedOut
 		return nil, errors.New("empty Subject NameID in upstream assertion")
 	}
 
-	var email, displayName string
+	var email, phone, displayName string
 	var groups []string
 
 	attrElements := assertionEl.FindElements(".//Attribute")
@@ -806,6 +811,13 @@ func (h *SAMLHandler) validateUpstreamSAMLResponseForSession(rawB64, expectedOut
 			case "email", "mail", "emailaddress", "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress":
 				if email == "" {
 					email = val
+				}
+			case "phone", "phone_number", "phonenumber", "mobile", "telephonenumber",
+				"http://schemas.xmlsoap.org/ws/2005/05/identity/claims/mobilephone",
+				"http://schemas.xmlsoap.org/ws/2005/05/identity/claims/homephone",
+				"http://schemas.xmlsoap.org/ws/2005/05/identity/claims/otherphone":
+				if phone == "" {
+					phone = mfa.NormalizePhoneNumber(val)
 				}
 			case "displayname", "name", "cn", "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name":
 				if displayName == "" {
@@ -843,6 +855,7 @@ func (h *SAMLHandler) validateUpstreamSAMLResponseForSession(rawB64, expectedOut
 		SubjectNameID:       subjectNameID,
 		SubjectNameIDFormat: subjectFormat,
 		Email:               email,
+		Phone:               phone,
 		DisplayName:         displayName,
 		Groups:              groups,
 	}, nil
@@ -962,11 +975,17 @@ func (h *SAMLHandler) HandleACS(c *gin.Context) {
 		}
 	}
 
+	userPhone := claims.Phone
+	if userPhone == "" && h.mfaService != nil {
+		userPhone = h.mfaService.LookupUserPhone(c.Request.Context(), claims.SubjectNameID, claims.Email, userKey)
+	}
+
 	state.UpstreamEntityID = upstreamEntityID
 	state.SubjectNameID = claims.SubjectNameID
 	state.SubjectNameIDFormat = claims.SubjectNameIDFormat
 	state.UserIdentityKey = userKey
 	state.UserEmail = claims.Email
+	state.UserPhone = userPhone
 	state.UserDisplayName = claims.DisplayName
 	state.UserGroups = claims.Groups
 	state.AssertionConsumed = true
@@ -1018,7 +1037,7 @@ func (h *SAMLHandler) HandleACSGet(c *gin.Context) {
 	}
 	if h.cfg != nil {
 		method = h.cfg.MFA.ResolveChallengeMethod(method)
-	} else if method != "totp" && method != "email" {
+	} else if method != "totp" && method != "email" && method != "sms" {
 		method = "totp"
 	}
 
@@ -1055,7 +1074,7 @@ func (h *SAMLHandler) HandleMFAVerify(c *gin.Context) {
 		}
 	}
 
-	if (method == "totp" || method == "email") && h.cfg != nil && !h.cfg.MFA.IsProviderEnabled(method) {
+	if (method == "totp" || method == "email" || method == "sms") && h.cfg != nil && !h.cfg.MFA.IsProviderEnabled(method) {
 		response.Error(c, http.StatusForbidden, fmt.Errorf("MFA method %q is disabled by administrator", method))
 		return
 	}
@@ -1081,6 +1100,8 @@ func (h *SAMLHandler) HandleMFAVerify(c *gin.Context) {
 		}
 	} else if method == "email" {
 		verified, err = h.mfaService.VerifyEmailOTP(ctx, state.UserIdentityKey, code)
+	} else if method == "sms" {
+		verified, err = h.mfaService.VerifySMSOTP(ctx, state.UserIdentityKey, code)
 	} else {
 		err = errors.New("unsupported MFA method")
 	}
@@ -1188,12 +1209,31 @@ func (h *SAMLHandler) HandleMFAResend(c *gin.Context) {
 		return
 	}
 
-	if h.cfg != nil && !h.cfg.MFA.IsProviderEnabled("email") {
-		response.Error(c, http.StatusForbidden, errors.New("email OTP method is disabled by administrator"))
+	method := strings.ToLower(strings.TrimSpace(c.PostForm("method")))
+	if method == "" {
+		method = "email"
+	}
+	if method != "email" && method != "sms" {
+		response.Error(c, http.StatusBadRequest, fmt.Errorf("OTP resend is only supported for email or sms (got %q)", method))
+		return
+	}
+	if h.cfg != nil && !h.cfg.MFA.IsProviderEnabled(method) {
+		response.Error(c, http.StatusForbidden, fmt.Errorf("%s OTP method is disabled by administrator", strings.ToUpper(method)))
 		return
 	}
 
 	ctx := c.Request.Context()
+	if method == "sms" {
+		phone := h.resolveChallengePhone(ctx, state)
+		err = h.mfaService.GenerateAndSendSMSOTP(ctx, state.UserIdentityKey, phone)
+		if err != nil {
+			h.renderMFAChallengeView(c, state, "sms", err.Error())
+			return
+		}
+		h.renderMFAChallengeViewWithMessage(c, http.StatusOK, state, "sms", "A new one-time code has been sent via SMS.", "")
+		return
+	}
+
 	err = h.mfaService.GenerateAndSendEmailOTP(ctx, state.UserIdentityKey, state.UserEmail)
 	if err != nil {
 		h.renderMFAChallengeView(c, state, "email", err.Error())
@@ -1237,7 +1277,7 @@ func (h *SAMLHandler) HandleMFAReEnroll(c *gin.Context) {
 		if verifyMethod == "" {
 			verifyMethod = "totp"
 		}
-		if verifyMethod != "totp" && verifyMethod != "email" {
+		if verifyMethod != "totp" && verifyMethod != "email" && verifyMethod != "sms" {
 			response.Error(c, http.StatusForbidden, fmt.Errorf("unsupported verification method %q", verifyMethod))
 			return
 		}
@@ -1253,9 +1293,12 @@ func (h *SAMLHandler) HandleMFAReEnroll(c *gin.Context) {
 
 		var ok bool
 		var verifyErr error
-		if verifyMethod == "email" {
+		switch verifyMethod {
+		case "email":
 			ok, verifyErr = h.mfaService.VerifyEmailOTP(ctx, state.UserIdentityKey, currentCode)
-		} else {
+		case "sms":
+			ok, verifyErr = h.mfaService.VerifySMSOTP(ctx, state.UserIdentityKey, currentCode)
+		default:
 			ok, verifyErr = h.mfaService.VerifyTOTP(ctx, state.UserIdentityKey, currentCode)
 		}
 
@@ -1291,11 +1334,14 @@ func (h *SAMLHandler) HandleMFAReEnroll(c *gin.Context) {
 		return
 	}
 
+	phone := h.resolveChallengePhone(ctx, state)
 	vm := ChallengeViewModel{
 		SessionID:          state.SessionID,
 		CSRFToken:          state.CSRFToken,
 		Email:              state.UserEmail,
 		MaskedEmail:        maskEmail(state.UserEmail),
+		Phone:              phone,
+		MaskedPhone:        mfa.MaskPhone(phone),
 		Method:             "totp",
 		EnrollmentRequired: true,
 		SecretKey:          enrollData.SecretKey,
@@ -1314,27 +1360,59 @@ func (h *SAMLHandler) HandleMFAReEnroll(c *gin.Context) {
 	c.String(http.StatusOK, renderInlineMFAPage(vm))
 }
 
+func (h *SAMLHandler) resolveChallengePhone(ctx context.Context, state *AuthSessionState) string {
+	if state == nil {
+		return ""
+	}
+	if strings.TrimSpace(state.UserPhone) != "" {
+		return state.UserPhone
+	}
+	if h.mfaService == nil {
+		return ""
+	}
+	phone := h.mfaService.LookupUserPhone(ctx, state.SubjectNameID, state.UserEmail, state.UserIdentityKey)
+	if phone != "" {
+		state.UserPhone = phone
+		if h.correlationStore != nil && state.SessionID != "" {
+			_ = h.correlationStore.Update(state.SessionID, state)
+		}
+	}
+	return phone
+}
+
 func (h *SAMLHandler) populateChallengeProviderFlags(vm *ChallengeViewModel) {
 	if h.cfg != nil {
 		vm.TotpEnabled = h.cfg.MFA.IsProviderEnabled("totp")
 		vm.EmailEnabled = h.cfg.MFA.IsProviderEnabled("email")
-		vm.MultiOTPEnabled = vm.TotpEnabled && vm.EmailEnabled
+		vm.SMSEnabled = h.cfg.MFA.IsProviderEnabled("sms")
 		if h.cfg.MFA.ResendCooldown > 0 {
 			vm.ResendCooldown = int(h.cfg.MFA.ResendCooldown.Seconds())
 		}
 	} else {
 		vm.TotpEnabled = true
 		vm.EmailEnabled = true
-		vm.MultiOTPEnabled = true
+		vm.SMSEnabled = false
 	}
+	activeCount := 0
+	if vm.TotpEnabled {
+		activeCount++
+	}
+	if vm.EmailEnabled {
+		activeCount++
+	}
+	if vm.SMSEnabled {
+		activeCount++
+	}
+	vm.MultiOTPEnabled = activeCount > 1
+
 	if vm.ResendCooldown <= 0 {
 		vm.ResendCooldown = 60
 	}
 
-	vm.VerificationMethods = buildMFAVerificationOptions(vm.SessionID, vm.MaskedEmail, vm.Method, vm.TotpEnabled, vm.EmailEnabled)
+	vm.VerificationMethods = buildMFAVerificationOptions(vm.SessionID, vm.MaskedEmail, vm.MaskedPhone, vm.Method, vm.TotpEnabled, vm.EmailEnabled, vm.SMSEnabled)
 }
 
-func buildMFAVerificationOptions(sessionID, maskedEmail, activeMethod string, totpEnabled, emailEnabled bool) []MFAVerificationOption {
+func buildMFAVerificationOptions(sessionID, maskedEmail, maskedPhone, activeMethod string, totpEnabled, emailEnabled, smsEnabled bool) []MFAVerificationOption {
 	escSession := url.QueryEscape(sessionID)
 	var opts []MFAVerificationOption
 	if totpEnabled {
@@ -1359,6 +1437,19 @@ func buildMFAVerificationOptions(sessionID, maskedEmail, activeMethod string, to
 			Active:      activeMethod == "email",
 		})
 	}
+	if smsEnabled {
+		desc := "Send a one-time verification code via SMS text message"
+		if maskedPhone != "" {
+			desc = "Text one-time code to " + maskedPhone
+		}
+		opts = append(opts, MFAVerificationOption{
+			Key:         "sms",
+			Title:       "SMS",
+			Description: desc,
+			URL:         "?method=sms&session_id=" + escSession,
+			Active:      activeMethod == "sms",
+		})
+	}
 	return opts
 }
 
@@ -1381,16 +1472,19 @@ func (h *SAMLHandler) renderMFAChallengeViewWithMessage(c *gin.Context, statusCo
 		}
 	} else if h.cfg != nil {
 		method = h.cfg.MFA.ResolveChallengeMethod(method)
-	} else if method != "totp" && method != "email" {
+	} else if method != "totp" && method != "email" && method != "sms" {
 		method = "totp"
 	}
 	hasActiveTOTP := h.mfaService.HasActiveTOTP(ctx, state.UserIdentityKey)
+	phone := h.resolveChallengePhone(ctx, state)
 
 	vm := ChallengeViewModel{
 		SessionID:    state.SessionID,
 		CSRFToken:    state.CSRFToken,
 		Email:        state.UserEmail,
 		MaskedEmail:  maskEmail(state.UserEmail),
+		Phone:        phone,
+		MaskedPhone:  mfa.MaskPhone(phone),
 		Method:       method,
 		Message:      successMsg,
 		ErrorMessage: errorMsg,
@@ -1419,6 +1513,13 @@ func (h *SAMLHandler) renderMFAChallengeViewWithMessage(c *gin.Context, statusCo
 	} else if method == "email" {
 		// Send initial email OTP if not already sent
 		_ = h.mfaService.GenerateAndSendEmailOTP(ctx, state.UserIdentityKey, state.UserEmail)
+	} else if method == "sms" {
+		// Send initial SMS OTP when switching to SMS method (suppress resend-cooldown warning on refresh)
+		if err := h.mfaService.GenerateAndSendSMSOTP(ctx, state.UserIdentityKey, phone); err != nil {
+			if vm.ErrorMessage == "" && !strings.Contains(strings.ToLower(err.Error()), "cooldown") {
+				vm.ErrorMessage = err.Error()
+			}
+		}
 	}
 
 	c.Header("Content-Type", "text/html; charset=utf-8")
@@ -1710,13 +1811,19 @@ func renderInlineMFAPage(vm ChallengeViewModel) string {
 	escCSRFToken := html.EscapeString(vm.CSRFToken)
 	escMethod := html.EscapeString(vm.Method)
 	escMaskedEmail := html.EscapeString(vm.MaskedEmail)
+	escMaskedPhone := html.EscapeString(vm.MaskedPhone)
 	escSecretKey := html.EscapeString(vm.SecretKey)
 	escQRDataURI := html.EscapeString(string(vm.QRCodeDataURI))
 	escMessage := html.EscapeString(vm.Message)
 	escError := html.EscapeString(vm.ErrorMessage)
 
-	totpEnabled := vm.TotpEnabled || (!vm.TotpEnabled && !vm.EmailEnabled)
-	emailEnabled := vm.EmailEnabled || (!vm.TotpEnabled && !vm.EmailEnabled)
+	totpEnabled := vm.TotpEnabled || (!vm.TotpEnabled && !vm.EmailEnabled && !vm.SMSEnabled)
+	emailEnabled := vm.EmailEnabled || (!vm.TotpEnabled && !vm.EmailEnabled && !vm.SMSEnabled)
+	smsEnabled := vm.SMSEnabled
+	identityLabel := escMaskedEmail
+	if vm.Method == "sms" && escMaskedPhone != "" {
+		identityLabel = escMaskedPhone
+	}
 
 	if vm.MethodSelectView && vm.MultiOTPEnabled {
 		var rows strings.Builder
@@ -1745,7 +1852,7 @@ func renderInlineMFAPage(vm ChallengeViewModel) string {
 		<div class="method-list">%s</div>
 	</div>
 </body>
-</html>`, escMaskedEmail, rows.String())
+</html>`, identityLabel, rows.String())
 	}
 
 	var tabsHTML string
@@ -1755,6 +1862,9 @@ func renderInlineMFAPage(vm ChallengeViewModel) string {
 	}
 	if emailEnabled {
 		fmt.Fprintf(&tabItems, `<a class="tab %s" href="?method=email&session_id=%s">Email OTP</a>`, activeTab(vm.Method == "email"), escSessionID)
+	}
+	if smsEnabled {
+		fmt.Fprintf(&tabItems, `<a class="tab %s" href="?method=sms&session_id=%s">SMS OTP</a>`, activeTab(vm.Method == "sms"), escSessionID)
 	}
 	tabsHTML = fmt.Sprintf(`<div class="tabs">%s</div>`, tabItems.String())
 
@@ -1793,14 +1903,14 @@ func renderInlineMFAPage(vm ChallengeViewModel) string {
 	}
 
 	var resendHTML string
-	if vm.Method == "email" {
+	if vm.Method == "email" || vm.Method == "sms" {
 		resendHTML = fmt.Sprintf(`
 		<form method="POST" action="/mfa/resend" style="margin-top: 1rem; text-align: center;">
 			<input type="hidden" name="session_id" value="%s"/>
 			<input type="hidden" name="csrf_token" value="%s"/>
-			<input type="hidden" name="method" value="email"/>
+			<input type="hidden" name="method" value="%s"/>
 			<button type="submit" style="background: none; border: none; color: #38bdf8; text-decoration: underline; cursor: pointer; font-size: 0.85rem;">Resend OTP Code</button>
-		</form>`, escSessionID, escCSRFToken)
+		</form>`, escSessionID, escCSRFToken, escMethod)
 	}
 
 	return fmt.Sprintf(`<!DOCTYPE html>
@@ -1841,7 +1951,7 @@ func renderInlineMFAPage(vm ChallengeViewModel) string {
 	</div>
 </body>
 </html>`,
-		escMaskedEmail,
+		identityLabel,
 		tabsHTML,
 		statusHTML,
 		qrHTML,

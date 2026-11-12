@@ -62,6 +62,9 @@ type AdminSettingsViewModel struct {
 	IdPProfilesJSON     template.JS
 	TotpEnabled         bool
 	EmailEnabled        bool
+	SMSEnabled          bool
+	SMSProvider         string
+	SMSProfilesJSON     template.JS
 	Port                int
 	AllowedAudiencesStr string
 	CertInfo            CertDetails
@@ -630,6 +633,54 @@ func (cHandler *SAMLHandler) HandleAdminSettingsPost(c *gin.Context) {
 	payload.SMTPFromName = strings.TrimSpace(c.PostForm("smtp_from_name"))
 	payload.SMTPEncryption = strings.ToLower(strings.TrimSpace(c.PostForm("smtp_encryption")))
 
+	// SMS Gateway Provider & Integration Profiles
+	payload.SMSProvider = config.NormalizeSMSProvider(c.PostForm("sms_provider"))
+	if payload.SMSProvider == "" {
+		payload.SMSProvider = cHandler.cfg.SMS.EffectiveProvider()
+	}
+	payload.SMSAPIURL = strings.TrimSpace(c.PostForm("sms_api_url"))
+	payload.SMSAccountID = strings.TrimSpace(c.PostForm("sms_account_id"))
+	payload.SMSAuthToken = c.PostForm("sms_auth_token")
+	payload.SMSSenderID = strings.TrimSpace(c.PostForm("sms_sender_id"))
+	payload.SMSHTTPMethod = strings.ToUpper(strings.TrimSpace(c.PostForm("sms_http_method")))
+	payload.SMSMessageTemplate = strings.TrimSpace(c.PostForm("sms_message_template"))
+
+	if smsProfilesRaw := strings.TrimSpace(c.PostForm("sms_profiles_json")); smsProfilesRaw != "" {
+		var parsedSMSProfiles map[string]config.SMSGatewayProfile
+		if err := json.Unmarshal([]byte(smsProfilesRaw), &parsedSMSProfiles); err == nil {
+			cleanedSMS := make(map[string]config.SMSGatewayProfile)
+			for k, v := range parsedSMSProfiles {
+				normKey := config.NormalizeSMSProvider(k)
+				if normKey == "" {
+					continue
+				}
+				token := v.AuthToken
+				if token == "" && cHandler.cfg.SMS.Profiles != nil {
+					if prev, ok := cHandler.cfg.SMS.Profiles[normKey]; ok {
+						token = prev.AuthToken
+					}
+				}
+				if token == "" && normKey == cHandler.cfg.SMS.EffectiveProvider() {
+					token = cHandler.cfg.SMS.AuthToken
+				}
+				cleanedSMS[normKey] = config.SMSGatewayProfile{
+					APIURL:     strings.TrimSpace(v.APIURL),
+					AccountID:  strings.TrimSpace(v.AccountID),
+					AuthToken:  token,
+					SenderID:   strings.TrimSpace(v.SenderID),
+					HTTPMethod: strings.ToUpper(strings.TrimSpace(v.HTTPMethod)),
+				}
+			}
+			payload.SMSProfiles = cleanedSMS
+		}
+	}
+	if payload.SMSProfiles == nil && len(cHandler.cfg.SMS.Profiles) > 0 {
+		payload.SMSProfiles = make(map[string]config.SMSGatewayProfile, len(cHandler.cfg.SMS.Profiles))
+		for k, v := range cHandler.cfg.SMS.Profiles {
+			payload.SMSProfiles[k] = v
+		}
+	}
+
 	// ITA API Integration & User Whitelist
 	payload.ITAAPIURL = strings.TrimSpace(c.PostForm("ita_api_url"))
 	payload.ITAAPIUsername = strings.TrimSpace(c.PostForm("ita_api_username"))
@@ -639,6 +690,25 @@ func (cHandler *SAMLHandler) HandleAdminSettingsPost(c *gin.Context) {
 	// Preserve existing secrets and manual allowlist when omitted from the form submission
 	if payload.SMTPPassword == "" {
 		payload.SMTPPassword = cHandler.cfg.SMTP.Password
+	}
+	if payload.SMSAuthToken == "" {
+		if cHandler.cfg.SMS.Profiles != nil {
+			if prev, ok := cHandler.cfg.SMS.Profiles[payload.SMSProvider]; ok && prev.AuthToken != "" {
+				payload.SMSAuthToken = prev.AuthToken
+			}
+		}
+		if payload.SMSAuthToken == "" && payload.SMSProvider == cHandler.cfg.SMS.EffectiveProvider() {
+			payload.SMSAuthToken = cHandler.cfg.SMS.AuthToken
+		}
+	}
+	if payload.SMSProfiles != nil {
+		activeSMSProfile := payload.SMSProfiles[payload.SMSProvider]
+		activeSMSProfile.APIURL = payload.SMSAPIURL
+		activeSMSProfile.AccountID = payload.SMSAccountID
+		activeSMSProfile.AuthToken = payload.SMSAuthToken
+		activeSMSProfile.SenderID = payload.SMSSenderID
+		activeSMSProfile.HTTPMethod = payload.SMSHTTPMethod
+		payload.SMSProfiles[payload.SMSProvider] = activeSMSProfile
 	}
 	if payload.ITAAPIPassword == "" {
 		payload.ITAAPIPassword = cHandler.cfg.ITA.APIPassword
@@ -674,7 +744,7 @@ func (cHandler *SAMLHandler) HandleAdminSettingsPost(c *gin.Context) {
 	config.ApplyAdminSettings(cHandler.cfg, &payload)
 	cHandler.ReloadIDPCertStore()
 
-	// Hot-reload SMTP sender on active MFA service
+	// Hot-reload SMTP & SMS senders on active MFA service
 	newSMTPSender := mfa.NewSMTPSender(
 		cHandler.cfg.SMTP.Host,
 		cHandler.cfg.SMTP.Port,
@@ -686,6 +756,9 @@ func (cHandler *SAMLHandler) HandleAdminSettingsPost(c *gin.Context) {
 		cHandler.logger,
 	)
 	cHandler.mfaService.UpdateSMTPSender(newSMTPSender)
+
+	newSMSSender := mfa.NewSMSSender(cHandler.cfg.SMS, cHandler.cfg.Env, cHandler.logger)
+	cHandler.mfaService.UpdateSMSSender(newSMSSender)
 
 	cHandler.recordAudit("admin_settings_update", "success",
 		zap.String("admin", adminUsername),
@@ -818,6 +891,7 @@ func (h *SAMLHandler) HandleAdminUserAddPost(c *gin.Context) {
 	var req struct {
 		Username string `json:"username"`
 		Email    string `json:"email"`
+		Phone    string `json:"phone"`
 		FullName string `json:"full_name"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Username) == "" {
@@ -828,6 +902,7 @@ func (h *SAMLHandler) HandleAdminUserAddPost(c *gin.Context) {
 	user := mfa.AuthorizedUser{
 		Username: strings.TrimSpace(req.Username),
 		Email:    strings.TrimSpace(req.Email),
+		Phone:    mfa.NormalizePhoneNumber(req.Phone),
 		FullName: strings.TrimSpace(req.FullName),
 		Source:   "manual",
 	}
@@ -981,6 +1056,117 @@ func (h *SAMLHandler) HandleAdminTestEmailPost(c *gin.Context) {
 	})
 }
 
+// HandleAdminUserUpdatePhonePost handles POST /admin/users/update-phone to assign or update a user's SMS phone number.
+func (h *SAMLHandler) HandleAdminUserUpdatePhonePost(c *gin.Context) {
+	var req struct {
+		Username string `json:"username"`
+		Phone    string `json:"phone"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Username) == "" {
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": "Username is required"})
+		return
+	}
+	if h.mfaService == nil || h.mfaService.Storage() == nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": "Database storage unavailable"})
+		return
+	}
+
+	targetUser := strings.TrimSpace(req.Username)
+	normPhone := mfa.NormalizePhoneNumber(req.Phone)
+	if err := h.mfaService.Storage().UpdateAuthorizedUserPhone(c.Request.Context(), targetUser, normPhone); err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	adminUser, _ := c.Get("admin_username")
+	adminUsername, _ := adminUser.(string)
+	h.recordAudit("admin_user_phone_update", "success",
+		zap.String("admin", adminUsername),
+		zap.String("target_user", targetUser),
+		zap.String("remote_ip", c.ClientIP()),
+	)
+
+	msg := fmt.Sprintf("Cleared SMS phone number for user '%s'.", targetUser)
+	if normPhone != "" {
+		msg = fmt.Sprintf("Updated SMS phone number for '%s' to %s.", targetUser, mfa.MaskPhone(normPhone))
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": msg, "phone": normPhone})
+}
+
+// HandleAdminTestSMSPost executes a live SMS gateway test and returns JSON status.
+func (h *SAMLHandler) HandleAdminTestSMSPost(c *gin.Context) {
+	var req struct {
+		Recipient       string `json:"recipient"`
+		Provider        string `json:"provider"`
+		APIURL          string `json:"api_url"`
+		AccountID       string `json:"account_id"`
+		AuthToken       string `json:"auth_token"`
+		SenderID        string `json:"sender_id"`
+		HTTPMethod      string `json:"http_method"`
+		MessageTemplate string `json:"message_template"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": "Invalid request payload: " + err.Error()})
+		return
+	}
+
+	recipient := mfa.NormalizePhoneNumber(req.Recipient)
+	if recipient == "" {
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": "Valid recipient mobile number (e.g. +60123456789) is required."})
+		return
+	}
+
+	provider := config.NormalizeSMSProvider(req.Provider)
+	if provider == "" {
+		provider = h.cfg.SMS.EffectiveProvider()
+	}
+
+	authToken := req.AuthToken
+	if authToken == "" {
+		if prof := h.cfg.SMS.ProfileForProvider(provider); prof.AuthToken != "" {
+			authToken = prof.AuthToken
+		} else if provider == h.cfg.SMS.EffectiveProvider() {
+			authToken = h.cfg.SMS.AuthToken
+		}
+	}
+
+	smsCfg := config.SMSConfig{
+		Provider:        provider,
+		APIURL:          strings.TrimSpace(req.APIURL),
+		AccountID:       strings.TrimSpace(req.AccountID),
+		AuthToken:       authToken,
+		SenderID:        strings.TrimSpace(req.SenderID),
+		HTTPMethod:      strings.ToUpper(strings.TrimSpace(req.HTTPMethod)),
+		MessageTemplate: strings.TrimSpace(req.MessageTemplate),
+	}
+
+	start := time.Now()
+	err := h.mfaService.TestSMS(c.Request.Context(), smsCfg, recipient)
+	duration := time.Since(start).Round(time.Millisecond)
+	if err != nil {
+		h.logger.Warn("admin test SMS failed",
+			zap.String("provider", provider),
+			zap.String("recipient", mfa.MaskPhone(recipient)),
+			zap.Error(err),
+		)
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"error":   fmt.Sprintf("%v (Attempted in %v)", err, duration),
+		})
+		return
+	}
+
+	h.logger.Info("admin test SMS sent successfully",
+		zap.String("provider", provider),
+		zap.String("recipient", mfa.MaskPhone(recipient)),
+		zap.Duration("duration", duration),
+	)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": fmt.Sprintf("Test SMS dispatched via %s to %s in %v!", strings.ToUpper(provider), mfa.MaskPhone(recipient), duration),
+	})
+}
+
 // HandleAdminCertDownload allows downloading public certificates directly from the UI.
 func (h *SAMLHandler) HandleAdminCertDownload(c *gin.Context) {
 	certType := strings.TrimSpace(c.Query("type"))
@@ -1036,6 +1222,29 @@ func (h *SAMLHandler) buildAdminViewModel(adminUsername, successMsg, errorMsg st
 		mfaDefaultProvider = "select"
 	}
 
+	smsProvider := h.cfg.SMS.EffectiveProvider()
+	smsProfilesView := make(map[string]config.SMSGatewayProfile)
+	for k, v := range h.cfg.SMS.Profiles {
+		normKey := config.NormalizeSMSProvider(k)
+		if normKey == "" {
+			continue
+		}
+		v.AuthToken = "" // Never expose SMS auth tokens in browser template JSON
+		smsProfilesView[normKey] = v
+	}
+	if _, ok := smsProfilesView[smsProvider]; !ok {
+		smsProfilesView[smsProvider] = config.SMSGatewayProfile{
+			APIURL:     h.cfg.SMS.APIURL,
+			AccountID:  h.cfg.SMS.AccountID,
+			SenderID:   h.cfg.SMS.SenderID,
+			HTTPMethod: h.cfg.SMS.HTTPMethod,
+		}
+	}
+	smsProfilesJSON := "{}"
+	if b, err := json.Marshal(smsProfilesView); err == nil {
+		smsProfilesJSON = string(b)
+	}
+
 	payload := &config.AdminSettingsPayload{
 		ActiveIdP:             activeIdP,
 		EnabledIdPs:           enabledIdPs,
@@ -1062,6 +1271,13 @@ func (h *SAMLHandler) buildAdminViewModel(adminUsername, successMsg, errorMsg st
 		SMTPFrom:              h.cfg.SMTP.From,
 		SMTPFromName:          h.cfg.SMTP.FromName,
 		SMTPEncryption:        h.cfg.SMTP.Encryption,
+		SMSProvider:           smsProvider,
+		SMSAPIURL:             h.cfg.SMS.APIURL,
+		SMSAccountID:          h.cfg.SMS.AccountID,
+		SMSSenderID:           h.cfg.SMS.SenderID,
+		SMSHTTPMethod:         h.cfg.SMS.HTTPMethod,
+		SMSMessageTemplate:    h.cfg.SMS.MessageTemplate,
+		SMSProfiles:           smsProfilesView,
 		ITAAPIURL:             h.cfg.ITA.APIURL,
 		ITAAPIUsername:        h.cfg.ITA.APIUsername,
 		ITAEnforceWhitelist:   h.cfg.ITA.EnforceUserWhitelist,
@@ -1091,6 +1307,9 @@ func (h *SAMLHandler) buildAdminViewModel(adminUsername, successMsg, errorMsg st
 		IdPProfilesJSON:     template.JS(profilesJSON),
 		TotpEnabled:         h.cfg.MFA.IsProviderEnabled("totp"),
 		EmailEnabled:        h.cfg.MFA.IsProviderEnabled("email"),
+		SMSEnabled:          h.cfg.MFA.IsProviderEnabled("sms"),
+		SMSProvider:         smsProvider,
+		SMSProfilesJSON:     template.JS(smsProfilesJSON),
 		Port:                h.cfg.Server.Port,
 		AllowedAudiencesStr: strings.Join(h.cfg.SAML.AllowedAudiences, ", "),
 		CertInfo:            certInfo,

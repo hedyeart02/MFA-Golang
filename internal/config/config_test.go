@@ -559,7 +559,7 @@ func TestConfig_Validate_UpstreamIdPAndMFAProviders(t *testing.T) {
 
 	// Unsupported MFA provider must fail validation
 	cfg = validProdConfig()
-	cfg.MFA.EnabledProviders = []string{"sms"}
+	cfg.MFA.EnabledProviders = []string{"push"}
 	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "enabled_providers") {
 		t.Fatalf("expected error for unsupported enabled_providers entry, got: %v", err)
 	}
@@ -638,6 +638,71 @@ func TestConfig_MultiEnabledIdPsAndMethodSelect(t *testing.T) {
 	prodCfg.MFA.DefaultProvider = "select"
 	if err := prodCfg.Validate(); err != nil {
 		t.Fatalf("expected default_provider=select to validate cleanly in multi-OTP mode, got: %v", err)
+	}
+}
+
+func TestConfig_SMSValidationAndRedaction(t *testing.T) {
+	if NormalizeSMSProvider(" SendQuick ") != "sendquick" || NormalizeSMSProvider("nexmo") != "vonage" ||
+		NormalizeSMSProvider("sms-eagle") != "smseagle" || NormalizeSMSProvider("smsfinder") != "multitech" ||
+		NormalizeSMSProvider("rut955") != "teltonika" {
+		t.Fatalf("unexpected NormalizeSMSProvider output")
+	}
+
+	// SMSEagle allows token-only auth in production as long as HTTPS URL + auth_token are configured
+	eagleCfg := validProdConfig()
+	eagleCfg.MFA.EnabledProviders = []string{"totp", "sms"}
+	eagleCfg.SMS.Provider = "smseagle"
+	eagleCfg.SMS.APIURL = "https://smseagle.corp.local/index.php/http_api/send_sms"
+	eagleCfg.SMS.AuthToken = "eagle-token-123"
+	if err := eagleCfg.Validate(); err != nil {
+		t.Fatalf("expected token-only SMSEagle production config to pass, got: %v", err)
+	}
+
+	// MultiTech & Teltonika require HTTPS in production
+	for _, hwProv := range []string{"multitech", "teltonika"} {
+		hwCfg := validProdConfig()
+		hwCfg.MFA.EnabledProviders = []string{"totp", "sms"}
+		hwCfg.SMS.Provider = hwProv
+		hwCfg.SMS.APIURL = "http://192.168.1.50/send"
+		hwCfg.SMS.AccountID = "admin"
+		hwCfg.SMS.AuthToken = "pass"
+		if err := hwCfg.Validate(); err == nil || !strings.Contains(err.Error(), "HTTPS") {
+			t.Fatalf("expected HTTPS enforcement error for hardware SMS %s in production, got: %v", hwProv, err)
+		}
+	}
+
+	// Production validation requires SMS gateway credentials when "sms" is active
+	cfg := validProdConfig()
+	cfg.MFA.EnabledProviders = []string{"totp", "sms"}
+	cfg.SMS.Provider = "sendquick"
+	cfg.SMS.APIURL = "https://sq.corp.local/send"
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "sms.account_id") {
+		t.Fatalf("expected error for missing sendquick credentials in production, got: %v", err)
+	}
+
+	cfg.SMS.AccountID = "sq_user"
+	cfg.SMS.AuthToken = "sq_secret"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected valid SendQuick production config to pass, got: %v", err)
+	}
+
+	// Redacted masks SMS AuthToken and profile tokens
+	cfg.SMS.Profiles = map[string]SMSGatewayProfile{
+		"twilio": {
+			APIURL:    "https://api.twilio.com/2010-04-01",
+			AccountID: "AC123",
+			AuthToken: "twilio-tok",
+		},
+	}
+	redacted := cfg.Redacted()
+	if redacted.SMS.AuthToken != "[REDACTED]" {
+		t.Errorf("expected redacted SMS.AuthToken, got %q", redacted.SMS.AuthToken)
+	}
+	if redacted.SMS.Profiles["twilio"].AuthToken != "[REDACTED]" {
+		t.Errorf("expected redacted SMS profile AuthToken, got %q", redacted.SMS.Profiles["twilio"].AuthToken)
+	}
+	if cfg.SMS.AuthToken != "sq_secret" {
+		t.Errorf("expected original SMS.AuthToken untouched by Redacted()")
 	}
 }
 

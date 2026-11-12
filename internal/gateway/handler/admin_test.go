@@ -736,3 +736,109 @@ func TestAdminSettings_MultiIdPAndSelectFlow(t *testing.T) {
 		t.Errorf("expected DefaultProvider 'select' preserved, got %q", h.cfg.MFA.DefaultProvider)
 	}
 }
+
+func TestAdminSettings_SMSProfilesTestAndUserPhone(t *testing.T) {
+	r, h, _ := setupTestAdminHandler(t)
+
+	// 1. Save Multi-OTP including SMS with Twilio + SendQuick integration profiles
+	smsProfilesJSON := `{"twilio":{"api_url":"https://api.twilio.com/2010-04-01","account_id":"AC111","auth_token":"twilio-secret-token","sender_id":"+15550001234","http_method":"POST"}}`
+	form := url.Values{
+		"idp_providers_submitted": {"1"},
+		"enabled_idps[]":          {"simulator"},
+		"active_idp":              {"simulator"},
+		"idp_entity_id":           {h.cfg.SAML.IdPEntityID},
+		"idp_sso_url":             {h.cfg.SAML.IdPSSOURL},
+		"entity_id":               {h.cfg.SAML.EntityID},
+		"acs_url":                 {h.cfg.SAML.ACSURL},
+		"mfa_providers_submitted": {"1"},
+		"mfa_enabled_providers[]": {"totp", "email", "sms"},
+		"mfa_default_provider":    {"select"},
+		"mfa_issuer":              {"SAMLGuard"},
+		"otp_expiry":              {"5m"},
+		"resend_cooldown":         {"60s"},
+		"smtp_host":               {"localhost"},
+		"smtp_port":               {"1025"},
+		"sms_provider":            {"sendquick"},
+		"sms_api_url":             {"mock://dev"},
+		"sms_account_id":          {"sq_user"},
+		"sms_auth_token":          {"sq-secret-token"},
+		"sms_sender_id":           {"SAMLGuard"},
+		"sms_http_method":         {"POST"},
+		"sms_message_template":    {"Your SAMLGuard OTP is {code}"},
+		"sms_profiles_json":       {smsProfilesJSON},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/settings", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Configuration updated successfully") {
+		t.Fatalf("expected SMS settings save success, got %d: %s", w.Code, w.Body.String())
+	}
+	if !h.cfg.MFA.IsProviderEnabled("sms") || h.cfg.SMS.Provider != "sendquick" || h.cfg.SMS.AuthToken != "sq-secret-token" {
+		t.Fatalf("unexpected runtime SMS config after save: %+v", h.cfg.SMS)
+	}
+	if h.cfg.SMS.ProfileForProvider("twilio").AuthToken != "twilio-secret-token" {
+		t.Fatalf("expected Twilio profile token saved alongside SendQuick")
+	}
+
+	// 2. Re-submit with blank sms_auth_token -> preserves existing sq-secret-token
+	form.Set("sms_auth_token", "")
+	form.Set("sms_profiles_json", "")
+	req2 := httptest.NewRequest(http.MethodPost, "/admin/settings", strings.NewReader(form.Encode()))
+	req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w2 := httptest.NewRecorder()
+	r.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK || h.cfg.SMS.AuthToken != "sq-secret-token" {
+		t.Fatalf("expected blank sms_auth_token submission to preserve stored secret, got %q", h.cfg.SMS.AuthToken)
+	}
+
+	// 3. Test live SMS gateway test endpoint (/admin/settings/test-sms)
+	r.POST("/admin/settings/test-sms", h.HandleAdminTestSMSPost)
+	r.POST("/admin/users/update-phone", h.HandleAdminUserUpdatePhonePost)
+
+	testSMSBody := `{"recipient":"+60123456789","provider":"sendquick","api_url":"mock://dev","account_id":"sq_user","sender_id":"SAMLGuard"}`
+	reqTest := httptest.NewRequest(http.MethodPost, "/admin/settings/test-sms", bytes.NewBufferString(testSMSBody))
+	reqTest.Header.Set("Content-Type", "application/json")
+	wTest := httptest.NewRecorder()
+	r.ServeHTTP(wTest, reqTest)
+	var testResp map[string]any
+	if err := json.Unmarshal(wTest.Body.Bytes(), &testResp); err != nil || testResp["success"] != true {
+		t.Fatalf("expected HandleAdminTestSMSPost success, got %s", wTest.Body.String())
+	}
+
+	// 4. Add authorized user with phone & update phone via /admin/users/update-phone
+	addBody := `{"username":"alice_sms","email":"alice@example.com","phone":"+60129998877","full_name":"Alice SMS"}`
+	reqAdd := httptest.NewRequest(http.MethodPost, "/admin/users/add", bytes.NewBufferString(addBody))
+	reqAdd.Header.Set("Content-Type", "application/json")
+	wAdd := httptest.NewRecorder()
+	r.ServeHTTP(wAdd, reqAdd)
+	if !strings.Contains(wAdd.Body.String(), `"success":true`) {
+		t.Fatalf("expected user add success, got: %s", wAdd.Body.String())
+	}
+
+	updBody := `{"username":"alice_sms","phone":"+6581112222"}`
+	reqUpd := httptest.NewRequest(http.MethodPost, "/admin/users/update-phone", bytes.NewBufferString(updBody))
+	reqUpd.Header.Set("Content-Type", "application/json")
+	wUpd := httptest.NewRecorder()
+	r.ServeHTTP(wUpd, reqUpd)
+	if !strings.Contains(wUpd.Body.String(), `+6581112222`) {
+		t.Fatalf("expected updated phone response, got: %s", wUpd.Body.String())
+	}
+	if got := h.mfaService.LookupUserPhone(context.Background(), "alice_sms"); got != "+6581112222" {
+		t.Fatalf("expected persisted updated phone '+6581112222', got %q", got)
+	}
+
+	// 5. Render /admin/settings and verify hardware SMS gateway presets (SendQuick, SMSEagle, MultiTech, Teltonika) render
+	wSettings := httptest.NewRecorder()
+	r.ServeHTTP(wSettings, httptest.NewRequest(http.MethodGet, "/admin/settings", nil))
+	if wSettings.Code != http.StatusOK {
+		t.Fatalf("expected 200 GET /admin/settings, got %d", wSettings.Code)
+	}
+	settingsBody := wSettings.Body.String()
+	for _, want := range []string{"SendQuick", "SMSEagle", "MultiTech iSMS", "Teltonika RUT/TRB", "data-sms-choice=\"smseagle\"", "data-sms-choice=\"multitech\"", "data-sms-choice=\"teltonika\""} {
+		if !strings.Contains(settingsBody, want) {
+			t.Errorf("expected admin settings HTML to include hardware SMS provider %q", want)
+		}
+	}
+}

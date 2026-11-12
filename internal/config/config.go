@@ -28,6 +28,7 @@ type Config struct {
 	Plugins  PluginsConfig  `mapstructure:"plugins"`
 	Security SecurityConfig `mapstructure:"security"`
 	SMTP     SMTPConfig     `mapstructure:"smtp"`
+	SMS      SMSConfig      `mapstructure:"sms"`
 	ITA      ITAConfig      `mapstructure:"ita"`
 	Env      string         `mapstructure:"env"`
 
@@ -218,13 +219,13 @@ type MFAConfig struct {
 	ServerPepper     string        `mapstructure:"server_pepper"`
 }
 
-// NormalizeMFAProviders filters and deduplicates supported OTP provider names ("totp", "email").
+// NormalizeMFAProviders filters and deduplicates supported OTP provider names ("totp", "email", "sms").
 func NormalizeMFAProviders(providers []string) []string {
 	seen := make(map[string]struct{}, len(providers))
 	var out []string
 	for _, p := range providers {
 		norm := strings.ToLower(strings.TrimSpace(p))
-		if norm != "totp" && norm != "email" {
+		if norm != "totp" && norm != "email" && norm != "sms" {
 			continue
 		}
 		if _, ok := seen[norm]; !ok {
@@ -292,6 +293,75 @@ type SMTPConfig struct {
 	From       string `mapstructure:"from"`
 	FromName   string `mapstructure:"from_name"`
 	Encryption string `mapstructure:"encryption"` // "starttls", "tls", "none"
+}
+
+// SMSGatewayProfile stores endpoint and credential settings for a single SMS gateway provider.
+type SMSGatewayProfile struct {
+	APIURL     string `json:"api_url" mapstructure:"api_url" yaml:"api_url"`
+	AccountID  string `json:"account_id" mapstructure:"account_id" yaml:"account_id"`
+	AuthToken  string `json:"auth_token" mapstructure:"auth_token" yaml:"auth_token"`
+	SenderID   string `json:"sender_id" mapstructure:"sender_id" yaml:"sender_id"`
+	HTTPMethod string `json:"http_method" mapstructure:"http_method" yaml:"http_method"`
+}
+
+// SMSConfig configures SMS OTP delivery across built-in cloud & hardware gateway profiles
+// ("twilio", "isms", "sendquick", "smseagle", "multitech", "teltonika", "vonage", "custom").
+type SMSConfig struct {
+	Provider        string                       `mapstructure:"provider"`
+	APIURL          string                       `mapstructure:"api_url"`
+	AccountID       string                       `mapstructure:"account_id"`
+	AuthToken       string                       `mapstructure:"auth_token"`
+	SenderID        string                       `mapstructure:"sender_id"`
+	HTTPMethod      string                       `mapstructure:"http_method"`
+	MessageTemplate string                       `mapstructure:"message_template"`
+	Timeout         time.Duration                `mapstructure:"timeout"`
+	Profiles        map[string]SMSGatewayProfile `mapstructure:"profiles"`
+}
+
+// NormalizeSMSProvider normalizes a supported SMS gateway provider key or returns empty string if invalid.
+func NormalizeSMSProvider(provider string) string {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "twilio", "isms", "sendquick", "smseagle", "multitech", "teltonika", "vonage", "custom":
+		return strings.ToLower(strings.TrimSpace(provider))
+	case "sms-eagle":
+		return "smseagle"
+	case "smsfinder", "multitech-isms":
+		return "multitech"
+	case "rut", "rut240", "rut955", "trb140":
+		return "teltonika"
+	case "nexmo":
+		return "vonage"
+	default:
+		return ""
+	}
+}
+
+// EffectiveProvider returns the active SMS gateway provider key, defaulting to "twilio".
+func (s SMSConfig) EffectiveProvider() string {
+	if norm := NormalizeSMSProvider(s.Provider); norm != "" {
+		return norm
+	}
+	return "twilio"
+}
+
+// ProfileForProvider returns the stored SMSGatewayProfile for key, falling back to top-level fields if matching the active provider.
+func (s SMSConfig) ProfileForProvider(key string) SMSGatewayProfile {
+	norm := strings.ToLower(strings.TrimSpace(key))
+	if s.Profiles != nil {
+		if prof, ok := s.Profiles[norm]; ok {
+			return prof
+		}
+	}
+	if norm == s.EffectiveProvider() {
+		return SMSGatewayProfile{
+			APIURL:     s.APIURL,
+			AccountID:  s.AccountID,
+			AuthToken:  s.AuthToken,
+			SenderID:   s.SenderID,
+			HTTPMethod: s.HTTPMethod,
+		}
+	}
+	return SMSGatewayProfile{}
 }
 
 type ITAConfig struct {
@@ -398,6 +468,9 @@ func SetDefaults(v *viper.Viper) {
 	v.SetDefault("mfa.resend_cooldown", 60*time.Second)
 
 	v.SetDefault("smtp.port", 587)
+	v.SetDefault("sms.provider", "twilio")
+	v.SetDefault("sms.timeout", 15*time.Second)
+	v.SetDefault("sms.message_template", "Your SAMLGuard verification code is: {{code}}")
 	v.SetDefault("smtp.encryption", "starttls")
 
 	v.SetDefault("ita.api_url", "https://ita.example.com/api/current")
@@ -642,17 +715,20 @@ func (c *Config) Validate() error {
 
 	for _, p := range c.MFA.EnabledProviders {
 		norm := strings.ToLower(strings.TrimSpace(p))
-		if norm != "" && norm != "totp" && norm != "email" {
-			return fmt.Errorf("invalid mfa.enabled_providers entry %q: must be 'totp' or 'email'", p)
+		if norm != "" && norm != "totp" && norm != "email" && norm != "sms" {
+			return fmt.Errorf("invalid mfa.enabled_providers entry %q: must be 'totp', 'email', or 'sms'", p)
 		}
 	}
 	if def := strings.ToLower(strings.TrimSpace(c.MFA.DefaultProvider)); def != "" {
-		if def != "totp" && def != "email" && def != "select" {
-			return fmt.Errorf("invalid mfa.default_provider %q: must be 'totp', 'email', or 'select'", c.MFA.DefaultProvider)
+		if def != "totp" && def != "email" && def != "sms" && def != "select" {
+			return fmt.Errorf("invalid mfa.default_provider %q: must be 'totp', 'email', 'sms', or 'select'", c.MFA.DefaultProvider)
 		}
 		if def != "select" && len(c.MFA.EnabledProviders) > 0 && !c.MFA.IsProviderEnabled(def) {
 			return fmt.Errorf("mfa.default_provider %q must be included in mfa.enabled_providers", c.MFA.DefaultProvider)
 		}
+	}
+	if smsProv := strings.TrimSpace(c.SMS.Provider); smsProv != "" && NormalizeSMSProvider(smsProv) == "" {
+		return fmt.Errorf("invalid sms.provider %q: must be 'twilio', 'isms', 'sendquick', 'vonage', or 'custom'", c.SMS.Provider)
 	}
 
 	if c.IsProduction() {
@@ -680,6 +756,26 @@ func (c *Config) Validate() error {
 			host := strings.TrimSpace(strings.ToLower(c.SMTP.Host))
 			if host == "" || host == "localhost" || host == "127.0.0.1" {
 				return errors.New("security violation: smtp.host must be configured with a real external SMTP server in production mode")
+			}
+		}
+		if c.MFA.IsProviderEnabled("sms") {
+			smsProv := c.SMS.EffectiveProvider()
+			tokenOnlyAllowed := smsProv == "smseagle" || smsProv == "custom"
+			if strings.TrimSpace(c.SMS.AuthToken) == "" || (!tokenOnlyAllowed && strings.TrimSpace(c.SMS.AccountID) == "") {
+				return fmt.Errorf("security violation: sms.account_id and sms.auth_token must be configured for %s in production mode", smsProv)
+			}
+			smsURL := strings.TrimSpace(c.SMS.APIURL)
+			switch smsProv {
+			case "sendquick", "smseagle", "multitech", "teltonika", "custom":
+				if err := requireHTTPS("sms.api_url", smsURL); err != nil {
+					return err
+				}
+			default:
+				if smsURL != "" {
+					if err := requireHTTPS("sms.api_url", smsURL); err != nil {
+						return err
+					}
+				}
 			}
 		}
 
@@ -751,6 +847,19 @@ func (c *Config) Redacted() *Config {
 	}
 	if copy.SMTP.Password != "" {
 		copy.SMTP.Password = "[REDACTED]"
+	}
+	if copy.SMS.AuthToken != "" {
+		copy.SMS.AuthToken = "[REDACTED]"
+	}
+	if len(copy.SMS.Profiles) > 0 {
+		redactedProfiles := make(map[string]SMSGatewayProfile, len(copy.SMS.Profiles))
+		for k, prof := range copy.SMS.Profiles {
+			if prof.AuthToken != "" {
+				prof.AuthToken = "[REDACTED]"
+			}
+			redactedProfiles[k] = prof
+		}
+		copy.SMS.Profiles = redactedProfiles
 	}
 	if copy.ITA.APIPassword != "" {
 		copy.ITA.APIPassword = "[REDACTED]"

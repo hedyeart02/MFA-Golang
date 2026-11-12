@@ -1718,6 +1718,10 @@
                                     <input type="radio" id="default_provider_email" name="mfa_default_provider" value="email" {{if eq .Settings.MFADefaultProvider "email"}}checked{{end}} onchange="syncOTPProviderState()">
                                     <span>📧 Email OTP</span>
                                 </label>
+                                <label style="font-weight: normal; display: flex; align-items: center; gap: 0.45rem; cursor: pointer; margin-bottom: 0;">
+                                    <input type="radio" id="default_provider_sms" name="mfa_default_provider" value="sms" {{if eq .Settings.MFADefaultProvider "sms"}}checked{{end}} onchange="syncOTPProviderState()">
+                                    <span>💬 SMS OTP</span>
+                                </label>
                             </div>
                             <p class="help-text">When multiple OTP methods are active, choose whether customers see the vertical "Select a method to verify your identity" list first or land directly on a default method (with a Back button to switch).</p>
                         </div>
@@ -1850,6 +1854,167 @@
                                         </div>
                                         <div id="testEmailResult" style="margin-top: 0.75rem; display: none;"></div>
                                     </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- SMS Gateway OTP Provider Card -->
+                        <div class="otp-provider-card {{if .SMSEnabled}}active{{else}}inactive{{end}}" id="card-otp-sms" style="margin-top: 1.25rem;">
+                            <div class="otp-provider-head">
+                                <div>
+                                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                        <h3 style="margin: 0; font-size: 1rem;">💬 SMS OTP (Gateway Profiles)</h3>
+                                        <span class="badge {{if .SMSEnabled}}badge-success{{else}}badge-warning{{end}}" id="badge-otp-sms">{{if .SMSEnabled}}Active{{else}}Disabled{{end}}</span>
+                                    </div>
+                                    <p class="help-text" style="margin-top: 0.25rem;">Delivers single-use SMS OTP verification codes via Twilio, iSMS Malaysia, SendQuick, Vonage, or Custom HTTP webhook.</p>
+                                </div>
+                                <label class="toggle-label" style="margin: 0;" title="Activate SMS OTP">
+                                    <input type="checkbox" id="otp_enable_sms" name="mfa_enabled_providers[]" value="sms" {{if .SMSEnabled}}checked{{end}} onchange="onOTPToggleChange(this)">
+                                    <span class="toggle-switch"></span>
+                                </label>
+                            </div>
+
+                            <div id="sms-otp-settings-body">
+                                <input type="hidden" id="sms_provider" name="sms_provider" value="{{.SMSProvider}}">
+                                <input type="hidden" id="sms_profiles_json" name="sms_profiles_json" value="">
+
+                                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.65rem;">
+                                    <label style="margin: 0; font-size: 0.85rem;">Select SMS Gateway Integration Profile (Cloud &amp; Hardware Appliances)</label>
+                                    <div style="display: flex; flex-wrap: wrap; gap: 0.4rem;">
+                                        <button type="button" class="btn btn-sm btn-secondary" onclick="applySMSPreset('twilio')">Twilio</button>
+                                        <button type="button" class="btn btn-sm btn-secondary" onclick="applySMSPreset('isms')">iSMS</button>
+                                        <button type="button" class="btn btn-sm btn-secondary" onclick="applySMSPreset('vonage')">Vonage</button>
+                                        <button type="button" class="btn btn-sm btn-secondary" onclick="applySMSPreset('sendquick')">SendQuick HW</button>
+                                        <button type="button" class="btn btn-sm btn-secondary" onclick="applySMSPreset('smseagle')">SMSEagle HW</button>
+                                        <button type="button" class="btn btn-sm btn-secondary" onclick="applySMSPreset('multitech')">MultiTech HW</button>
+                                        <button type="button" class="btn btn-sm btn-secondary" onclick="applySMSPreset('teltonika')">Teltonika HW</button>
+                                        <button type="button" class="btn btn-sm btn-secondary" onclick="applySMSPreset('mock')">Local Dev Mock</button>
+                                    </div>
+                                </div>
+
+                                <div class="idp-selector-grid" role="group" aria-label="SMS Gateway Provider Profiles" style="margin-bottom: 1rem;">
+                                    <div class="idp-option-card {{if eq .SMSProvider "twilio"}}active editing{{end}}" data-sms-choice="twilio" onclick="selectSMSProvider('twilio')">
+                                        <div class="idp-option-header">
+                                            <div class="idp-option-title"><span>🔴 Twilio</span></div>
+                                            <span class="badge {{if eq .SMSProvider "twilio"}}badge-success{{else}}badge-info{{end}}" data-sms-badge="twilio">{{if eq .SMSProvider "twilio"}}Selected{{else}}Cloud API{{end}}</span>
+                                        </div>
+                                        <div class="idp-option-desc">Twilio Programmable SMS REST API using Account SID, Auth Token &amp; From number.</div>
+                                    </div>
+
+                                    <div class="idp-option-card {{if eq .SMSProvider "isms"}}active editing{{end}}" data-sms-choice="isms" onclick="selectSMSProvider('isms')">
+                                        <div class="idp-option-header">
+                                            <div class="idp-option-title"><span>🟡 iSMS</span></div>
+                                            <span class="badge {{if eq .SMSProvider "isms"}}badge-success{{else}}badge-info{{end}}" data-sms-badge="isms">{{if eq .SMSProvider "isms"}}Selected{{else}}Cloud API{{end}}</span>
+                                        </div>
+                                        <div class="idp-option-desc">iSMS (Malaysia / Regional) HTTP Gateway (<code>isms_send_all_id.php</code>).</div>
+                                    </div>
+
+                                    <div class="idp-option-card {{if eq .SMSProvider "vonage"}}active editing{{end}}" data-sms-choice="vonage" onclick="selectSMSProvider('vonage')">
+                                        <div class="idp-option-header">
+                                            <div class="idp-option-title"><span>🟣 Vonage</span></div>
+                                            <span class="badge {{if eq .SMSProvider "vonage"}}badge-success{{else}}badge-info{{end}}" data-sms-badge="vonage">{{if eq .SMSProvider "vonage"}}Selected{{else}}Cloud API{{end}}</span>
+                                        </div>
+                                        <div class="idp-option-desc">Vonage (Nexmo) SMS REST JSON API with API Key &amp; API Secret.</div>
+                                    </div>
+
+                                    <div class="idp-option-card {{if eq .SMSProvider "sendquick"}}active editing{{end}}" data-sms-choice="sendquick" onclick="selectSMSProvider('sendquick')">
+                                        <div class="idp-option-header">
+                                            <div class="idp-option-title"><span>🟢 SendQuick</span></div>
+                                            <span class="badge {{if eq .SMSProvider "sendquick"}}badge-success{{else}}badge-info{{end}}" data-sms-badge="sendquick">{{if eq .SMSProvider "sendquick"}}Selected{{else}}Hardware{{end}}</span>
+                                        </div>
+                                        <div class="idp-option-desc">TalariaX SendQuick Hardware / On-Premise SMS Appliance (<code>tar_num</code>/<code>tar_msg</code>).</div>
+                                    </div>
+
+                                    <div class="idp-option-card {{if eq .SMSProvider "smseagle"}}active editing{{end}}" data-sms-choice="smseagle" onclick="selectSMSProvider('smseagle')">
+                                        <div class="idp-option-header">
+                                            <div class="idp-option-title"><span>🦅 SMSEagle</span></div>
+                                            <span class="badge {{if eq .SMSProvider "smseagle"}}badge-success{{else}}badge-info{{end}}" data-sms-badge="smseagle">{{if eq .SMSProvider "smseagle"}}Selected{{else}}Hardware{{end}}</span>
+                                        </div>
+                                        <div class="idp-option-desc">SMSEagle Hardware SIM-Card Gateway (<code>/index.php/http_api/send_sms</code>).</div>
+                                    </div>
+
+                                    <div class="idp-option-card {{if eq .SMSProvider "multitech"}}active editing{{end}}" data-sms-choice="multitech" onclick="selectSMSProvider('multitech')">
+                                        <div class="idp-option-header">
+                                            <div class="idp-option-title"><span>📡 MultiTech iSMS</span></div>
+                                            <span class="badge {{if eq .SMSProvider "multitech"}}badge-success{{else}}badge-info{{end}}" data-sms-badge="multitech">{{if eq .SMSProvider "multitech"}}Selected{{else}}Hardware{{end}}</span>
+                                        </div>
+                                        <div class="idp-option-desc">MultiTech MultiModem / SMSFinder Hardware Box (<code>/sendmsg</code> CGI API).</div>
+                                    </div>
+
+                                    <div class="idp-option-card {{if eq .SMSProvider "teltonika"}}active editing{{end}}" data-sms-choice="teltonika" onclick="selectSMSProvider('teltonika')">
+                                        <div class="idp-option-header">
+                                            <div class="idp-option-title"><span>📶 Teltonika RUT/TRB</span></div>
+                                            <span class="badge {{if eq .SMSProvider "teltonika"}}badge-success{{else}}badge-info{{end}}" data-sms-badge="teltonika">{{if eq .SMSProvider "teltonika"}}Selected{{else}}Hardware{{end}}</span>
+                                        </div>
+                                        <div class="idp-option-desc">Teltonika Industrial Cellular Router SMS Gateway (<code>/cgi-bin/sms_send</code>).</div>
+                                    </div>
+
+                                    <div class="idp-option-card {{if eq .SMSProvider "custom"}}active editing{{end}}" data-sms-choice="custom" onclick="selectSMSProvider('custom')">
+                                        <div class="idp-option-header">
+                                            <div class="idp-option-title"><span>🧩 Custom HTTP</span></div>
+                                            <span class="badge {{if eq .SMSProvider "custom"}}badge-success{{else}}badge-info{{end}}" data-sms-badge="custom">{{if eq .SMSProvider "custom"}}Selected{{else}}Generic{{end}}</span>
+                                        </div>
+                                        <div class="idp-option-desc">Kannel, Ozeki, Yeastar TG, USB-modem HTTP bridge, or <code>mock://dev</code>.</div>
+                                    </div>
+                                </div>
+
+                                <div class="grid-2">
+                                    <div class="form-group">
+                                        <label for="sms_api_url">SMS Gateway API Endpoint URL</label>
+                                        <input type="text" id="sms_api_url" name="sms_api_url" value="{{.Settings.SMSAPIURL}}" placeholder="https://api.twilio.com/2010-04-01 or mock://dev">
+                                        <p class="help-text" id="smsEndpointHelp">Provider endpoint URL (leave blank or use <code>mock://dev</code> in local dev to log codes safely).</p>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="sms_sender_id" id="smsSenderLabel">Sender ID / From Number</label>
+                                        <input type="text" id="sms_sender_id" name="sms_sender_id" value="{{.Settings.SMSSenderID}}" placeholder="SAMLGuard or +15551234567">
+                                        <p class="help-text">Alphanumeric Sender ID (e.g. <code>SAMLGuard</code>) or E.164 origin phone number.</p>
+                                    </div>
+                                </div>
+
+                                <div class="grid-2">
+                                    <div class="form-group">
+                                        <label for="sms_account_id" id="smsAccountLabel">Account SID / API Username / API Key</label>
+                                        <input type="text" id="sms_account_id" name="sms_account_id" value="{{.Settings.SMSAccountID}}" placeholder="Account SID or API Username">
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="sms_auth_token" id="smsTokenLabel">Auth Token / API Password / Secret</label>
+                                        <div class="input-group">
+                                            <input type="password" id="sms_auth_token" name="sms_auth_token" placeholder="•••••••• (Leave blank to keep current)">
+                                            <button type="button" class="btn btn-secondary" onclick="togglePasswordVisibility('sms_auth_token')">👁️</button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="grid-2">
+                                    <div class="form-group">
+                                        <label for="sms_http_method">HTTP Transport Method</label>
+                                        <select id="sms_http_method" name="sms_http_method">
+                                            <option value="" {{if eq .Settings.SMSHTTPMethod ""}}selected{{end}}>Provider Default (Recommended)</option>
+                                            <option value="POST" {{if eq .Settings.SMSHTTPMethod "POST"}}selected{{end}}>POST</option>
+                                            <option value="GET" {{if eq .Settings.SMSHTTPMethod "GET"}}selected{{end}}>GET (Query Parameters)</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="sms_message_template">SMS Message Template</label>
+                                        <input type="text" id="sms_message_template" name="sms_message_template" value="{{.Settings.SMSMessageTemplate}}" placeholder="Your SAMLGuard verification code is {code}. Valid for 5 minutes.">
+                                        <p class="help-text">Use <code>{code}</code> placeholder for the generated 6-digit OTP.</p>
+                                    </div>
+                                </div>
+
+                                <!-- Live Send Test SMS Box -->
+                                <div class="guide-box" style="margin-top: 0.75rem;">
+                                    <h3>📲 Live SMS Gateway Test</h3>
+                                    <div class="input-group">
+                                        <input type="text" id="testSMSRecipient" placeholder="Enter mobile number (e.g. +60123456789)" style="flex: 1;">
+                                        <button type="button" class="btn btn-secondary" id="btnTestSMS" onclick="sendTestSMS()" style="border-color: var(--brand-green); color: var(--brand-green);">
+                                            <span id="testSMSSpinner" class="spinner" style="display: none;"></span>
+                                            <span>Send Test SMS</span>
+                                        </button>
+                                    </div>
+                                    <div id="testSMSResult" style="margin-top: 0.75rem; display: none;"></div>
                                 </div>
                             </div>
                         </div>
@@ -2013,9 +2178,10 @@
                                     <tr>
                                         <th>Username</th>
                                         <th>Email</th>
+                                        <th>Phone (SMS)</th>
                                         <th>Full Name</th>
                                         <th>Source</th>
-                                        <th style="width: 80px;">Action</th>
+                                        <th style="width: 180px;">Action</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -2023,6 +2189,7 @@
                                     <tr>
                                         <td><strong style="color: var(--brand-green);">{{.Username}}</strong></td>
                                         <td>{{if .Email}}{{.Email}}{{else}}<span style="color: var(--text-muted);">-</span>{{end}}</td>
+                                        <td>{{if .Phone}}{{.Phone}}{{else}}<span style="color: var(--text-muted);">-</span>{{end}}</td>
                                         <td>{{if .FullName}}{{.FullName}}{{else}}<span style="color: var(--text-muted);">-</span>{{end}}</td>
                                         <td>
                                             <span class="badge {{if eq .Source "ita_sync"}}badge-info{{else if eq .Source "manual"}}badge-warning{{else}}badge-success{{end}}">
@@ -2030,6 +2197,7 @@
                                             </span>
                                         </td>
                                         <td style="display: flex; gap: 0.4rem; flex-wrap: wrap;">
+                                            <button type="button" class="btn btn-sm btn-secondary" data-username="{{.Username}}" data-phone="{{.Phone}}" onclick="updateUserPhone(this.dataset.username, this.dataset.phone)" title="Set or update mobile phone number for SMS OTP">Set Phone</button>
                                             <button type="button" class="btn btn-sm btn-secondary" data-username="{{.Username}}" onclick="resetUserMFA(this.dataset.username)" title="Clear TOTP secret so user must re-enroll">Reset MFA</button>
                                             {{if ne .Username "apc"}}
                                             <button type="button" class="btn btn-sm btn-danger" onclick="deleteAuthorizedUser('{{.Username}}')">Delete</button>
@@ -2040,7 +2208,7 @@
                                     </tr>
                                     {{else}}
                                     <tr>
-                                        <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">
+                                        <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">
                                             No users currently in whitelist database. Click "Sync Users From ITA Now" to fetch user accounts.
                                         </td>
                                     </tr>
@@ -2088,6 +2256,7 @@
                             <span class="badge badge-info">Upstream IdP: <strong style="text-transform: uppercase;">{{.ActiveIdP}}</strong></span>
                             {{if .TotpEnabled}}<span class="badge badge-success">📱 Authenticator App (TOTP): Active</span>{{end}}
                             {{if .EmailEnabled}}<span class="badge badge-success">📧 Email OTP: Active</span>{{end}}
+                            {{if .SMSEnabled}}<span class="badge badge-success">💬 SMS OTP: Active ({{.SMSProvider}})</span>{{end}}
                             <span class="badge badge-info">Default OTP: <strong style="text-transform: uppercase;">{{.Settings.MFADefaultProvider}}</strong></span>
                         </div>
                     </div>
@@ -2322,10 +2491,198 @@
         syncUpstreamIdPState();
     }
 
+    const smsProfiles = {{.SMSProfilesJSON}} || {};
+    const smsProviderMeta = {
+        twilio: {
+            name: 'Twilio',
+            defaultBadge: 'Cloud API',
+            apiUrl: 'https://api.twilio.com/2010-04-01',
+            accountLabel: 'Twilio Account SID',
+            accountPlaceholder: 'ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+            tokenLabel: 'Twilio Auth Token',
+            senderLabel: 'Twilio From Number / Messaging SID',
+            senderPlaceholder: '+15551234567',
+            httpMethod: 'POST',
+            help: 'Calls Twilio Messages.json endpoint using HTTP Basic Auth (Account SID : Auth Token).'
+        },
+        isms: {
+            name: 'iSMS',
+            defaultBadge: 'Cloud API',
+            apiUrl: 'https://www.isms.com.my/isms_send_all_id.php',
+            accountLabel: 'iSMS Username',
+            accountPlaceholder: 'your_isms_username',
+            tokenLabel: 'iSMS Password',
+            senderLabel: 'Approved Sender ID',
+            senderPlaceholder: 'SAMLGuard',
+            httpMethod: 'POST',
+            help: 'Calls iSMS HTTP API using un, pwd, dstno, msg, type=1 and sendid parameters.'
+        },
+        vonage: {
+            name: 'Vonage',
+            defaultBadge: 'Cloud API',
+            apiUrl: 'https://rest.nexmo.com/sms/json',
+            accountLabel: 'Vonage API Key',
+            accountPlaceholder: '1a2b3c4d',
+            tokenLabel: 'Vonage API Secret',
+            senderLabel: 'From Brand / Number',
+            senderPlaceholder: 'SAMLGuard',
+            httpMethod: 'POST',
+            help: 'Calls Vonage SMS JSON API using api_key, api_secret, from, to and text.'
+        },
+        sendquick: {
+            name: 'SendQuick',
+            defaultBadge: 'Hardware',
+            apiUrl: 'https://sendquick.example.local/sq/sendmsg.php',
+            accountLabel: 'SendQuick Username',
+            accountPlaceholder: 'sq_api_user',
+            tokenLabel: 'SendQuick Password',
+            senderLabel: 'Sender ID (optional)',
+            senderPlaceholder: 'SAMLGuard',
+            httpMethod: 'POST',
+            help: 'Calls TalariaX SendQuick appliance HTTP API sending tar_num, tar_msg, tar_mode=text, username & passwd (+ Basic Auth).'
+        },
+        smseagle: {
+            name: 'SMSEagle',
+            defaultBadge: 'Hardware',
+            apiUrl: 'https://smseagle.example.local/index.php/http_api/send_sms',
+            accountLabel: 'SMSEagle Login (blank for Access Token mode)',
+            accountPlaceholder: 'admin (or leave blank if using access-token)',
+            tokenLabel: 'SMSEagle Password / Access Token',
+            senderLabel: 'Sender Label (SIM handles CLI)',
+            senderPlaceholder: 'SAMLGuard',
+            httpMethod: 'POST',
+            help: 'Calls SMSEagle hardware gateway HTTP API (/index.php/http_api/send_sms) with login+pass or access-token.'
+        },
+        multitech: {
+            name: 'MultiTech iSMS',
+            defaultBadge: 'Hardware',
+            apiUrl: 'https://multitech.example.local/sendmsg',
+            accountLabel: 'MultiTech Appliance Username',
+            accountPlaceholder: 'admin',
+            tokenLabel: 'MultiTech Appliance Password',
+            senderLabel: 'Modem Port / Sender Label (optional)',
+            senderPlaceholder: 'SAMLGuard',
+            httpMethod: 'GET',
+            help: 'Calls MultiTech MultiModem/SMSFinder hardware API (/sendmsg) using user, passwd, cat=1, enc=0, to & text.'
+        },
+        teltonika: {
+            name: 'Teltonika RUT/TRB',
+            defaultBadge: 'Hardware',
+            apiUrl: 'https://teltonika.example.local/cgi-bin/sms_send',
+            accountLabel: 'RutOS SMS Gateway Username',
+            accountPlaceholder: 'user1',
+            tokenLabel: 'RutOS SMS Gateway Password',
+            senderLabel: 'Router SIM Label (optional)',
+            senderPlaceholder: 'SAMLGuard',
+            httpMethod: 'GET',
+            help: 'Calls Teltonika cellular router/gateway CGI endpoint (/cgi-bin/sms_send) with username, password, number & text.'
+        },
+        custom: {
+            name: 'Custom HTTP',
+            defaultBadge: 'Generic',
+            apiUrl: 'mock://dev',
+            accountLabel: 'Bearer / Basic Username (optional)',
+            accountPlaceholder: 'Leave blank for Bearer token auth',
+            tokenLabel: 'API Secret / Bearer Token',
+            senderLabel: 'Sender ID / From',
+            senderPlaceholder: 'SAMLGuard',
+            httpMethod: 'POST',
+            help: 'Posts JSON {to, from, message, code} or sends GET query params; supports Kannel, Ozeki, Yeastar TG, or mock://dev.'
+        }
+    };
+
+    function snapshotActiveSMSProfile() {
+        const providerInput = document.getElementById('sms_provider');
+        if (!providerInput) return;
+        const key = providerInput.value || 'twilio';
+        const prevToken = (smsProfiles[key] && smsProfiles[key].auth_token) || '';
+        const typedToken = (document.getElementById('sms_auth_token') || {}).value || '';
+        smsProfiles[key] = {
+            api_url: (document.getElementById('sms_api_url') || {}).value || '',
+            account_id: (document.getElementById('sms_account_id') || {}).value || '',
+            auth_token: typedToken !== '' ? typedToken : prevToken,
+            sender_id: (document.getElementById('sms_sender_id') || {}).value || '',
+            http_method: (document.getElementById('sms_http_method') || {}).value || ''
+        };
+        const hiddenSMS = document.getElementById('sms_profiles_json');
+        if (hiddenSMS) {
+            hiddenSMS.value = JSON.stringify(smsProfiles);
+        }
+    }
+
+    function syncSMSProviderUI() {
+        const key = (document.getElementById('sms_provider') || {}).value || 'twilio';
+        const meta = smsProviderMeta[key] || smsProviderMeta.custom;
+
+        ['twilio', 'isms', 'vonage', 'sendquick', 'smseagle', 'multitech', 'teltonika', 'custom'].forEach(k => {
+            const card = document.querySelector(`[data-sms-choice="${k}"]`);
+            if (card) {
+                card.classList.toggle('active', k === key);
+                card.classList.toggle('editing', k === key);
+            }
+            const badge = document.querySelector(`[data-sms-badge="${k}"]`);
+            if (badge) {
+                const defaultBadge = (smsProviderMeta[k] && smsProviderMeta[k].defaultBadge) || 'Ready';
+                badge.textContent = k === key ? 'Selected' : defaultBadge;
+                badge.className = `badge ${k === key ? 'badge-success' : 'badge-info'}`;
+            }
+        });
+
+        const accountLabel = document.getElementById('smsAccountLabel');
+        const tokenLabel = document.getElementById('smsTokenLabel');
+        const senderLabel = document.getElementById('smsSenderLabel');
+        const helpEl = document.getElementById('smsEndpointHelp');
+        const urlInput = document.getElementById('sms_api_url');
+        const accInput = document.getElementById('sms_account_id');
+        const senderInput = document.getElementById('sms_sender_id');
+
+        if (accountLabel) accountLabel.textContent = meta.accountLabel;
+        if (tokenLabel) tokenLabel.textContent = meta.tokenLabel;
+        if (senderLabel) senderLabel.textContent = meta.senderLabel;
+        if (helpEl) helpEl.textContent = meta.help;
+        if (urlInput) urlInput.placeholder = meta.apiUrl;
+        if (accInput) accInput.placeholder = meta.accountPlaceholder;
+        if (senderInput) senderInput.placeholder = meta.senderPlaceholder;
+    }
+
+    function selectSMSProvider(providerKey) {
+        snapshotActiveSMSProfile();
+        const providerInput = document.getElementById('sms_provider');
+        if (providerInput) providerInput.value = providerKey;
+
+        const existing = smsProfiles[providerKey] || {};
+        const meta = smsProviderMeta[providerKey] || smsProviderMeta.custom;
+        document.getElementById('sms_api_url').value = existing.api_url || '';
+        document.getElementById('sms_account_id').value = existing.account_id || '';
+        document.getElementById('sms_auth_token').value = existing.auth_token || '';
+        document.getElementById('sms_sender_id').value = existing.sender_id || '';
+        document.getElementById('sms_http_method').value = existing.http_method || meta.httpMethod || '';
+
+        snapshotActiveSMSProfile();
+        syncSMSProviderUI();
+    }
+
+    function applySMSPreset(presetKey) {
+        const providerKey = presetKey === 'mock' ? 'custom' : presetKey;
+        selectSMSProvider(providerKey);
+        const meta = smsProviderMeta[providerKey] || smsProviderMeta.custom;
+        document.getElementById('sms_api_url').value = presetKey === 'mock' ? 'mock://dev' : meta.apiUrl;
+        if (!document.getElementById('sms_sender_id').value) {
+            document.getElementById('sms_sender_id').value = meta.senderPlaceholder || 'SAMLGuard';
+        }
+        document.getElementById('sms_http_method').value = meta.httpMethod || 'POST';
+        if (!document.getElementById('sms_message_template').value) {
+            document.getElementById('sms_message_template').value = 'Your SAMLGuard verification code is {code}. Valid for 5 minutes.';
+        }
+        snapshotActiveSMSProfile();
+        syncSMSProviderUI();
+    }
+
     function onOTPToggleChange(changedEl) {
-        const totpBox = document.getElementById('otp_enable_totp');
-        const emailBox = document.getElementById('otp_enable_email');
-        if (totpBox && emailBox && !totpBox.checked && !emailBox.checked) {
+        const boxes = ['totp', 'email', 'sms']
+            .map(k => document.getElementById(`otp_enable_${k}`))
+            .filter(Boolean);
+        if (!boxes.some(b => b.checked)) {
             changedEl.checked = true;
             alert('At least one OTP verification method must remain active.');
             return;
@@ -2336,71 +2693,77 @@
     function syncOTPProviderState() {
         const totpBox = document.getElementById('otp_enable_totp');
         const emailBox = document.getElementById('otp_enable_email');
-        if (!totpBox || !emailBox) return;
+        const smsBox = document.getElementById('otp_enable_sms');
+        if (!totpBox || !emailBox || !smsBox) return;
 
-        const totpEnabled = totpBox.checked;
-        const emailEnabled = emailBox.checked;
+        const state = {
+            totp: totpBox.checked,
+            email: emailBox.checked,
+            sms: smsBox.checked
+        };
+        const activeNames = [];
+        if (state.totp) activeNames.push('TOTP');
+        if (state.email) activeNames.push('Email');
+        if (state.sms) activeNames.push('SMS');
+        const activeCount = activeNames.length;
 
-        const totpCard = document.getElementById('card-otp-totp');
-        const emailCard = document.getElementById('card-otp-email');
-        if (totpCard) {
-            totpCard.classList.toggle('active', totpEnabled);
-            totpCard.classList.toggle('inactive', !totpEnabled);
-        }
-        if (emailCard) {
-            emailCard.classList.toggle('active', emailEnabled);
-            emailCard.classList.toggle('inactive', !emailEnabled);
-        }
-
-        const totpBadge = document.getElementById('badge-otp-totp');
-        const emailBadge = document.getElementById('badge-otp-email');
-        if (totpBadge) {
-            totpBadge.textContent = totpEnabled ? 'Active' : 'Disabled';
-            totpBadge.className = `badge ${totpEnabled ? 'badge-success' : 'badge-warning'}`;
-        }
-        if (emailBadge) {
-            emailBadge.textContent = emailEnabled ? 'Active' : 'Disabled';
-            emailBadge.className = `badge ${emailEnabled ? 'badge-success' : 'badge-warning'}`;
-        }
-
-        const totpBody = document.getElementById('totp-settings-body');
-        const emailBody = document.getElementById('email-otp-settings-body');
-        if (totpBody) totpBody.style.display = totpEnabled ? '' : 'none';
-        if (emailBody) emailBody.style.display = emailEnabled ? '' : 'none';
+        [
+            ['totp', 'card-otp-totp', 'badge-otp-totp', 'totp-settings-body'],
+            ['email', 'card-otp-email', 'badge-otp-email', 'email-otp-settings-body'],
+            ['sms', 'card-otp-sms', 'badge-otp-sms', 'sms-otp-settings-body']
+        ].forEach(([key, cardId, badgeId, bodyId]) => {
+            const on = state[key];
+            const card = document.getElementById(cardId);
+            if (card) {
+                card.classList.toggle('active', on);
+                card.classList.toggle('inactive', !on);
+            }
+            const badge = document.getElementById(badgeId);
+            if (badge) {
+                badge.textContent = on ? 'Active' : 'Disabled';
+                badge.className = `badge ${on ? 'badge-success' : 'badge-warning'}`;
+            }
+            const body = document.getElementById(bodyId);
+            if (body) body.style.display = on ? '' : 'none';
+        });
 
         const defaultSelect = document.getElementById('default_provider_select');
-        const defaultTotp = document.getElementById('default_provider_totp');
-        const defaultEmail = document.getElementById('default_provider_email');
-        if (defaultSelect) defaultSelect.disabled = !(totpEnabled && emailEnabled);
-        if (defaultTotp) defaultTotp.disabled = !totpEnabled;
-        if (defaultEmail) defaultEmail.disabled = !emailEnabled;
-        if (defaultSelect && defaultSelect.checked && !(totpEnabled && emailEnabled)) {
-            if (totpEnabled && defaultTotp) defaultTotp.checked = true;
-            else if (emailEnabled && defaultEmail) defaultEmail.checked = true;
-        } else if (defaultTotp && defaultTotp.checked && !totpEnabled && emailEnabled && defaultEmail) {
-            defaultEmail.checked = true;
-        } else if (defaultEmail && defaultEmail.checked && !emailEnabled && totpEnabled && defaultTotp) {
-            defaultTotp.checked = true;
+        const radios = {
+            totp: document.getElementById('default_provider_totp'),
+            email: document.getElementById('default_provider_email'),
+            sms: document.getElementById('default_provider_sms')
+        };
+        if (defaultSelect) defaultSelect.disabled = activeCount <= 1;
+        Object.entries(radios).forEach(([k, radio]) => {
+            if (radio) radio.disabled = !state[k];
+        });
+
+        const firstActive = ['totp', 'email', 'sms'].find(k => state[k] && radios[k]);
+        if (defaultSelect && defaultSelect.checked && activeCount <= 1 && firstActive) {
+            radios[firstActive].checked = true;
+        } else {
+            const brokenSelected = Object.entries(radios).some(([k, radio]) => radio && radio.checked && !state[k]);
+            if (brokenSelected && firstActive) {
+                radios[firstActive].checked = true;
+            }
         }
 
         const mfaIssuer = document.getElementById('mfa_issuer');
-        if (mfaIssuer) mfaIssuer.required = totpEnabled;
+        if (mfaIssuer) mfaIssuer.required = state.totp;
 
         ['otp_expiry', 'resend_cooldown', 'smtp_host', 'smtp_port'].forEach(id => {
             const el = document.getElementById(id);
-            if (el) el.required = emailEnabled;
+            if (el) el.required = state.email;
         });
 
         const summaryBadge = document.getElementById('otpSummaryBadge');
         if (summaryBadge) {
-            if (totpEnabled && emailEnabled) {
-                summaryBadge.textContent = '2 Active (TOTP + Email OTP)';
+            if (activeCount > 1) {
+                summaryBadge.textContent = `${activeCount} Active (${activeNames.join(' + ')})`;
                 summaryBadge.className = 'badge badge-success';
-            } else if (emailEnabled) {
-                summaryBadge.textContent = '1 Active (Email OTP Only)';
-                summaryBadge.className = 'badge badge-info';
             } else {
-                summaryBadge.textContent = '1 Active (Authenticator Only)';
+                const labelMap = { TOTP: 'Authenticator Only', Email: 'Email OTP Only', SMS: 'SMS OTP Only' };
+                summaryBadge.textContent = `1 Active (${labelMap[activeNames[0]] || activeNames[0]})`;
                 summaryBadge.className = 'badge badge-info';
             }
         }
@@ -2421,6 +2784,8 @@
 
         snapshotActiveIdPProfile();
         syncUpstreamIdPState();
+        snapshotActiveSMSProfile();
+        syncSMSProviderUI();
         syncOTPProviderState();
 
         ['idp_entity_id', 'idp_sso_url', 'idp_metadata_url', 'idp_cert_file'].forEach(id => {
@@ -2428,9 +2793,20 @@
             if (el) el.addEventListener('input', snapshotActiveIdPProfile);
         });
 
+        ['sms_api_url', 'sms_account_id', 'sms_auth_token', 'sms_sender_id', 'sms_http_method', 'sms_message_template'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                el.addEventListener('input', snapshotActiveSMSProfile);
+                el.addEventListener('change', snapshotActiveSMSProfile);
+            }
+        });
+
         const settingsForm = document.getElementById('settingsForm');
         if (settingsForm) {
-            settingsForm.addEventListener('submit', snapshotActiveIdPProfile);
+            settingsForm.addEventListener('submit', () => {
+                snapshotActiveIdPProfile();
+                snapshotActiveSMSProfile();
+            });
         }
     });
 
@@ -2592,10 +2968,62 @@
         }
     }
 
+    async function sendTestSMS() {
+        const recipient = document.getElementById('testSMSRecipient').value.trim();
+        const btn = document.getElementById('btnTestSMS');
+        const spinner = document.getElementById('testSMSSpinner');
+        const resultBox = document.getElementById('testSMSResult');
+
+        if (!recipient) {
+            alert("Please enter a mobile number (e.g. +60123456789) to receive the test SMS.");
+            return;
+        }
+
+        btn.disabled = true;
+        spinner.style.display = 'inline-block';
+        resultBox.style.display = 'none';
+
+        const payload = {
+            recipient: recipient,
+            provider: document.getElementById('sms_provider').value,
+            api_url: document.getElementById('sms_api_url').value.trim(),
+            account_id: document.getElementById('sms_account_id').value.trim(),
+            auth_token: document.getElementById('sms_auth_token').value,
+            sender_id: document.getElementById('sms_sender_id').value.trim(),
+            http_method: document.getElementById('sms_http_method').value,
+            message_template: document.getElementById('sms_message_template').value.trim()
+        };
+
+        try {
+            const resp = await fetch('/admin/settings/test-sms', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': getAdminCSRFToken()
+                },
+                body: JSON.stringify(payload)
+            });
+            const data = await resp.json();
+            resultBox.style.display = 'block';
+            if (data.success) {
+                resultBox.innerHTML = `<div class="flash-alert alert-success" style="margin-bottom:0;">✅ ${data.message}</div>`;
+            } else {
+                resultBox.innerHTML = `<div class="flash-alert alert-danger" style="margin-bottom:0;">⚠️ <strong>Delivery Failed:</strong> ${data.error}</div>`;
+            }
+        } catch (err) {
+            resultBox.style.display = 'block';
+            resultBox.innerHTML = `<div class="flash-alert alert-danger" style="margin-bottom:0;">⚠️ <strong>Network Error:</strong> ${err.message}</div>`;
+        } finally {
+            btn.disabled = false;
+            spinner.style.display = 'none';
+        }
+    }
+
     async function showAddUserPrompt() {
         const username = prompt("Enter ITA Username (e.g. newuser):");
         if (!username || !username.trim()) return;
         const email = prompt("Enter Email (optional):", "") || "";
+        const phone = prompt("Enter Mobile Phone for SMS OTP (optional, e.g. +60123456789):", "") || "";
         const fullName = prompt("Enter Full Name (optional):", "") || "";
 
         try {
@@ -2605,7 +3033,32 @@
                     'Content-Type': 'application/json',
                     'X-CSRF-Token': getAdminCSRFToken()
                 },
-                body: JSON.stringify({ username: username.trim(), email: email.trim(), full_name: fullName.trim() })
+                body: JSON.stringify({ username: username.trim(), email: email.trim(), phone: phone.trim(), full_name: fullName.trim() })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                alert(data.message);
+                window.location.reload();
+            } else {
+                alert("Failed: " + data.error);
+            }
+        } catch (err) {
+            alert("Error: " + err.message);
+        }
+    }
+
+    async function updateUserPhone(username, currentPhone) {
+        const phone = prompt(`Enter SMS mobile phone number for '${username}' (leave empty to clear):`, currentPhone || '');
+        if (phone === null) return;
+
+        try {
+            const resp = await fetch('/admin/users/update-phone', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': getAdminCSRFToken()
+                },
+                body: JSON.stringify({ username: username, phone: phone.trim() })
             });
             const data = await resp.json();
             if (data.success) {
