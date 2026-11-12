@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -842,3 +843,178 @@ func TestAdminSettings_SMSProfilesTestAndUserPhone(t *testing.T) {
 		}
 	}
 }
+
+func TestAdminSettings_CustomThemeProfilesAndBrandingAssets(t *testing.T) {
+	r, h, _ := setupTestAdminHandler(t)
+	r.POST("/admin/branding/upload", h.HandleAdminBrandingUploadPost)
+	r.GET("/branding/assets/:id", h.HandleBrandingAssetGet)
+	r.GET("/admin/login", h.HandleAdminLoginGet)
+
+	uploadFile := func(filename string, content []byte) *httptest.ResponseRecorder {
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		_ = mw.WriteField("slot", "app_icon")
+		part, err := mw.CreateFormFile("file", filename)
+		if err != nil {
+			t.Fatalf("CreateFormFile failed: %v", err)
+		}
+		if _, err := part.Write(content); err != nil {
+			t.Fatalf("Write part failed: %v", err)
+		}
+		_ = mw.Close()
+
+		req := httptest.NewRequest(http.MethodPost, "/admin/branding/upload", &buf)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	// 1. Valid PNG upload succeeds and is retrievable from /branding/assets/:id
+	pngBytes := []byte{
+		0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+		0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89,
+		0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54,
+		0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01,
+		0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+	}
+	wPNG := uploadFile("logo.png", pngBytes)
+	if wPNG.Code != http.StatusOK {
+		t.Fatalf("expected 200 on PNG upload, got %d: %s", wPNG.Code, wPNG.Body.String())
+	}
+	var pngResp map[string]any
+	if err := json.Unmarshal(wPNG.Body.Bytes(), &pngResp); err != nil || pngResp["success"] != true {
+		t.Fatalf("unexpected PNG upload JSON: %s", wPNG.Body.String())
+	}
+	uploadedURL, _ := pngResp["url"].(string)
+	if !strings.HasPrefix(uploadedURL, "/branding/assets/") {
+		t.Fatalf("expected /branding/assets/ URL, got %q", uploadedURL)
+	}
+
+	wGet := httptest.NewRecorder()
+	r.ServeHTTP(wGet, httptest.NewRequest(http.MethodGet, uploadedURL, nil))
+	if wGet.Code != http.StatusOK || wGet.Header().Get("Content-Type") != "image/png" || wGet.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("unexpected GET %s response: code=%d headers=%v", uploadedURL, wGet.Code, wGet.Header())
+	}
+	if !bytes.Equal(wGet.Body.Bytes(), pngBytes) {
+		t.Fatalf("served asset bytes mismatch")
+	}
+
+	// 2. Reject unsafe SVG with embedded <script> or event handlers; allow clean SVG
+	wBadSVG := uploadFile("evil.svg", []byte(`<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`))
+	if wBadSVG.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 rejecting scripted SVG, got %d: %s", wBadSVG.Code, wBadSVG.Body.String())
+	}
+	wGoodSVG := uploadFile("clean.svg", []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>`))
+	if wGoodSVG.Code != http.StatusOK {
+		t.Fatalf("expected 200 for safe SVG, got %d: %s", wGoodSVG.Code, wGoodSVG.Body.String())
+	}
+
+	// 3. Persist custom theme profile in /admin/settings
+	profilesPayload, _ := json.Marshal(map[string]config.ThemeProfile{
+		"default": config.DefaultThemeProfile(),
+		"acme-app": {
+			Name:            "Acme Portal Theme",
+			AppName:         "AcmeGuard",
+			TargetAppName:   "Acme Cloud ERP",
+			Subtitle:        "Enterprise SSO",
+			AccentColor:     "#2563EB",
+			AppIcon:         uploadedURL,
+			OrgLogo:         uploadedURL,
+			LoginBgDark:     uploadedURL,
+			ConsoleBgDark:   uploadedURL,
+			HeaderLogoDark:  uploadedURL,
+			HeaderLogoLight: uploadedURL,
+		},
+	})
+
+	form := url.Values{
+		"idp_entity_id":           {h.cfg.SAML.IdPEntityID},
+		"idp_sso_url":             {h.cfg.SAML.IdPSSOURL},
+		"entity_id":               {h.cfg.SAML.EntityID},
+		"acs_url":                 {h.cfg.SAML.ACSURL},
+		"mfa_default_provider":    {"totp"},
+		"mfa_issuer":              {"SAMLGuard"},
+		"otp_expiry":              {"5m"},
+		"resend_cooldown":         {"60s"},
+		"smtp_host":               {"localhost"},
+		"smtp_port":               {"1025"},
+		"branding_active_profile": {"acme-app"},
+		"branding_profiles_json":  {string(profilesPayload)},
+	}
+	reqSave := httptest.NewRequest(http.MethodPost, "/admin/settings", strings.NewReader(form.Encode()))
+	reqSave.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	wSave := httptest.NewRecorder()
+	r.ServeHTTP(wSave, reqSave)
+	if wSave.Code != http.StatusOK || !strings.Contains(wSave.Body.String(), "Configuration updated successfully") {
+		t.Fatalf("expected settings save 200 OK, got %d: %s", wSave.Code, wSave.Body.String())
+	}
+	if h.cfg.Branding.EffectiveActiveProfile() != "acme-app" || h.cfg.Branding.Resolve().AppName != "AcmeGuard" {
+		t.Fatalf("expected runtime branding updated to acme-app/AcmeGuard, got %+v", h.cfg.Branding.Resolve())
+	}
+
+	// 4. Subsequent settings POST without branding fields preserves saved branding profiles
+	formWithoutBranding := url.Values{
+		"idp_entity_id":        {h.cfg.SAML.IdPEntityID},
+		"idp_sso_url":          {h.cfg.SAML.IdPSSOURL},
+		"entity_id":            {h.cfg.SAML.EntityID},
+		"acs_url":              {h.cfg.SAML.ACSURL},
+		"mfa_default_provider": {"totp"},
+		"mfa_issuer":           {"SAMLGuard"},
+		"otp_expiry":           {"5m"},
+		"resend_cooldown":      {"60s"},
+		"smtp_host":            {"localhost"},
+		"smtp_port":            {"1025"},
+	}
+	reqSave2 := httptest.NewRequest(http.MethodPost, "/admin/settings", strings.NewReader(formWithoutBranding.Encode()))
+	reqSave2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	wSave2 := httptest.NewRecorder()
+	r.ServeHTTP(wSave2, reqSave2)
+	if wSave2.Code != http.StatusOK || h.cfg.Branding.Resolve().AppName != "AcmeGuard" {
+		t.Fatalf("expected branding profile preserved when omitted from POST, got %+v", h.cfg.Branding.Resolve())
+	}
+
+	// 5. Render admin settings & admin login and verify custom branding values appear
+	wSettings := httptest.NewRecorder()
+	r.ServeHTTP(wSettings, httptest.NewRequest(http.MethodGet, "/admin/settings", nil))
+	settingsHTML := wSettings.Body.String()
+	for _, want := range []string{"Custom Theme &amp; Branding Profiles", "AcmeGuard", "#2563EB", uploadedURL, "Enterprise SSO", `href="/admin/guide"`} {
+		if !strings.Contains(settingsHTML, want) {
+			t.Errorf("expected admin settings HTML to include %q", want)
+		}
+	}
+
+	wLogin := httptest.NewRecorder()
+	r.ServeHTTP(wLogin, httptest.NewRequest(http.MethodGet, "/admin/login", nil))
+	loginHTML := wLogin.Body.String()
+	for _, want := range []string{"AcmeGuard", "#2563EB", uploadedURL, "Enterprise SSO"} {
+		if !strings.Contains(loginHTML, want) {
+			t.Errorf("expected admin login HTML to reflect custom branding %q", want)
+		}
+	}
+
+	// 6. Verify User Guide page (/admin/guide) renders with guide sections and custom branding
+	r.GET("/admin/guide", h.HandleAdminGuideGet)
+	wGuide := httptest.NewRecorder()
+	r.ServeHTTP(wGuide, httptest.NewRequest(http.MethodGet, "/admin/guide", nil))
+	if wGuide.Code != http.StatusOK {
+		t.Fatalf("expected 200 GET /admin/guide, got %d", wGuide.Code)
+	}
+	guideHTML := wGuide.Body.String()
+	for _, want := range []string{
+		"User Guide",
+		"Overview &amp; SAML 2.0 Proxy Architecture",
+		"Custom Theme &amp; Branding Profiles",
+		"AcmeGuard",
+		"#2563EB",
+		uploadedURL,
+		`href="/admin/settings"`,
+	} {
+		if !strings.Contains(guideHTML, want) {
+			t.Errorf("expected user guide HTML to include %q", want)
+		}
+	}
+}
+

@@ -793,3 +793,25 @@ func TestMetadataHTTPClient_LocalSelfSignedAndPinEnforcement(t *testing.T) {
 		t.Fatal("expected production mode to enforce strict SAN verification and reject mismatch")
 	}
 }
+
+func TestSetupApp_AdminGuideRouteProtectionAndHelpLink(t *testing.T) {
+	if !strings.Contains(web.DefaultAdminSettingsHTML, `href="/admin/guide"`) {
+		t.Errorf("expected embedded admin_settings.html help button to link to /admin/guide")
+	}
+	if !strings.Contains(web.DefaultUserGuideHTML, "User Guide") {
+		t.Errorf("expected embedded user_guide.html to contain User Guide title")
+	}
+
+	app, cleanup, err := SetupAppWithCleanup(testConfig(t), testLogger())
+	if err != nil {
+		t.Fatalf("unexpected setup error: %v", err)
+	}
+	defer cleanup()
+
+	wUnauth := httptest.NewRecorder()
+	reqUnauth, _ := http.NewRequest(http.MethodGet, "/admin/guide", nil)
+	app.ServeHTTP(wUnauth, reqUnauth)
+	if wUnauth.Code != http.StatusSeeOther || !strings.Contains(wUnauth.Header().Get("Location"), "/admin/login") {
+		t.Fatalf("expected unauthenticated GET /admin/guide to redirect to /admin/login, got %d (%q)", wUnauth.Code, wUnauth.Header().Get("Location"))
+	}
+}

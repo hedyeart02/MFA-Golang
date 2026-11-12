@@ -24,6 +24,9 @@ var DefaultAdminChangePasswordHTML string
 //go:embed templates/corporate_login.html
 var DefaultCorporateLoginHTML string
 
+//go:embed templates/user_guide.html
+var DefaultUserGuideHTML string
+
 //go:embed static
 var staticFiles embed.FS
 
@@ -60,4 +63,9 @@ func ParseAdminChangePasswordTemplate() (*template.Template, error) {
 // ParseCorporateLoginTemplate parses and returns the embedded corporate sign-in template
 func ParseCorporateLoginTemplate() (*template.Template, error) {
 	return template.New("corporate_login.html").Parse(DefaultCorporateLoginHTML)
+}
+
+// ParseUserGuideTemplate parses and returns the embedded administrator user guide template
+func ParseUserGuideTemplate() (*template.Template, error) {
+	return template.New("user_guide.html").Parse(DefaultUserGuideHTML)
 }

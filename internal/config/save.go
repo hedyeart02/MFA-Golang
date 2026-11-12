@@ -62,6 +62,10 @@ type AdminSettingsPayload struct {
 	ITAAPIPassword        string   `json:"ita_api_password" form:"ita_api_password"`
 	ITAEnforceWhitelist   bool     `json:"ita_enforce_whitelist" form:"ita_enforce_whitelist"`
 	ITAManualAllowedUsers []string `json:"ita_manual_allowed_users" form:"ita_manual_allowed_users"`
+
+	// Custom Theme & Branding Profiles
+	BrandingActiveProfile string                  `json:"branding_active_profile" form:"branding_active_profile"`
+	BrandingProfiles      map[string]ThemeProfile `json:"branding_profiles,omitempty"`
 }
 
 // ApplyAdminSettings updates the in-memory Config from an AdminSettingsPayload without touching disk.
@@ -317,6 +321,25 @@ func ApplyAdminSettings(cfg *Config, payload *AdminSettingsPayload) {
 			cfg.ITA.ManualAllowedUsers = cfgList
 		}
 	}
+
+	// Custom Theme & Branding Profiles
+	if payload.BrandingProfiles != nil {
+		cleaned := make(map[string]ThemeProfile, len(payload.BrandingProfiles))
+		for k, prof := range payload.BrandingProfiles {
+			nk := NormalizeThemeProfileKey(k)
+			cleaned[nk] = SanitizeThemeProfile(prof)
+		}
+		cfg.Branding.Profiles = cleaned
+	}
+	if strings.TrimSpace(payload.BrandingActiveProfile) != "" {
+		active := NormalizeThemeProfileKey(payload.BrandingActiveProfile)
+		if active != "default" && cfg.Branding.Profiles != nil {
+			if _, ok := cfg.Branding.Profiles[active]; !ok {
+				active = "default"
+			}
+		}
+		cfg.Branding.ActiveProfile = active
+	}
 }
 
 // SaveConfig updates the in-memory Config and persists the changes to the specified YAML file.
@@ -521,6 +544,23 @@ func SaveConfig(filePath string, cfg *Config, payload *AdminSettingsPayload) err
 			list = append(list, u)
 		}
 		itaMap["manual_allowed_users"] = list
+	}
+
+	// Update Branding section when configured
+	if cfg.Branding.ActiveProfile != "" || len(cfg.Branding.Profiles) > 0 {
+		brandingMap, _ := raw["branding"].(map[string]interface{})
+		if brandingMap == nil {
+			brandingMap = make(map[string]interface{})
+			raw["branding"] = brandingMap
+		}
+		brandingMap["active_profile"] = cfg.Branding.EffectiveActiveProfile()
+		if len(cfg.Branding.Profiles) > 0 {
+			profilesMap := make(map[string]interface{}, len(cfg.Branding.Profiles))
+			for k, prof := range cfg.Branding.Profiles {
+				profilesMap[k] = prof
+			}
+			brandingMap["profiles"] = profilesMap
+		}
 	}
 
 	// 3. Write back cleanly

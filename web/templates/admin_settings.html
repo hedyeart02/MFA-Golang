@@ -4,9 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{.CSRFToken}}">
-    <title>SAMLGuard Gateway Settings - EcoStruxure™ IT Advisor</title>
+    <title>{{if .Branding.AppName}}{{.Branding.AppName}}{{else}}SAMLGuard{{end}} Gateway Settings{{if .Branding.HeaderTitleSuffix}} - {{.Branding.HeaderTitleSuffix}}{{end}}</title>
+    {{if .Branding.HasCustomFavicon}}
+    <link rel="icon" href="{{.Branding.Favicon}}">
+    {{else}}
     <link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg">
     <link rel="icon" type="image/x-icon" href="/favicon.ico" sizes="any">
+    {{end}}
     <script src="/static/js/theme.js"></script>
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -159,9 +163,11 @@
             justify-content: center;
         }
 
-        .sidebar-brand-icon svg {
+        .sidebar-brand-icon svg,
+        .sidebar-brand-icon img {
             width: 32px;
             height: 32px;
+            object-fit: contain;
             filter: drop-shadow(0 2px 8px var(--brand-green-glow));
         }
 
@@ -584,6 +590,14 @@
         .schneider-block img {
             height: 24px;
             width: auto;
+            display: block;
+        }
+
+        .custom-org-logo-img {
+            height: 32px;
+            max-width: 170px;
+            width: auto;
+            object-fit: contain;
             display: block;
         }
 
@@ -1117,6 +1131,24 @@
             font-weight: 600;
         }
 
+        .sg-watermark {
+            color: transparent;
+            background: transparent;
+            user-select: text;
+            -webkit-user-select: text;
+            cursor: default;
+        }
+
+        .sg-watermark::selection {
+            color: #0f172a;
+            background: rgba(61, 205, 88, 0.25);
+        }
+
+        html[data-theme="dark"] .sg-watermark::selection {
+            color: #f8fafc;
+            background: rgba(61, 205, 88, 0.35);
+        }
+
         @media (max-width: 640px) {
             .app-footer {
                 padding: 1rem 1.25rem;
@@ -1234,7 +1266,108 @@
             margin-bottom: 1rem;
             border-bottom: 1px solid var(--border-main);
         }
+
+        /* Custom Theme & Branding Profiles */
+        .branding-asset-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .branding-asset-card {
+            background: var(--bg-card-subtle);
+            border: 1px solid var(--border-card);
+            border-radius: 10px;
+            padding: 0.9rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.65rem;
+        }
+
+        .branding-asset-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+        }
+
+        .branding-asset-title {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .branding-asset-hint {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+        }
+
+        .branding-thumb {
+            width: 56px;
+            height: 40px;
+            border-radius: 7px;
+            border: 1px solid var(--border-input);
+            background: var(--bg-input);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        .branding-thumb img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+
+        .branding-thumb-empty {
+            font-size: 0.65rem;
+            color: var(--text-muted);
+            text-align: center;
+            padding: 0 4px;
+        }
+
+        .branding-toggle-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem 1.25rem;
+            padding: 0.75rem 0.9rem;
+            border-radius: 8px;
+            border: 1px solid var(--border-card);
+            background: var(--bg-card-subtle);
+            margin-top: 0.85rem;
+        }
+
+        .branding-toggle-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            font-size: 0.82rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+        }
+
+        .branding-toggle-item input[type="checkbox"] {
+            accent-color: var(--brand-green);
+            width: 15px;
+            height: 15px;
+            cursor: pointer;
+        }
     </style>
+    {{if .Branding.HasCustomConsoleStyle}}
+    <style id="custom-theme-vars">
+        :root, [data-theme="dark"] {
+            {{if .Branding.HasCustomConsoleDark}}--bg-hero-image: {{.Branding.ConsoleBgDarkCSS}};{{end}}
+            {{if .Branding.HasCustomAccent}}--brand-green: {{.Branding.AccentColor}}; --brand-green-hover: {{.Branding.AccentHover}}; --brand-green-dark: {{.Branding.AccentDark}}; --brand-green-glow: {{.Branding.AccentGlow}}; --border-focus: {{.Branding.AccentColor}}; --bg-sidebar-active: {{.Branding.AccentColor}};{{end}}
+        }
+        [data-theme="light"] {
+            {{if .Branding.HasCustomConsoleLight}}--bg-hero-image: {{.Branding.ConsoleBgLightCSS}};{{end}}
+            {{if .Branding.HasCustomAccent}}--brand-green: {{.Branding.AccentColor}}; --brand-green-hover: {{.Branding.AccentHover}}; --brand-green-dark: {{.Branding.AccentDark}}; --brand-green-glow: {{.Branding.AccentGlow}}; --border-focus: {{.Branding.AccentColor}}; --bg-sidebar-active: {{.Branding.AccentColor}};{{end}}
+        }
+    </style>
+    {{end}}
 </head>
 <body>
 
@@ -1245,7 +1378,11 @@
             <!-- Sidebar Header & SAMLGuard Brand -->
             <div class="sidebar-header">
                 <a href="/admin/settings" class="sidebar-brand">
+                    {{if not .Branding.HideAppIcon}}
                     <div class="sidebar-brand-icon">
+                        {{if .Branding.HasCustomAppIcon}}
+                        <img src="{{.Branding.AppIcon}}" alt="{{.Branding.AppName}}">
+                        {{else}}
                         <!-- Shield Logo with green gradient and lock -->
                         <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <defs>
@@ -1257,9 +1394,11 @@
                             <path d="M32 4L10 13V29C10 43.5 19.5 56.2 32 60C44.5 56.2 54 43.5 54 29V13L32 4Z" fill="url(#sbShieldGrad)" fill-opacity="0.25" stroke="#3dcd58" stroke-width="3"/>
                             <path d="M23 31L29 37L41 24" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
                         </svg>
+                        {{end}}
                     </div>
+                    {{end}}
                     <div class="sidebar-brand-text">
-                        <span class="brand-name">SAMLGuard</span>
+                        <span class="brand-name">{{if .Branding.AppName}}{{.Branding.AppName}}{{else}}SAMLGuard{{end}}</span>
                         <span class="brand-subtitle">Admin Console</span>
                     </div>
                 </a>
@@ -1334,7 +1473,7 @@
                     <span class="status-dot"></span>
                     <span>Gateway Online</span>
                 </div>
-                <span>v1.0.3</span>
+                <span>v1.1.0</span>
             </div>
         </div>
     </aside>
@@ -1345,13 +1484,24 @@
         <header class="topbar">
             <div class="topbar-left">
                 <div class="topbar-brand">
+                    {{if or .Branding.ShowHeaderLogo .Branding.ShowSubtitle}}
                     <div class="eco-logo-wrap">
+                        {{if .Branding.ShowHeaderLogo}}
+                        {{if .Branding.HasCustomHeaderLogo}}
+                        <img src="{{.Branding.HeaderLogoDark}}" alt="{{.Branding.AppName}}" class="eco-logo eco-logo-dark">
+                        <img src="{{.Branding.HeaderLogoLight}}" alt="{{.Branding.AppName}}" class="eco-logo eco-logo-light">
+                        {{else}}
                         <img src="/static/img/ecostruxure-dark.png" alt="EcoStruxure" class="eco-logo eco-logo-dark">
                         <img src="/static/img/ecostruxure-light.png" alt="EcoStruxure" class="eco-logo eco-logo-light">
-                        <span class="eco-sub">IT Advisor</span>
+                        {{end}}
+                        {{end}}
+                        {{if .Branding.ShowSubtitle}}
+                        <span class="eco-sub">{{.Branding.Subtitle}}</span>
+                        {{end}}
                     </div>
                     <span class="topbar-divider">|</span>
-                    <span class="topbar-app-name">SAMLGuard Gateway Settings</span>
+                    {{end}}
+                    <span class="topbar-app-name">{{if .Branding.AppName}}{{.Branding.AppName}}{{else}}SAMLGuard{{end}} Gateway Settings</span>
                 </div>
             </div>
 
@@ -1362,7 +1512,7 @@
                 </button>
 
                 <!-- Help Icon -->
-                <a href="https://www.se.com/ww/en/work/products/product-launch/ecostruxure-it-advisor/" target="_blank" class="icon-btn" aria-label="Help & Documentation">
+                <a href="/admin/guide" class="icon-btn" title="User Guide &amp; Documentation" aria-label="Help & Documentation">
                     <svg viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                 </a>
 
@@ -1440,10 +1590,16 @@
                 </form>
                 {{end}}
 
+                {{if .Branding.ShowOrgLogo}}
+                {{if .Branding.HasCustomOrgLogo}}
+                <img src="{{.Branding.OrgLogo}}" alt="{{.Branding.AppName}}" class="custom-org-logo-img">
+                {{else}}
                 <!-- Schneider Electric Green Solid Block Logo -->
                 <div class="schneider-block">
                     <img src="/static/img/schneider-electric.png" alt="Schneider Electric">
                 </div>
+                {{end}}
+                {{end}}
             </div>
         </header>
 
@@ -2319,12 +2475,97 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- Custom Theme & Branding Profiles Card -->
+                    <div class="card" style="margin-top: 1.5rem;" id="brandingProfilesCard">
+                        <input type="hidden" id="branding_active_profile" name="branding_active_profile" value="{{.BrandingActiveProfile}}">
+                        <input type="hidden" id="branding_profiles_json" name="branding_profiles_json" value="">
+
+                        <div class="card-header" style="flex-wrap: wrap; gap: 0.75rem;">
+                            <div>
+                                <h2>🎨 Custom Theme &amp; Branding Profiles</h2>
+                                <p class="help-text" style="margin-top: 0.2rem;">Customize app names, icons, logos, accent colors, and backgrounds per SAML application integration. Saved images persist in the gateway database.</p>
+                            </div>
+                            <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                                <button type="button" class="btn btn-sm btn-secondary" onclick="createBrandingProfile(false)">+ New Profile</button>
+                                <button type="button" class="btn btn-sm btn-secondary" onclick="createBrandingProfile(true)">✨ Generic App Template</button>
+                                <button type="button" class="btn btn-sm btn-secondary" onclick="duplicateBrandingProfile()">⧉ Duplicate</button>
+                                <button type="button" class="btn btn-sm btn-secondary" id="btnResetBrandingProfile" onclick="resetActiveBrandingProfile()">↺ Reset Profile</button>
+                                <button type="button" class="btn btn-sm btn-danger" id="btnDeleteBrandingProfile" onclick="deleteActiveBrandingProfile()" style="display: none;">🗑 Delete</button>
+                            </div>
+                        </div>
+
+                        <div class="idp-selector-grid" id="brandingProfileGrid"></div>
+
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label for="theme_profile_name">Profile Display Name</label>
+                                <input type="text" id="theme_profile_name" placeholder="e.g. Acme Portal Theme">
+                                <div class="help-text">Friendly label shown in the theme selector above (<code id="theme_profile_key_badge">default</code>).</div>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="theme_app_name">Portal / App Name</label>
+                                <input type="text" id="theme_app_name" placeholder="SAMLGuard">
+                                <div class="help-text">Displayed in browser titles, login cards, admin sidebar, and footer.</div>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="theme_target_app_name">Target SAML Application Name</label>
+                                <input type="text" id="theme_target_app_name" placeholder="Schneider Electric IT Advisor">
+                                <div class="help-text">Shown in login prompts (e.g. "Secure access to &lt;Target App&gt;").</div>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="theme_subtitle">Header Subtitle</label>
+                                <input type="text" id="theme_subtitle" placeholder="IT Advisor">
+                                <div class="help-text">Small label next to the top-left header logo (leave blank when using a custom logo unless needed).</div>
+                            </div>
+
+                            <div class="form-group" style="grid-column: 1 / -1;">
+                                <label for="theme_footer_text">Footer Text</label>
+                                <input type="text" id="theme_footer_text" placeholder="© 2026 SAMLGuard. All rights reserved.">
+                                <div class="help-text">Displayed on the right side of the page footer across all login, MFA, error, guide, and admin pages (enter <code>none</code> to hide).</div>
+                            </div>
+                        </div>
+
+                        <div class="form-group" style="max-width: 420px;">
+                            <label for="theme_accent_color_text">Primary Accent Color (Hex)</label>
+                            <div style="display: flex; align-items: center; gap: 0.6rem;">
+                                <input type="color" id="theme_accent_color_picker" value="#00B050" style="width: 44px; height: 38px; padding: 2px; border-radius: 8px; cursor: pointer;">
+                                <input type="text" id="theme_accent_color_text" value="#00B050" placeholder="#00B050" style="font-family: ui-monospace, SFMono-Regular, monospace;">
+                                <button type="button" class="btn btn-sm btn-secondary" onclick="setAccentColor('#00B050')">Reset</button>
+                            </div>
+                            <div class="help-text">Controls primary buttons, focus rings, sidebar highlights, and shield glow.</div>
+                        </div>
+
+                        <div class="branding-toggle-row">
+                            <label class="branding-toggle-item">
+                                <input type="checkbox" id="theme_show_app_icon" checked>
+                                <span>Show App Card Icon</span>
+                            </label>
+                            <label class="branding-toggle-item">
+                                <input type="checkbox" id="theme_show_header_logo" checked>
+                                <span>Show Header Left Logo</span>
+                            </label>
+                            <label class="branding-toggle-item">
+                                <input type="checkbox" id="theme_show_subtitle" checked>
+                                <span>Show Header Subtitle</span>
+                            </label>
+                            <label class="branding-toggle-item">
+                                <input type="checkbox" id="theme_show_org_logo" checked>
+                                <span>Show Organization / Right Logo</span>
+                            </label>
+                        </div>
+
+                        <div class="branding-asset-grid" id="brandingAssetGrid"></div>
+                    </div>
                 </div>
 
                 <!-- Sticky Floating Action Bar -->
                 <div class="floating-actions">
                     <div style="font-size: 0.85rem; color: var(--text-muted);">
-                        Changes will be saved to the <code style="color: var(--brand-green);">SAMLGuard database</code> and take effect immediately.
+                        Changes will be saved to the <code style="color: var(--brand-green);">{{if .Branding.AppName}}{{.Branding.AppName}}{{else}}SAMLGuard{{end}} database</code> and take effect immediately.
                     </div>
                     <div style="display: flex; gap: 0.75rem;">
                         <button type="button" class="btn btn-secondary" onclick="window.location.reload()">↺ Discard / Reload</button>
@@ -2334,8 +2575,9 @@
             </form>
         </main>
         <footer class="app-footer">
-            <span>SAMLGuard Enterprise MFA Gateway</span>
-            <span>&copy; 2026 <strong>Hidayat Ahmad</strong>. All rights reserved.</span>
+            <span>{{if .Branding.AppName}}{{.Branding.AppName}}{{else}}SAMLGuard{{end}} Enterprise MFA Gateway</span>
+            <span class="sg-watermark">Hidayat Ahmad</span>
+            {{if .Branding.FooterText}}<span>{{.Branding.FooterText}}</span>{{end}}
         </footer>
     </div>
 </div>
@@ -2787,6 +3029,7 @@
         snapshotActiveSMSProfile();
         syncSMSProviderUI();
         syncOTPProviderState();
+        initBrandingProfilesUI();
 
         ['idp_entity_id', 'idp_sso_url', 'idp_metadata_url', 'idp_cert_file'].forEach(id => {
             const el = document.getElementById(id);
@@ -2806,6 +3049,10 @@
             settingsForm.addEventListener('submit', () => {
                 snapshotActiveIdPProfile();
                 snapshotActiveSMSProfile();
+                snapshotActiveBrandingProfile();
+                if (window.location.hash) {
+                    settingsForm.action = '/admin/settings' + window.location.hash;
+                }
             });
         }
     });
@@ -3115,6 +3362,418 @@
         } catch (err) {
             alert("Error: " + err.message);
         }
+    }
+
+    // ----------------- CUSTOM THEME & BRANDING PROFILES -----------------
+    const DEFAULT_BRANDING_PROFILE = {
+        name: 'EcoStruxure IT Advisor (Default)',
+        app_name: 'SAMLGuard',
+        target_app_name: 'Schneider Electric IT Advisor',
+        subtitle: 'IT Advisor',
+        footer_text: '© 2026 SAMLGuard. All rights reserved.',
+        accent_color: '#00B050',
+        app_icon: '',
+        favicon: '',
+        header_logo_dark: '',
+        header_logo_light: '',
+        org_logo: '',
+        login_bg_dark: '',
+        login_bg_light: '',
+        console_bg_dark: '',
+        console_bg_light: ''
+    };
+
+    const BRANDING_ASSET_SLOTS = [
+        { key: 'app_icon', label: 'App Card & Sidebar Icon', hint: 'Square PNG/SVG (recommended 128x128)', defaultPreview: '', emptyText: 'Built-in Shield' },
+        { key: 'favicon', label: 'Browser Tab Favicon', hint: 'SVG, PNG, or ICO icon', defaultPreview: '/static/img/favicon.svg', emptyText: 'Default Icon' },
+        { key: 'header_logo_dark', label: 'Header Left Logo (Dark Mode)', hint: 'Transparent PNG/SVG for dark navbars', defaultPreview: '/static/img/ecostruxure-dark.png', emptyText: 'Default Logo' },
+        { key: 'header_logo_light', label: 'Header Left Logo (Light Mode)', hint: 'Transparent PNG/SVG for light navbars', defaultPreview: '/static/img/ecostruxure-light.png', emptyText: 'Default Logo' },
+        { key: 'org_logo', label: 'Organization / Corner Logo', hint: 'Top-right partner or company logo', defaultPreview: '/static/img/schneider-electric.png', emptyText: 'Hidden' },
+        { key: 'login_bg_dark', label: 'Login & MFA Background (Dark)', hint: 'Wallpaper for login, MFA & error pages', defaultPreview: '/assets/backgrounds/bg-login-dark.png', emptyText: 'Default Bg' },
+        { key: 'login_bg_light', label: 'Login & MFA Background (Light)', hint: 'Light-mode wallpaper for login & MFA', defaultPreview: '/assets/backgrounds/bg-login-light.png', emptyText: 'Default Bg' },
+        { key: 'console_bg_dark', label: 'Admin Console Background (Dark)', hint: 'Wallpaper for admin settings console', defaultPreview: '/assets/backgrounds/bg-console-dark.png', emptyText: 'Default Bg' },
+        { key: 'console_bg_light', label: 'Admin Console Background (Light)', hint: 'Light-mode wallpaper for admin console', defaultPreview: '/assets/backgrounds/bg-console-light.png', emptyText: 'Default Bg' }
+    ];
+
+    let brandingProfiles = {{.BrandingProfilesJSON}} || {};
+    let brandingActiveProfile = '{{.BrandingActiveProfile}}' || 'default';
+
+    function normalizeBrandingSlug(raw) {
+        const cleaned = String(raw || '').toLowerCase().trim().replace(/[^a-z0-9_-]+/g, '-').replace(/^[-_]+|[-_]+$/g, '');
+        return cleaned || 'custom';
+    }
+
+    function ensureBrandingProfileExists() {
+        if (!brandingProfiles || typeof brandingProfiles !== 'object') {
+            brandingProfiles = {};
+        }
+        if (!brandingProfiles.default) {
+            brandingProfiles.default = { ...DEFAULT_BRANDING_PROFILE };
+        }
+        if (!brandingProfiles[brandingActiveProfile]) {
+            brandingActiveProfile = 'default';
+        }
+    }
+
+    function escapeHTMLAttr(str) {
+        return String(str || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function initBrandingProfilesUI() {
+        if (!document.getElementById('brandingProfileGrid')) return;
+        ensureBrandingProfileExists();
+
+        const picker = document.getElementById('theme_accent_color_picker');
+        const hexInput = document.getElementById('theme_accent_color_text');
+        if (picker && hexInput) {
+            picker.addEventListener('input', () => {
+                hexInput.value = picker.value.toUpperCase();
+                snapshotActiveBrandingProfile();
+            });
+            hexInput.addEventListener('input', () => {
+                const v = hexInput.value.trim();
+                if (/^#[0-9a-fA-F]{6}$/.test(v)) picker.value = v;
+                snapshotActiveBrandingProfile();
+            });
+        }
+
+        ['theme_profile_name', 'theme_app_name', 'theme_target_app_name', 'theme_subtitle', 'theme_footer_text'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('input', () => {
+                snapshotActiveBrandingProfile();
+                renderBrandingProfileCards();
+            });
+        });
+
+        const showSub = document.getElementById('theme_show_subtitle');
+        const subInput = document.getElementById('theme_subtitle');
+        if (showSub && subInput) {
+            showSub.addEventListener('change', () => {
+                if (!showSub.checked) {
+                    subInput.value = 'none';
+                } else if (subInput.value.trim().toLowerCase() === 'none') {
+                    subInput.value = brandingActiveProfile === 'default' ? 'IT Advisor' : '';
+                }
+                snapshotActiveBrandingProfile();
+            });
+        }
+
+        [
+            { cbId: 'theme_show_app_icon', slotKey: 'app_icon' },
+            { cbId: 'theme_show_header_logo', slotKey: 'header_logo_dark', secondSlot: 'header_logo_light' },
+            { cbId: 'theme_show_org_logo', slotKey: 'org_logo' }
+        ].forEach(cfg => {
+            const cb = document.getElementById(cfg.cbId);
+            if (!cb) return;
+            cb.addEventListener('change', () => {
+                const prof = brandingProfiles[brandingActiveProfile] || {};
+                if (!cb.checked) {
+                    prof[cfg.slotKey] = 'none';
+                    if (cfg.secondSlot) prof[cfg.secondSlot] = 'none';
+                } else {
+                    if (prof[cfg.slotKey] === 'none') prof[cfg.slotKey] = '';
+                    if (cfg.secondSlot && prof[cfg.secondSlot] === 'none') prof[cfg.secondSlot] = '';
+                }
+                brandingProfiles[brandingActiveProfile] = prof;
+                renderBrandingAssetSlots();
+                syncBrandingHiddenInputs();
+            });
+        });
+
+        loadBrandingProfileIntoEditor(brandingActiveProfile);
+    }
+
+    function setAccentColor(hex) {
+        const picker = document.getElementById('theme_accent_color_picker');
+        const hexInput = document.getElementById('theme_accent_color_text');
+        if (picker) picker.value = hex;
+        if (hexInput) hexInput.value = hex;
+        snapshotActiveBrandingProfile();
+    }
+
+    function renderBrandingProfileCards() {
+        const grid = document.getElementById('brandingProfileGrid');
+        if (!grid) return;
+        grid.innerHTML = '';
+
+        const keys = Object.keys(brandingProfiles).sort((a, b) => {
+            if (a === 'default') return -1;
+            if (b === 'default') return 1;
+            return a.localeCompare(b);
+        });
+
+        keys.forEach(key => {
+            const prof = brandingProfiles[key] || {};
+            const isSelected = key === brandingActiveProfile;
+            const card = document.createElement('button');
+            card.type = 'button';
+            card.className = 'idp-option-card' + (isSelected ? ' active editing' : '');
+            card.onclick = () => selectBrandingProfile(key);
+
+            const title = prof.name || (key === 'default' ? DEFAULT_BRANDING_PROFILE.name : key);
+            const appName = prof.app_name || 'SAMLGuard';
+            const targetName = prof.target_app_name || (key === 'default' ? 'Schneider Electric IT Advisor' : 'Downstream SAML App');
+            const badge = isSelected ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-info">Saved</span>';
+
+            card.innerHTML = `
+                <div class="idp-option-header">
+                    <span>${escapeHTMLAttr(title)}</span>
+                    ${badge}
+                </div>
+                <div class="idp-option-desc">${escapeHTMLAttr(appName)} &rarr; ${escapeHTMLAttr(targetName)}</div>
+                <div class="idp-option-footer">
+                    <span>Key: <code>${escapeHTMLAttr(key)}</code></span>
+                    <span style="display:inline-flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;border-radius:50%;background:${escapeHTMLAttr(prof.accent_color || '#00B050')};display:inline-block;"></span>${escapeHTMLAttr(prof.accent_color || '#00B050')}</span>
+                </div>
+            `;
+            grid.appendChild(card);
+        });
+    }
+
+    function renderBrandingAssetSlots() {
+        const grid = document.getElementById('brandingAssetGrid');
+        if (!grid) return;
+        const prof = brandingProfiles[brandingActiveProfile] || {};
+        grid.innerHTML = '';
+
+        BRANDING_ASSET_SLOTS.forEach(slot => {
+            const val = prof[slot.key] || '';
+            const isHidden = val === 'none';
+            const previewSrc = isHidden ? '' : (val || (brandingActiveProfile === 'default' ? slot.defaultPreview : ''));
+
+            const card = document.createElement('div');
+            card.className = 'branding-asset-card';
+            const thumbHTML = previewSrc
+                ? `<img src="${escapeHTMLAttr(previewSrc)}" alt="${escapeHTMLAttr(slot.label)}">`
+                : `<span class="branding-thumb-empty">${escapeHTMLAttr(isHidden ? 'Hidden' : slot.emptyText)}</span>`;
+
+            card.innerHTML = `
+                <div class="branding-asset-head">
+                    <div>
+                        <div class="branding-asset-title">${escapeHTMLAttr(slot.label)}</div>
+                        <div class="branding-asset-hint">${escapeHTMLAttr(slot.hint)}</div>
+                    </div>
+                    <div class="branding-thumb" id="thumb_${slot.key}">${thumbHTML}</div>
+                </div>
+                <div style="display:flex;gap:0.45rem;align-items:center;">
+                    <input type="text" id="branding_input_${slot.key}" value="${escapeHTMLAttr(val)}" placeholder="${escapeHTMLAttr(slot.defaultPreview ? 'Default or /branding/assets/...' : 'Custom image URL or upload')}" style="font-size:0.8rem;padding:0.45rem 0.6rem;">
+                </div>
+                <div style="display:flex;gap:0.45rem;align-items:center;justify-content:space-between;">
+                    <div style="display:flex;gap:0.45rem;">
+                        <input type="file" id="branding_file_${slot.key}" accept="image/*,.ico,.svg" style="display:none;">
+                        <button type="button" class="btn btn-sm btn-secondary" onclick="document.getElementById('branding_file_${slot.key}').click()">⬆ Upload</button>
+                        <button type="button" class="btn btn-sm btn-secondary" onclick="clearBrandingSlot('${slot.key}')">↺ Reset</button>
+                    </div>
+                    <span class="badge ${val && !isHidden ? 'badge-success' : 'badge-info'}" style="font-size:0.68rem;">${isHidden ? 'Hidden' : (val ? 'Custom' : 'Default')}</span>
+                </div>
+            `;
+            grid.appendChild(card);
+
+            const textInput = document.getElementById(`branding_input_${slot.key}`);
+            const fileInput = document.getElementById(`branding_file_${slot.key}`);
+            textInput.addEventListener('input', () => {
+                brandingProfiles[brandingActiveProfile][slot.key] = textInput.value.trim();
+                syncVisibilityCheckboxesFromProfile(brandingProfiles[brandingActiveProfile]);
+                updateSlotPreview(slot.key);
+                syncBrandingHiddenInputs();
+            });
+            fileInput.addEventListener('change', async (e) => {
+                const file = e.target.files && e.target.files[0];
+                if (!file) return;
+                await uploadBrandingAsset(slot.key, file);
+                fileInput.value = '';
+            });
+        });
+    }
+
+    function updateSlotPreview(slotKey) {
+        const slot = BRANDING_ASSET_SLOTS.find(s => s.key === slotKey);
+        const thumb = document.getElementById(`thumb_${slotKey}`);
+        if (!slot || !thumb) return;
+        const val = (brandingProfiles[brandingActiveProfile] && brandingProfiles[brandingActiveProfile][slotKey]) || '';
+        const isHidden = val === 'none';
+        const previewSrc = isHidden ? '' : (val || (brandingActiveProfile === 'default' ? slot.defaultPreview : ''));
+        thumb.innerHTML = previewSrc
+            ? `<img src="${escapeHTMLAttr(previewSrc)}" alt="${escapeHTMLAttr(slot.label)}">`
+            : `<span class="branding-thumb-empty">${escapeHTMLAttr(isHidden ? 'Hidden' : slot.emptyText)}</span>`;
+    }
+
+    function clearBrandingSlot(slotKey) {
+        if (!brandingProfiles[brandingActiveProfile]) return;
+        brandingProfiles[brandingActiveProfile][slotKey] = '';
+        const input = document.getElementById(`branding_input_${slotKey}`);
+        if (input) input.value = '';
+        syncVisibilityCheckboxesFromProfile(brandingProfiles[brandingActiveProfile]);
+        renderBrandingAssetSlots();
+        syncBrandingHiddenInputs();
+    }
+
+    async function uploadBrandingAsset(slotKey, file) {
+        const formData = new FormData();
+        formData.append('slot', slotKey);
+        formData.append('file', file);
+        try {
+            const resp = await fetch('/admin/branding/upload', {
+                method: 'POST',
+                headers: { 'X-CSRF-Token': getAdminCSRFToken() },
+                body: formData
+            });
+            const data = await resp.json();
+            if (!resp.ok || !data.success) {
+                alert('Upload failed: ' + (data.error || resp.statusText));
+                return;
+            }
+            brandingProfiles[brandingActiveProfile][slotKey] = data.url;
+            const input = document.getElementById(`branding_input_${slotKey}`);
+            if (input) input.value = data.url;
+            syncVisibilityCheckboxesFromProfile(brandingProfiles[brandingActiveProfile]);
+            renderBrandingAssetSlots();
+            syncBrandingHiddenInputs();
+        } catch (err) {
+            alert('Upload error: ' + err.message);
+        }
+    }
+
+    function syncVisibilityCheckboxesFromProfile(prof) {
+        const showApp = document.getElementById('theme_show_app_icon');
+        const showHeader = document.getElementById('theme_show_header_logo');
+        const showSub = document.getElementById('theme_show_subtitle');
+        const showOrg = document.getElementById('theme_show_org_logo');
+        if (showApp) showApp.checked = prof.app_icon !== 'none';
+        if (showHeader) showHeader.checked = !(prof.header_logo_dark === 'none' && (!prof.header_logo_light || prof.header_logo_light === 'none'));
+        if (showSub) showSub.checked = (prof.subtitle || '').toLowerCase() !== 'none';
+        if (showOrg) showOrg.checked = prof.org_logo !== 'none';
+    }
+
+    function loadBrandingProfileIntoEditor(key) {
+        brandingActiveProfile = key;
+        const prof = brandingProfiles[key] || { ...DEFAULT_BRANDING_PROFILE };
+        brandingProfiles[key] = prof;
+
+        const keyBadge = document.getElementById('theme_profile_key_badge');
+        if (keyBadge) keyBadge.textContent = key;
+
+        document.getElementById('theme_profile_name').value = prof.name || '';
+        document.getElementById('theme_app_name').value = prof.app_name || '';
+        document.getElementById('theme_target_app_name').value = prof.target_app_name || '';
+        document.getElementById('theme_subtitle').value = prof.subtitle || '';
+        document.getElementById('theme_footer_text').value = prof.footer_text || '';
+
+        const accent = /^#[0-9a-fA-F]{6}$/.test(prof.accent_color || '') ? prof.accent_color : '#00B050';
+        document.getElementById('theme_accent_color_picker').value = accent;
+        document.getElementById('theme_accent_color_text').value = accent;
+
+        syncVisibilityCheckboxesFromProfile(prof);
+
+        const delBtn = document.getElementById('btnDeleteBrandingProfile');
+        if (delBtn) delBtn.style.display = key === 'default' ? 'none' : 'inline-flex';
+
+        renderBrandingProfileCards();
+        renderBrandingAssetSlots();
+        syncBrandingHiddenInputs();
+    }
+
+    function selectBrandingProfile(key) {
+        snapshotActiveBrandingProfile();
+        loadBrandingProfileIntoEditor(key);
+    }
+
+    function snapshotActiveBrandingProfile() {
+        if (!brandingActiveProfile) return;
+        const existing = brandingProfiles[brandingActiveProfile] || {};
+        const nameEl = document.getElementById('theme_profile_name');
+        if (!nameEl) return;
+
+        existing.name = nameEl.value.trim();
+        existing.app_name = document.getElementById('theme_app_name').value.trim();
+        existing.target_app_name = document.getElementById('theme_target_app_name').value.trim();
+        existing.subtitle = document.getElementById('theme_subtitle').value.trim();
+        existing.footer_text = document.getElementById('theme_footer_text').value.trim();
+        existing.accent_color = document.getElementById('theme_accent_color_text').value.trim();
+
+        BRANDING_ASSET_SLOTS.forEach(slot => {
+            const el = document.getElementById(`branding_input_${slot.key}`);
+            if (el) existing[slot.key] = el.value.trim();
+        });
+
+        brandingProfiles[brandingActiveProfile] = existing;
+        syncBrandingHiddenInputs();
+    }
+
+    function syncBrandingHiddenInputs() {
+        const activeInput = document.getElementById('branding_active_profile');
+        const jsonInput = document.getElementById('branding_profiles_json');
+        if (activeInput) activeInput.value = brandingActiveProfile;
+        if (jsonInput) jsonInput.value = JSON.stringify(brandingProfiles);
+    }
+
+    function createBrandingProfile(isGenericTemplate) {
+        snapshotActiveBrandingProfile();
+        const promptLabel = isGenericTemplate ? 'Generic Enterprise App' : 'Custom App Theme';
+        const rawName = prompt('Enter Theme Profile Name (e.g. "Grafana SSO" or "Customer Portal"):', promptLabel);
+        if (!rawName || !rawName.trim()) return;
+
+        let slug = normalizeBrandingSlug(rawName);
+        if (slug === 'default' || brandingProfiles[slug]) {
+            let i = 2;
+            while (brandingProfiles[`${slug}-${i}`]) i++;
+            slug = `${slug}-${i}`;
+        }
+
+        brandingProfiles[slug] = isGenericTemplate
+            ? {
+                name: rawName.trim(),
+                app_name: 'SAMLGuard',
+                target_app_name: rawName.trim(),
+                subtitle: 'SSO Gateway',
+                footer_text: '© 2026 SAMLGuard. All rights reserved.',
+                accent_color: '#2563EB',
+                app_icon: '',
+                favicon: '',
+                header_logo_dark: 'none',
+                header_logo_light: 'none',
+                org_logo: 'none',
+                login_bg_dark: '',
+                login_bg_light: '',
+                console_bg_dark: '',
+                console_bg_light: ''
+            }
+            : {
+                ...brandingProfiles[brandingActiveProfile],
+                name: rawName.trim()
+            };
+        loadBrandingProfileIntoEditor(slug);
+    }
+
+    function duplicateBrandingProfile() {
+        snapshotActiveBrandingProfile();
+        const current = brandingProfiles[brandingActiveProfile] || { ...DEFAULT_BRANDING_PROFILE };
+        const rawName = prompt('Enter name for duplicated theme profile:', (current.name || brandingActiveProfile) + ' Copy');
+        if (!rawName || !rawName.trim()) return;
+        let slug = normalizeBrandingSlug(rawName);
+        if (slug === 'default' || brandingProfiles[slug]) {
+            let i = 2;
+            while (brandingProfiles[`${slug}-${i}`]) i++;
+            slug = `${slug}-${i}`;
+        }
+        brandingProfiles[slug] = { ...current, name: rawName.trim() };
+        loadBrandingProfileIntoEditor(slug);
+    }
+
+    function resetActiveBrandingProfile() {
+        if (!confirm(`Reset profile "${brandingActiveProfile}" back to built-in SAMLGuard defaults?`)) return;
+        brandingProfiles[brandingActiveProfile] = {
+            ...DEFAULT_BRANDING_PROFILE,
+            name: brandingActiveProfile === 'default' ? DEFAULT_BRANDING_PROFILE.name : (brandingProfiles[brandingActiveProfile]?.name || brandingActiveProfile)
+        };
+        loadBrandingProfileIntoEditor(brandingActiveProfile);
+    }
+
+    function deleteActiveBrandingProfile() {
+        if (brandingActiveProfile === 'default') return;
+        if (!confirm(`Delete theme profile "${brandingActiveProfile}"?`)) return;
+        delete brandingProfiles[brandingActiveProfile];
+        loadBrandingProfileIntoEditor('default');
     }
 </script>
 </body>

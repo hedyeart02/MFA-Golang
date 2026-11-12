@@ -7,7 +7,7 @@
     and creates .zip and .tar.gz distribution archives with SHA-256 checksums.
 #>
 param(
-    [string]$Version = "1.0.3"
+    [string]$Version = "1.1.0"
 )
 
 $ErrorActionPreference = "Stop"

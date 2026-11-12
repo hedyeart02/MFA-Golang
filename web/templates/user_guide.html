@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{if .Branding.AppName}}{{.Branding.AppName}}{{else}}SAMLGuard{{end}} User Guide{{if .Branding.HeaderTitleSuffix}} - {{.Branding.HeaderTitleSuffix}}{{end}}</title>
+    {{if .Branding.HasCustomFavicon}}
+    <link rel="icon" href="{{.Branding.Favicon}}">
+    {{else}}
+    <link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" sizes="any">
+    {{end}}
+    <script src="/static/js/theme.js"></script>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root, [data-theme="dark"] {
+            --bg-body: #101B2B;
+            --bg-sidebar: rgba(11, 20, 33, 0.86);
+            --bg-sidebar-hover: rgba(23, 37, 54, 0.88);
+            --bg-sidebar-active: #00B050;
+            --bg-topbar: rgba(16, 27, 43, 0.84);
+            --bg-hero-image: url('/assets/backgrounds/bg-console-dark.png');
+            --bg-console-scrim: linear-gradient(135deg, rgba(16, 27, 43, 0.62) 0%, rgba(16, 27, 43, 0.42) 55%, rgba(16, 27, 43, 0.48) 100%);
+            --bg-card: rgba(23, 37, 54, 0.90);
+            --bg-card-subtle: rgba(18, 30, 46, 0.90);
+            --bg-input: rgba(16, 27, 43, 0.90);
+            --border-main: rgba(148, 178, 214, 0.18);
+            --border-card: rgba(148, 178, 214, 0.16);
+            --border-input: #27405e;
+            --border-focus: #00B050;
+            --text-primary: #f1f6fc;
+            --text-secondary: #b2c5dc;
+            --text-muted: #7f96b3;
+            --brand-green: #00B050;
+            --brand-green-hover: #009845;
+            --brand-green-dark: #00823a;
+            --brand-green-glow: rgba(0, 176, 80, 0.30);
+            --dropdown-bg: #172536;
+            --dropdown-border: #253d5c;
+            --code-bg: #0f172a;
+            --code-color: #3dcd58;
+        }
+
+        [data-theme="light"] {
+            --bg-body: #f1f4f8;
+            --bg-sidebar: rgba(255, 255, 255, 0.88);
+            --bg-sidebar-hover: rgba(241, 245, 249, 0.92);
+            --bg-sidebar-active: #00B050;
+            --bg-topbar: rgba(255, 255, 255, 0.88);
+            --bg-hero-image: url('/assets/backgrounds/bg-console-light.png');
+            --bg-console-scrim: linear-gradient(135deg, rgba(248, 250, 252, 0.68) 0%, rgba(248, 250, 252, 0.48) 55%, rgba(241, 244, 248, 0.56) 100%);
+            --bg-card: rgba(255, 255, 255, 0.92);
+            --bg-card-subtle: rgba(248, 250, 252, 0.92);
+            --bg-input: #ffffff;
+            --border-main: rgba(16, 27, 43, 0.10);
+            --border-card: rgba(16, 27, 43, 0.10);
+            --border-input: #cbd5e1;
+            --border-focus: #00B050;
+            --text-primary: #101B2B;
+            --text-secondary: #334155;
+            --text-muted: #64748b;
+            --brand-green: #00B050;
+            --brand-green-hover: #009845;
+            --brand-green-dark: #007d39;
+            --brand-green-glow: rgba(0, 176, 80, 0.22);
+            --dropdown-bg: #ffffff;
+            --dropdown-border: #cbd5e1;
+            --code-bg: #eef2f7;
+            --code-color: #00823a;
+        }
+
+        html { scroll-behavior: smooth; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-body);
+            background-image: var(--bg-console-scrim), var(--bg-hero-image);
+            background-size: cover;
+            background-position: center center;
+            background-attachment: fixed;
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.55;
+            transition: background-color 0.2s ease, color 0.2s ease;
+        }
+
+        .guide-layout {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 270px;
+            background: var(--bg-sidebar);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+            border-right: 1px solid var(--border-main);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            height: 100vh;
+            z-index: 40;
+            flex-shrink: 0;
+            overflow-y: auto;
+        }
+
+        .sidebar-header {
+            padding: 1.15rem 1.25rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border-main);
+        }
+
+        .sidebar-brand {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            text-decoration: none;
+            color: inherit;
+        }
+
+        .sidebar-brand-icon {
+            width: 34px;
+            height: 34px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .sidebar-brand-icon svg,
+        .sidebar-brand-icon img {
+            width: 32px;
+            height: 32px;
+            object-fit: contain;
+            filter: drop-shadow(0 2px 8px var(--brand-green-glow));
+        }
+
+        .brand-name { font-size: 1rem; font-weight: 700; display: block; line-height: 1.2; }
+        .brand-subtitle { font-size: 0.72rem; color: var(--text-muted); font-weight: 500; display: block; }
+
+        .sidebar-section-label {
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-muted);
+            padding: 1rem 1.25rem 0.45rem;
+        }
+
+        .toc-nav {
+            padding: 0 0.75rem 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .toc-link {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.6rem 0.85rem;
+            border-radius: 8px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.86rem;
+            font-weight: 500;
+            transition: all 0.15s ease;
+        }
+
+        .toc-link:hover {
+            background: var(--bg-sidebar-hover);
+            color: var(--text-primary);
+        }
+
+        .toc-link.active {
+            background: var(--bg-sidebar-active);
+            color: #ffffff;
+            box-shadow: 0 4px 12px var(--brand-green-glow);
+        }
+
+        .sidebar-footer {
+            padding: 1rem 1.25rem;
+            border-top: 1px solid var(--border-main);
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        /* Main Shell */
+        .main-shell {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .topbar {
+            background: var(--bg-topbar);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+            border-bottom: 1px solid var(--border-main);
+            padding: 0.85rem 1.75rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            position: sticky;
+            top: 0;
+            z-index: 30;
+        }
+
+        .topbar-brand {
+            display: flex;
+            align-items: center;
+            gap: 0.85rem;
+            flex-wrap: wrap;
+        }
+
+        .eco-logo-wrap { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+        .eco-logo { height: 22px; width: auto; }
+        [data-theme="dark"] .eco-logo-light { display: none; }
+        [data-theme="light"] .eco-logo-dark { display: none; }
+        .eco-sub { font-size: 0.66rem; font-weight: 600; color: var(--text-secondary); line-height: 1; }
+        .topbar-divider { color: var(--text-muted); opacity: 0.45; }
+        .topbar-title { font-size: 0.95rem; font-weight: 700; color: var(--text-primary); }
+
+        .topbar-right {
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.5rem 0.9rem;
+            border-radius: 8px;
+            font-size: 0.84rem;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: all 0.16s ease;
+            font-family: inherit;
+        }
+
+        .btn-primary {
+            background: var(--brand-green);
+            color: #ffffff;
+        }
+        .btn-primary:hover { background: var(--brand-green-hover); }
+
+        .btn-secondary {
+            background: var(--bg-input);
+            border-color: var(--border-input);
+            color: var(--text-primary);
+        }
+        .btn-secondary:hover { border-color: var(--brand-green); }
+
+        .icon-btn {
+            background: var(--bg-input);
+            border: 1px solid var(--border-input);
+            color: var(--text-secondary);
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .icon-btn:hover { border-color: var(--brand-green); color: var(--text-primary); }
+        .icon-btn svg { width: 17px; height: 17px; stroke: currentColor; fill: none; }
+
+        /* Theme Dropdown */
+        .theme-dropdown-wrap { position: relative; }
+        .theme-pill-btn {
+            background: var(--bg-input);
+            border: 1px solid var(--border-input);
+            color: var(--text-primary);
+            padding: 0.42rem 0.78rem;
+            border-radius: 8px;
+            font-size: 0.82rem;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            cursor: pointer;
+        }
+        .theme-pill-btn:hover { border-color: var(--brand-green); }
+        .theme-pill-btn svg { width: 14px; height: 14px; stroke: currentColor; fill: none; }
+
+        .theme-menu {
+            position: absolute;
+            right: 0;
+            top: calc(100% + 8px);
+            background: var(--dropdown-bg);
+            border: 1px solid var(--dropdown-border);
+            border-radius: 12px;
+            box-shadow: 0 16px 36px rgba(0, 0, 0, 0.35);
+            width: 240px;
+            padding: 0.55rem;
+            z-index: 60;
+            display: none;
+        }
+        .theme-menu.active { display: block; }
+        .theme-menu-title { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); font-weight: 700; padding: 0.35rem 0.6rem; }
+        .theme-option { display: flex; align-items: center; justify-content: space-between; padding: 0.55rem 0.7rem; border-radius: 8px; cursor: pointer; border: 1px solid transparent; }
+        .theme-option:hover { background: rgba(125, 155, 195, 0.12); }
+        .theme-option.selected { border-color: var(--brand-green); background: rgba(0, 176, 80, 0.1); }
+        .theme-opt-left { display: flex; align-items: center; gap: 0.6rem; }
+        .theme-opt-left svg { width: 16px; height: 16px; stroke: currentColor; fill: none; }
+        .theme-opt-title { font-size: 0.82rem; font-weight: 600; }
+        .theme-opt-sub { font-size: 0.7rem; color: var(--text-muted); }
+        .theme-check { color: var(--brand-green); display: none; }
+        .theme-option.selected .theme-check { display: block; }
+
+        .schneider-block {
+            background-color: #009e4f;
+            height: 36px;
+            padding: 0 0.9rem;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .schneider-block img { height: 21px; width: auto; display: block; }
+        .custom-org-logo-img { height: 30px; max-width: 160px; width: auto; object-fit: contain; display: block; }
+
+        /* Hero */
+        .hero-banner {
+            padding: 2rem 2.25rem;
+            border-bottom: 1px solid var(--border-main);
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1.25rem;
+        }
+        .hero-banner h1 { font-size: 1.75rem; font-weight: 700; margin-bottom: 0.3rem; }
+        .hero-banner p { font-size: 0.92rem; color: var(--text-secondary); max-width: 680px; }
+
+        .guide-search-box {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-input);
+            border-radius: 10px;
+            padding: 0.5rem 0.85rem;
+            min-width: 280px;
+        }
+        .guide-search-box:focus-within { border-color: var(--brand-green); box-shadow: 0 0 0 3px var(--brand-green-glow); }
+        .guide-search-box input {
+            background: transparent;
+            border: none;
+            color: var(--text-primary);
+            font-size: 0.88rem;
+            width: 100%;
+            outline: none;
+        }
+
+        /* Content */
+        .guide-content {
+            padding: 1.75rem 2.25rem 3rem;
+            max-width: 1180px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 1.35rem;
+            flex: 1;
+        }
+
+        .guide-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 14px;
+            padding: 1.5rem 1.65rem;
+            scroll-margin-top: 84px;
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+        }
+
+        .guide-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            padding-bottom: 0.85rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border-main);
+        }
+
+        .guide-card-header h2 {
+            font-size: 1.18rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.22rem 0.6rem;
+            border-radius: 999px;
+            font-size: 0.74rem;
+            font-weight: 600;
+        }
+        .badge-info { background: rgba(59, 130, 246, 0.14); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.28); }
+        .badge-success { background: rgba(16, 185, 129, 0.14); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.28); }
+        .badge-warning { background: rgba(245, 158, 11, 0.14); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.28); }
+
+        .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-top: 0.75rem; }
+        .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-top: 0.75rem; }
+
+        .sub-box {
+            background: var(--bg-card-subtle);
+            border: 1px solid var(--border-card);
+            border-radius: 10px;
+            padding: 1rem 1.1rem;
+        }
+        .sub-box h3 { font-size: 0.94rem; font-weight: 700; color: var(--brand-green); margin-bottom: 0.45rem; }
+        .sub-box p, .sub-box li, .guide-card p, .guide-card li { font-size: 0.87rem; color: var(--text-secondary); }
+
+        ul.guide-list, ol.guide-list { padding-left: 1.25rem; display: flex; flex-direction: column; gap: 0.45rem; margin-top: 0.5rem; }
+
+        code {
+            background: var(--code-bg);
+            color: var(--code-color);
+            padding: 0.14rem 0.42rem;
+            border-radius: 5px;
+            font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+            font-size: 0.82rem;
+        }
+
+        pre.flow-diagram {
+            background: var(--code-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--border-card);
+            border-radius: 10px;
+            padding: 1rem 1.15rem;
+            overflow-x: auto;
+            font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+            font-size: 0.8rem;
+            line-height: 1.5;
+            margin-top: 0.75rem;
+        }
+
+        table.guide-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 0.75rem;
+            font-size: 0.85rem;
+        }
+        table.guide-table th, table.guide-table td {
+            text-align: left;
+            padding: 0.65rem 0.75rem;
+            border-bottom: 1px solid var(--border-main);
+            color: var(--text-secondary);
+        }
+        table.guide-table th {
+            color: var(--text-primary);
+            font-weight: 700;
+            background: var(--bg-card-subtle);
+        }
+
+        .live-meta-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.6rem;
+            margin-top: 0.85rem;
+        }
+
+        .empty-search-msg {
+            display: none;
+            text-align: center;
+            padding: 2.5rem 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 14px;
+            color: var(--text-muted);
+        }
+
+        .app-footer {
+            padding: 1rem 2.25rem;
+            border-top: 1px solid var(--border-main);
+            background: var(--bg-topbar);
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            gap: 0.5rem 1rem;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+        }
+
+        .sg-watermark {
+            color: transparent;
+            background: transparent;
+            user-select: text;
+            -webkit-user-select: text;
+            cursor: default;
+        }
+
+        .sg-watermark::selection {
+            color: #0f172a;
+            background: rgba(61, 205, 88, 0.25);
+        }
+
+        html[data-theme="dark"] .sg-watermark::selection {
+            color: #f8fafc;
+            background: rgba(61, 205, 88, 0.35);
+        }
+
+        @media (max-width: 960px) {
+            .sidebar { display: none; }
+            .topbar, .hero-banner, .guide-content, .app-footer { padding-left: 1.15rem; padding-right: 1.15rem; }
+        }
+    </style>
+    {{if .Branding.HasCustomConsoleStyle}}
+    <style id="custom-theme-vars">
+        :root, [data-theme="dark"] {
+            {{if .Branding.HasCustomConsoleDark}}--bg-hero-image: {{.Branding.ConsoleBgDarkCSS}};{{end}}
+            {{if .Branding.HasCustomAccent}}--brand-green: {{.Branding.AccentColor}}; --brand-green-hover: {{.Branding.AccentHover}}; --brand-green-dark: {{.Branding.AccentDark}}; --brand-green-glow: {{.Branding.AccentGlow}}; --border-focus: {{.Branding.AccentColor}}; --bg-sidebar-active: {{.Branding.AccentColor}};{{end}}
+        }
+        [data-theme="light"] {
+            {{if .Branding.HasCustomConsoleLight}}--bg-hero-image: {{.Branding.ConsoleBgLightCSS}};{{end}}
+            {{if .Branding.HasCustomAccent}}--brand-green: {{.Branding.AccentColor}}; --brand-green-hover: {{.Branding.AccentHover}}; --brand-green-dark: {{.Branding.AccentDark}}; --brand-green-glow: {{.Branding.AccentGlow}}; --border-focus: {{.Branding.AccentColor}}; --bg-sidebar-active: {{.Branding.AccentColor}};{{end}}
+        }
+    </style>
+    {{end}}
+</head>
+<body>
+
+<div class="guide-layout">
+    <aside class="sidebar">
+        <div>
+            <div class="sidebar-header">
+                <a href="/admin/settings" class="sidebar-brand">
+                    {{if not .Branding.HideAppIcon}}
+                    <div class="sidebar-brand-icon">
+                        {{if .Branding.HasCustomAppIcon}}
+                        <img src="{{.Branding.AppIcon}}" alt="{{.Branding.AppName}}">
+                        {{else}}
+                        <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <defs>
+                                <linearGradient id="guideShieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                    <stop offset="0%" stop-color="#008744"/>
+                                    <stop offset="100%" stop-color="#3dcd58"/>
+                                </linearGradient>
+                            </defs>
+                            <path d="M32 4L10 13V29C10 43.5 19.5 56.2 32 60C44.5 56.2 54 43.5 54 29V13L32 4Z" fill="url(#guideShieldGrad)" fill-opacity="0.25" stroke="#3dcd58" stroke-width="3"/>
+                            <path d="M23 31L29 37L41 24" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        {{end}}
+                    </div>
+                    {{end}}
+                    <div>
+                        <span class="brand-name">{{if .Branding.AppName}}{{.Branding.AppName}}{{else}}SAMLGuard{{end}}</span>
+                        <span class="brand-subtitle">Administrator User Guide</span>
+                    </div>
+                </a>
+            </div>
+
+            <div class="sidebar-section-label">Guide Contents</div>
+            <nav class="toc-nav">
+                <a class="toc-link active" href="#section-overview">1. Overview &amp; Architecture</a>
+                <a class="toc-link" href="#section-quickstart">2. Quick Start Setup</a>
+                <a class="toc-link" href="#section-upstream-idp">3. Upstream Identity Providers</a>
+                <a class="toc-link" href="#section-mfa">4. Multi-Factor Authentication</a>
+                <a class="toc-link" href="#section-sp-groups">5. Service Providers &amp; Groups</a>
+                <a class="toc-link" href="#section-users">6. User Whitelist &amp; Access</a>
+                <a class="toc-link" href="#section-branding">7. Custom Theme &amp; Branding</a>
+                <a class="toc-link" href="#section-endpoints">8. Certificates &amp; Endpoints</a>
+                <a class="toc-link" href="#section-troubleshooting">9. Troubleshooting &amp; FAQ</a>
+            </nav>
+        </div>
+
+        <div class="sidebar-footer">
+            <a href="/admin/settings" class="btn btn-primary" style="justify-content: center;">&larr; Back to Gateway Settings</a>
+            <a href="/admin/settings#tab-system-settings" class="btn btn-secondary" style="justify-content: center;">Open System Settings</a>
+        </div>
+    </aside>
+
+    <div class="main-shell">
+        <header class="topbar">
+            <div class="topbar-brand">
+                {{if or .Branding.ShowHeaderLogo .Branding.ShowSubtitle}}
+                <div class="eco-logo-wrap">
+                    {{if .Branding.ShowHeaderLogo}}
+                    {{if .Branding.HasCustomHeaderLogo}}
+                    <img src="{{.Branding.HeaderLogoDark}}" alt="{{.Branding.AppName}}" class="eco-logo eco-logo-dark">
+                    <img src="{{.Branding.HeaderLogoLight}}" alt="{{.Branding.AppName}}" class="eco-logo eco-logo-light">
+                    {{else}}
+                    <img src="/static/img/ecostruxure-dark.png" alt="EcoStruxure" class="eco-logo eco-logo-dark">
+                    <img src="/static/img/ecostruxure-light.png" alt="EcoStruxure" class="eco-logo eco-logo-light">
+                    {{end}}
+                    {{end}}
+                    {{if .Branding.ShowSubtitle}}
+                    <span class="eco-sub">{{.Branding.Subtitle}}</span>
+                    {{end}}
+                </div>
+                <span class="topbar-divider">|</span>
+                {{end}}
+                <span class="topbar-title">{{if .Branding.AppName}}{{.Branding.AppName}}{{else}}SAMLGuard{{end}} User Guide &amp; Documentation</span>
+            </div>
+
+            <div class="topbar-right">
+                <a href="/admin/settings" class="btn btn-secondary">&larr; Back to Settings</a>
+
+                <div class="theme-dropdown-wrap">
+                    <button type="button" class="theme-pill-btn" id="themeDropdownBtn" onclick="toggleThemeMenu()" aria-label="Theme mode selector">
+                        <span id="themeBtnIcon">
+                            <svg viewBox="0 0 24 24" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                        </span>
+                        <span id="themeBtnLabel">Device</span>
+                        <svg viewBox="0 0 24 24" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+
+                    <div class="theme-menu" id="themeMenu">
+                        <div class="theme-menu-title">Appearance</div>
+                        <div class="theme-option" data-val="system" onclick="selectTheme('system')">
+                            <div class="theme-opt-left">
+                                <svg viewBox="0 0 24 24" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                                <div><div class="theme-opt-title">Device Mode</div><div class="theme-opt-sub">Follow OS preference</div></div>
+                            </div>
+                            <div class="theme-check"><svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3" fill="none"><polyline points="20 6 9 17 4 12"/></svg></div>
+                        </div>
+                        <div class="theme-option" data-val="light" onclick="selectTheme('light')">
+                            <div class="theme-opt-left">
+                                <svg viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                                <div><div class="theme-opt-title">Light Mode</div><div class="theme-opt-sub">Always use light theme</div></div>
+                            </div>
+                            <div class="theme-check"><svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3" fill="none"><polyline points="20 6 9 17 4 12"/></svg></div>
+                        </div>
+                        <div class="theme-option" data-val="dark" onclick="selectTheme('dark')">
+                            <div class="theme-opt-left">
+                                <svg viewBox="0 0 24 24" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                                <div><div class="theme-opt-title">Dark Mode</div><div class="theme-opt-sub">Always use dark theme</div></div>
+                            </div>
+                            <div class="theme-check"><svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3" fill="none"><polyline points="20 6 9 17 4 12"/></svg></div>
+                        </div>
+                    </div>
+                </div>
+
+                {{if .AdminUsername}}
+                <span class="badge badge-info" style="font-size: 0.78rem; padding: 0.35rem 0.65rem;">{{.AdminUsername}}</span>
+                <form method="POST" action="/admin/logout" style="display: inline;">
+                    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}"/>
+                    <button type="submit" class="icon-btn" title="Sign Out of Console" style="color: #f87171;">
+                        <svg viewBox="0 0 24 24" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                    </button>
+                </form>
+                {{end}}
+
+                {{if .Branding.ShowOrgLogo}}
+                {{if .Branding.HasCustomOrgLogo}}
+                <img src="{{.Branding.OrgLogo}}" alt="{{.Branding.AppName}}" class="custom-org-logo-img">
+                {{else}}
+                <div class="schneider-block">
+                    <img src="/static/img/schneider-electric.png" alt="Schneider Electric">
+                </div>
+                {{end}}
+                {{end}}
+            </div>
+        </header>
+
+        <section class="hero-banner">
+            <div>
+                <h1>{{if .Branding.AppName}}{{.Branding.AppName}}{{else}}SAMLGuard{{end}} User Guide</h1>
+                <p>Complete administrator manual for configuring upstream SAML 2.0 Identity Providers, enforcing TOTP / Email / SMS Multi-Factor Authentication, onboarding downstream SAML apps, and customizing theme profiles.</p>
+                <div class="live-meta-row">
+                    <span class="badge badge-info">Active Upstream IdP: {{.ActiveIdP}}</span>
+                    {{if .TotpEnabled}}<span class="badge badge-success">TOTP Active</span>{{end}}
+                    {{if .EmailEnabled}}<span class="badge badge-success">Email OTP Active</span>{{end}}
+                    {{if .SMSEnabled}}<span class="badge badge-success">SMS OTP Active ({{.SMSProvider}})</span>{{end}}
+                    <span class="badge badge-info">Active Theme: {{.Branding.ProfileName}}</span>
+                </div>
+            </div>
+            <div class="guide-search-box">
+                <svg width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="search" id="guideSearchInput" placeholder="Filter guide topics (e.g. Entra, SMS, theme)..." oninput="filterGuideSections(this.value)">
+            </div>
+        </section>
+
+        <main class="guide-content">
+            <div class="empty-search-msg" id="emptySearchMsg">
+                No user guide sections match your filter. Clear the search box to view all topics.
+            </div>
+
+            <!-- 1. Overview & Architecture -->
+            <section class="guide-card" id="section-overview">
+                <div class="guide-card-header">
+                    <h2>1. Overview &amp; SAML 2.0 Proxy Architecture</h2>
+                    <span class="badge badge-info">Core Flow</span>
+                </div>
+                <p>{{if .Branding.AppName}}{{.Branding.AppName}}{{else}}SAMLGuard{{end}} operates as a SAML 2.0 Identity Provider Proxy between your downstream enterprise Service Providers (such as {{if .Branding.TargetAppName}}{{.Branding.TargetAppName}}{{else}}Schneider Electric IT Advisor{{end}} or any SAML 2.0 application) and upstream corporate IdPs (Microsoft Entra ID, Keycloak, Okta, ADFS, or the built-in Simulator).</p>
+                <pre class="flow-diagram">1. User opens Downstream SAML App  ──► App redirects browser with SAML AuthnRequest to /saml/sso
+2. Gateway validates request       ──► Checks binding, XML schema, signature, replay protection, allowed audience
+3. Upstream Corporate IdP sign-in  ──► User authenticates at Entra ID / Keycloak / Custom IdP (returns to /saml/acs)
+4. User Access &amp; MFA Challenge     ──► Gateway verifies allowlist (if enforced) + prompts TOTP / Email OTP / SMS OTP
+5. Signed Downstream Assertion     ──► Gateway maps roles/groups and issues signed SAML Response to Downstream ACS URL</pre>
+            </section>
+
+            <!-- 2. Quick Start -->
+            <section class="guide-card" id="section-quickstart">
+                <div class="guide-card-header">
+                    <h2>2. Quick Start Setup Checklist</h2>
+                    <a href="/admin/settings#tab-upstream" class="btn btn-secondary">Open Identity Providers &rarr;</a>
+                </div>
+                <ol class="guide-list">
+                    <li><strong>Sign in &amp; rotate default password:</strong> Log into <code>/admin/login</code> (initial default credentials <code>admin</code> / <code>admin</code>) and complete the mandatory password update at <code>/admin/change-password</code>.</li>
+                    <li><strong>Exchange SAML Metadata:</strong> Download <strong>SP Metadata XML</strong> from System Settings to upload to your upstream IdP (Entra ID / Keycloak), and download <strong>IdP Metadata XML</strong> (or public <code>.crt</code>) to configure your downstream application.</li>
+                    <li><strong>Select Upstream IdP(s):</strong> In the <strong>Identity Providers</strong> tab, choose <em>Simulator</em>, <em>Microsoft Entra ID</em>, <em>Keycloak</em>, or <em>Custom SAML 2.0</em>, enter Entity ID / SSO URL / X.509 Certificate, and enable one or multiple providers.</li>
+                    <li><strong>Enable MFA Methods:</strong> Turn on <em>Authenticator App (TOTP)</em>, <em>Email OTP</em> (with SMTP settings &amp; Test Email), and/or <em>SMS OTP</em> (with gateway credentials &amp; Test SMS).</li>
+                    <li><strong>Configure Downstream Application &amp; Branding:</strong> Set Downstream SP Entity ID, ACS URL, Group Mappings in <strong>Service Providers</strong>, and optionally tailor app name, logos, and backgrounds in <strong>System Settings &rarr; Custom Theme &amp; Branding Profiles</strong>.</li>
+                    <li><strong>Save Configuration:</strong> Click <strong>Save Configuration</strong> on the bottom action bar. Changes persist immediately in the SQLite <code>gateway_settings</code> table across restarts.</li>
+                </ol>
+            </section>
+
+            <!-- 3. Upstream IdP -->
+            <section class="guide-card" id="section-upstream-idp">
+                <div class="guide-card-header">
+                    <h2>3. Configuring Upstream Identity Providers</h2>
+                    <a href="/admin/settings#tab-upstream" class="btn btn-secondary">Manage Upstream IdPs &rarr;</a>
+                </div>
+                <p>Each IdP card stores an isolated configuration profile so you can configure multiple IdPs simultaneously without losing credentials when switching.</p>
+                <div class="grid-2">
+                    <div class="sub-box">
+                        <h3>Supported Upstream IdPs</h3>
+                        <ul class="guide-list">
+                            <li><strong>Simulator (Mock IdP):</strong> Built-in test login screen at <code>/mock-idp/submit</code> for safe offline testing without an external IdP. (Disallowed in production mode.)</li>
+                            <li><strong>Microsoft Entra ID:</strong> Configure Tenant Login URL (SSO URL), Azure AD Identifier (Entity ID), and Federation Metadata XML URL or downloaded PEM certificate.</li>
+                            <li><strong>Keycloak:</strong> Use realm SAML endpoint (<code>.../realms/&lt;realm&gt;/protocol/saml</code>) and realm descriptor URL.</li>
+                            <li><strong>Custom SAML 2.0:</strong> Connects to Okta, ADFS, Ping Identity, Auth0, or any standard SAML 2.0 Identity Provider.</li>
+                        </ul>
+                    </div>
+                    <div class="sub-box">
+                        <h3>Multi-Provider Login Experience</h3>
+                        <ul class="guide-list">
+                            <li><strong>Single Active IdP:</strong> Users signing in at <code>/saml/sso</code> can either auto-continue or sign in via your primary active IdP.</li>
+                            <li><strong>Multiple Enabled IdPs:</strong> Checking multiple IdPs presents a clean provider selection screen on the corporate login page so users pick their organization directory.</li>
+                            <li><strong>SAML Request Binding:</strong> Share this gateway's SP Entity ID (<code>{{.Settings.EntityID}}</code>) and ACS URL (<code>{{.Settings.ACSURL}}</code>) with your upstream IdP.</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 4. MFA -->
+            <section class="guide-card" id="section-mfa">
+                <div class="guide-card-header">
+                    <h2>4. Multi-Factor Authentication (TOTP, Email &amp; SMS OTP)</h2>
+                    <a href="/admin/settings#tab-upstream" class="btn btn-secondary">Configure MFA &amp; SMTP &rarr;</a>
+                </div>
+                <div class="grid-3">
+                    <div class="sub-box">
+                        <h3>Authenticator App (TOTP)</h3>
+                        <p>Users scan a QR code on first sign-in using Microsoft Authenticator, Google Authenticator, or any RFC 6238 app. Secrets are encrypted at rest with AES-256-GCM. Admins can trigger a fresh QR re-enrollment per user under <strong>User Groups &rarr; Reset MFA</strong>.</p>
+                    </div>
+                    <div class="sub-box">
+                        <h3>Email OTP (SMTP)</h3>
+                        <p>Sends time-limited HMAC-SHA256 verification codes over SMTP (STARTTLS or SMTPS). Use the built-in <strong>Send Test Email</strong> diagnostics button after entering SMTP Host, Port, Sender Address, Username, and Password.</p>
+                    </div>
+                    <div class="sub-box">
+                        <h3>SMS OTP (Cloud &amp; Hardware)</h3>
+                        <p>Supports <strong>Twilio</strong>, <strong>iSMS</strong>, <strong>Vonage</strong>, <strong>SendQuick</strong>, <strong>SMSEagle</strong>, <strong>MultiTech iSMS</strong>, <strong>Teltonika RUT/TRB</strong>, and <strong>Custom HTTP/JSON</strong> gateways. Store mobile numbers in E.164 format (e.g. <code>+60123456789</code>) and validate using <strong>Send Test SMS</strong>.</p>
+                    </div>
+                </div>
+                <p style="margin-top: 0.85rem;"><strong>Default Verification Policy:</strong> Choose <code>Let User Choose (select)</code> when multiple MFA methods are enabled to let users switch between Authenticator App, Email OTP, and SMS OTP at login, or pin a mandatory default method.</p>
+            </section>
+
+            <!-- 5. Service Providers & Groups -->
+            <section class="guide-card" id="section-sp-groups">
+                <div class="guide-card-header">
+                    <h2>5. Service Providers, Audiences &amp; Group Mapping</h2>
+                    <a href="/admin/settings#tab-sp" class="btn btn-secondary">Open Service Providers &rarr;</a>
+                </div>
+                <div class="grid-2">
+                    <div class="sub-box">
+                        <h3>Downstream SAML App Integration</h3>
+                        <ul class="guide-list">
+                            <li>Import SAMLGuard's IdP Metadata from <code>/saml/metadata/idp</code> (or <code>/metadata</code>) into your target application.</li>
+                            <li>Add every downstream application's SP Entity ID to <strong>Allowed Audiences</strong> (comma-separated) so SAMLGuard accepts its AuthnRequests.</li>
+                            <li>Verify <strong>Downstream ACS URLs</strong> include the target app's SAML callback URL.</li>
+                        </ul>
+                    </div>
+                    <div class="sub-box">
+                        <h3>Role &amp; Group Translation</h3>
+                        <ul class="guide-list">
+                            <li>Use <strong>Group Mapping</strong> to translate upstream directory group IDs/names (e.g. Entra Object ID or <code>cn=ITA-Admins</code>) into downstream role names expected by your target app.</li>
+                            <li>Assign fallback roles in <strong>Default Groups</strong> when an upstream assertion carries no mapped group claims.</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 6. Users & Whitelist -->
+            <section class="guide-card" id="section-users">
+                <div class="guide-card-header">
+                    <h2>6. User Whitelist &amp; Access Control</h2>
+                    <a href="/admin/settings#tab-users" class="btn btn-secondary">Manage Users &rarr;</a>
+                </div>
+                <ul class="guide-list">
+                    <li><strong>Enforce User Whitelist:</strong> When enabled, only users present in the gateway database (via manual entry or API sync) are permitted to complete SSO sign-in.</li>
+                    <li><strong>Add &amp; Edit Users:</strong> Manually whitelist users with Username, Email, Full Name, and E.164 Phone Number (required for SMS OTP delivery when the upstream IdP does not provide a phone claim).</li>
+                    <li><strong>EcoStruxure™ IT Advisor Sync:</strong> Configure ITA API URL &amp; credentials to pull authorized ITA users directly via <strong>Sync Users Now</strong>.</li>
+                    <li><strong>Reset TOTP Enrollment:</strong> Use <strong>Reset MFA</strong> if a user replaces their phone so they are prompted to scan a new authenticator QR code on next sign-in.</li>
+                </ul>
+            </section>
+
+            <!-- 7. Branding -->
+            <section class="guide-card" id="section-branding">
+                <div class="guide-card-header">
+                    <h2>7. Custom Theme &amp; Branding Profiles</h2>
+                    <a href="/admin/settings#tab-system-settings" class="btn btn-secondary">Customize Theme Profiles &rarr;</a>
+                </div>
+                <p>Located in <strong>System Settings</strong>, theme profiles make integrating additional downstream SAML applications fast by letting you save reusable brand presets (default EcoStruxure™ profile or custom app profiles) applied across Corporate Sign-In, MFA Verification, Error Pages, Admin Login, and the Admin Console.</p>
+                <div class="grid-2">
+                    <div class="sub-box">
+                        <h3>App Naming, Colors &amp; Toggles</h3>
+                        <ul class="guide-list">
+                            <li><strong>Profile Display Name:</strong> Selector card label in System Settings.</li>
+                            <li><strong>Portal / App Name &amp; Target App Name:</strong> Replaces <code>SAMLGuard</code> and <code>Schneider Electric IT Advisor</code> in page titles, headings, sign-in prompts, sidebar, and footer.</li>
+                            <li><strong>Primary Accent Color:</strong> Hex picker/input updates buttons, focus rings, sidebar highlights, and shield glow.</li>
+                            <li><strong>Visibility Toggles:</strong> Show or hide App Card Icon, Header Left Logo, Header Subtitle, and Organization/Corner Logo (1-click <em>Generic App Template</em> sets clean app-agnostic defaults).</li>
+                        </ul>
+                    </div>
+                    <div class="sub-box">
+                        <h3>Uploading Custom Media Assets</h3>
+                        <ul class="guide-list">
+                            <li>Upload images up to <strong>5 MB</strong> directly in PNG, JPG/JPEG, WebP, GIF, ICO, or safe sanitized SVG format — stored durably in SQLite (<code>branding_assets</code>) and served from <code>/branding/assets/:id</code>.</li>
+                            <li>Independent upload slots exist for <strong>App Card Icon</strong>, <strong>Browser Favicon</strong>, <strong>Header Logo (Dark &amp; Light)</strong>, <strong>Organization Logo</strong>, <strong>Login/MFA Backgrounds (Dark &amp; Light)</strong>, and <strong>Admin Console Backgrounds (Dark &amp; Light)</strong>.</li>
+                            <li>Click <strong>Reset</strong> on any slot (or <strong>Reset Profile</strong>) to revert immediately, then click <strong>Save Configuration</strong>.</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 8. Certificates & Endpoints -->
+            <section class="guide-card" id="section-endpoints">
+                <div class="guide-card-header">
+                    <h2>8. Certificates, Operations &amp; Endpoints Reference</h2>
+                    <a href="/admin/settings#tab-system-settings" class="btn btn-secondary">View Certificates &rarr;</a>
+                </div>
+                <p>Current signing certificate subject: <code>{{.CertInfo.Subject}}</code> &bull; Valid until: <code>{{.CertInfo.NotAfter}}</code></p>
+                <table class="guide-table">
+                    <thead>
+                        <tr>
+                            <th>Endpoint</th>
+                            <th>Method</th>
+                            <th>Purpose</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td><code>/saml/sso</code>, <code>/login</code></td><td>GET / POST</td><td>SAML 2.0 IdP SSO entry point &amp; Corporate Sign-In portal</td></tr>
+                        <tr><td><code>/saml/acs</code>, <code>/acs</code></td><td>POST / GET</td><td>SAML 2.0 SP Assertion Consumer Service receiving upstream IdP responses</td></tr>
+                        <tr><td><code>/saml/metadata/idp</code>, <code>/saml/metadata/sp</code></td><td>GET</td><td>Download Gateway IdP (for downstream apps) &amp; SP (for upstream IdP) XML metadata</td></tr>
+                        <tr><td><code>/admin/settings</code></td><td>GET / POST</td><td>Authenticated Admin Console configuration &amp; SQLite persistence</td></tr>
+                        <tr><td><code>/admin/guide</code></td><td>GET</td><td>This built-in Administrator User Guide</td></tr>
+                        <tr><td><code>/health</code>, <code>/ready</code>, <code>/live</code>, <code>/version</code></td><td>GET</td><td>Operational health checks and build version probes</td></tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <!-- 9. Troubleshooting -->
+            <section class="guide-card" id="section-troubleshooting">
+                <div class="guide-card-header">
+                    <h2>9. Troubleshooting &amp; FAQ</h2>
+                    <span class="badge badge-warning">Diagnostics</span>
+                </div>
+                <div class="grid-2">
+                    <div class="sub-box">
+                        <h3>SAML Assertion or Audience Errors</h3>
+                        <ul class="guide-list">
+                            <li>Verify system clocks on Gateway, Upstream IdP, and Downstream App are synchronized via NTP.</li>
+                            <li>Confirm the Downstream App's Entity ID is listed in <strong>Allowed Audiences</strong> in Service Providers.</li>
+                            <li>Check that the Upstream IdP certificate matches the signing key currently used by Entra/Keycloak.</li>
+                        </ul>
+                    </div>
+                    <div class="sub-box">
+                        <h3>OTP Delivery &amp; Theme Display Issues</h3>
+                        <ul class="guide-list">
+                            <li><strong>Email/SMS fails:</strong> Run <em>Send Test Email</em> or <em>Send Test SMS</em> in Identity Providers and ensure the user record includes a valid email / E.164 phone number.</li>
+                            <li><strong>User lost Authenticator phone:</strong> Click <strong>Reset MFA</strong> next to the user in User Groups so they can enroll a new device.</li>
+                            <li><strong>Theme not updating:</strong> Make sure you clicked <strong>Save Configuration</strong> at the bottom of System Settings and clear browser cache if testing an updated favicon.</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer class="app-footer">
+            <span>{{if .Branding.AppName}}{{.Branding.AppName}}{{else}}SAMLGuard{{end}} Enterprise MFA Gateway</span>
+            <span class="sg-watermark">Hidayat Ahmad</span>
+            {{if .Branding.FooterText}}<span>{{.Branding.FooterText}}</span>{{end}}
+        </footer>
+    </div>
+</div>
+
+<script>
+    function filterGuideSections(query) {
+        const q = (query || '').trim().toLowerCase();
+        const cards = document.querySelectorAll('.guide-card');
+        let visibleCount = 0;
+
+        cards.forEach(card => {
+            const text = (card.textContent || '').toLowerCase();
+            const match = !q || text.includes(q);
+            card.style.display = match ? '' : 'none';
+            if (match) visibleCount++;
+        });
+
+        const emptyMsg = document.getElementById('emptySearchMsg');
+        if (emptyMsg) {
+            emptyMsg.style.display = visibleCount === 0 ? 'block' : 'none';
+        }
+    }
+
+    document.querySelectorAll('.toc-link').forEach(link => {
+        link.addEventListener('click', () => {
+            document.querySelectorAll('.toc-link').forEach(item => item.classList.remove('active'));
+            link.classList.add('active');
+        });
+    });
+</script>
+</body>
+</html>
+

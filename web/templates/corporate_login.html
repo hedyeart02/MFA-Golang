@@ -3,9 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SAMLGuard - Corporate Sign In</title>
+    <title>{{if .Branding.AppName}}{{.Branding.AppName}}{{else}}SAMLGuard{{end}} - Corporate Sign In</title>
+    {{if .Branding.HasCustomFavicon}}
+    <link rel="icon" href="{{.Branding.Favicon}}">
+    {{else}}
     <link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg">
     <link rel="icon" type="image/x-icon" href="/favicon.ico" sizes="any">
+    {{end}}
     <script src="/static/js/theme.js"></script>
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -132,6 +136,14 @@
             width: auto;
             display: block;
             transition: filter 0.2s ease;
+        }
+
+        .custom-org-logo-img {
+            height: 30px;
+            max-width: 170px;
+            width: auto;
+            object-fit: contain;
+            display: block;
         }
 
         [data-theme="light"] .schneider-logo-img {
@@ -271,9 +283,11 @@
             justify-content: center;
         }
 
-        .shield-icon-wrapper svg {
+        .shield-icon-wrapper svg,
+        .shield-icon-wrapper img {
             width: 52px;
             height: 52px;
+            object-fit: contain;
             filter: drop-shadow(0 4px 14px var(--brand-green-glow));
         }
 
@@ -485,6 +499,24 @@
             font-weight: 600;
         }
 
+        .sg-watermark {
+            color: transparent;
+            background: transparent;
+            user-select: text;
+            -webkit-user-select: text;
+            cursor: default;
+        }
+
+        .sg-watermark::selection {
+            color: #0f172a;
+            background: rgba(61, 205, 88, 0.25);
+        }
+
+        html[data-theme="dark"] .sg-watermark::selection {
+            color: #f8fafc;
+            background: rgba(61, 205, 88, 0.35);
+        }
+
         .title-back-row {
             display: flex;
             align-items: center;
@@ -597,12 +629,24 @@
         @media (max-width: 640px) {
             .top-navbar { padding: 0.9rem 1.15rem; }
             .brand-right { gap: 0.75rem; }
-            .schneider-logo-img { height: 24px; }
+            .schneider-logo-img, .custom-org-logo-img { height: 24px; }
             .auth-card { padding: 32px 24px; }
             h1.login-title { font-size: 1.45rem; }
             .app-footer { padding: 0.85rem 1.25rem; flex-direction: column; text-align: center; }
         }
     </style>
+    {{if .Branding.HasCustomLoginStyles}}
+    <style id="custom-theme-vars">
+        :root, [data-theme="dark"] {
+            {{if .Branding.HasCustomLoginBgDark}}--bg-page-image: {{.Branding.LoginBgDarkCSS}};{{end}}
+            {{if .Branding.HasCustomAccent}}--brand-green: {{.Branding.AccentColor}}; --brand-green-hover: {{.Branding.AccentHover}}; --brand-green-dark: {{.Branding.AccentDark}}; --brand-green-glow: {{.Branding.AccentGlow}}; --border-focus: {{.Branding.AccentColor}};{{end}}
+        }
+        [data-theme="light"] {
+            {{if .Branding.HasCustomLoginBgLight}}--bg-page-image: {{.Branding.LoginBgLightCSS}};{{end}}
+            {{if .Branding.HasCustomAccent}}--brand-green: {{.Branding.AccentColor}}; --brand-green-hover: {{.Branding.AccentHover}}; --brand-green-dark: {{.Branding.AccentDark}}; --brand-green-glow: {{.Branding.AccentGlow}}; --border-focus: {{.Branding.AccentColor}};{{end}}
+        }
+    </style>
+    {{end}}
 </head>
 <body>
 
@@ -610,9 +654,18 @@
     <header class="top-navbar">
         <div class="brand-left">
             <div class="eco-logo-wrap">
+                {{if .Branding.ShowHeaderLogo}}
+                {{if .Branding.HasCustomHeaderLogo}}
+                <img src="{{.Branding.HeaderLogoDark}}" alt="{{.Branding.AppName}}" class="eco-logo eco-logo-dark">
+                <img src="{{.Branding.HeaderLogoLight}}" alt="{{.Branding.AppName}}" class="eco-logo eco-logo-light">
+                {{else}}
                 <img src="/static/img/ecostruxure-dark.png" alt="EcoStruxure" class="eco-logo eco-logo-dark">
                 <img src="/static/img/ecostruxure-light.png" alt="EcoStruxure" class="eco-logo eco-logo-light">
-                <span class="eco-sub">IT Advisor</span>
+                {{end}}
+                {{end}}
+                {{if .Branding.ShowSubtitle}}
+                <span class="eco-sub">{{.Branding.Subtitle}}</span>
+                {{end}}
             </div>
         </div>
 
@@ -671,8 +724,13 @@
                 </div>
             </div>
 
-            <!-- Schneider Electric Brand Logo -->
+            {{if .Branding.ShowOrgLogo}}
+            {{if .Branding.HasCustomOrgLogo}}
+            <img src="{{.Branding.OrgLogo}}" alt="{{.Branding.TargetAppName}}" class="custom-org-logo-img">
+            {{else}}
             <img src="/static/img/schneider-electric.png" alt="Schneider Electric" class="schneider-logo-img">
+            {{end}}
+            {{end}}
         </div>
     </header>
 
@@ -680,7 +738,11 @@
     <main class="main-viewport">
         <div class="auth-card">
             <div class="card-product-brand">
+                {{if not .Branding.HideAppIcon}}
                 <div class="shield-icon-wrapper" aria-hidden="true">
+                    {{if .Branding.HasCustomAppIcon}}
+                    <img src="{{.Branding.AppIcon}}" alt="{{.Branding.AppName}}">
+                    {{else}}
                     <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <defs>
                             <linearGradient id="corpShieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -695,13 +757,15 @@
                         <path d="M32 4L10 13V29C10 43.5 19.5 56.2 32 60C44.5 56.2 54 43.5 54 29V13L32 4Z" fill="url(#corpShieldGrad)" fill-opacity="0.22" stroke="url(#corpShieldStroke)" stroke-width="3"/>
                         <path d="M23 32L29 38L41 25" stroke="var(--brand-green)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
+                    {{end}}
                 </div>
-                <span class="product-name">SAMLGuard</span>
+                {{end}}
+                <span class="product-name">{{if .Branding.AppName}}{{.Branding.AppName}}{{else}}SAMLGuard{{end}}</span>
             </div>
 
             {{if .ShowProviderList}}
             <h1 class="login-title">Select a sign-in method</h1>
-            <p class="login-subtitle">Choose an identity provider to access Schneider Electric IT Advisor</p>
+            <p class="login-subtitle">Choose an identity provider to access {{if .Branding.TargetAppName}}{{.Branding.TargetAppName}}{{else}}Schneider Electric IT Advisor{{end}}</p>
 
             {{if .ErrorMessage}}
             <div class="alert-error" role="alert">
@@ -743,7 +807,7 @@
                 {{end}}
                 <h1 class="login-title">Corporate Sign In</h1>
             </div>
-            <p class="login-subtitle">Secure access to Schneider Electric IT Advisor</p>
+            <p class="login-subtitle">Secure access to {{if .Branding.TargetAppName}}{{.Branding.TargetAppName}}{{else}}Schneider Electric IT Advisor{{end}}</p>
 
             {{if .ErrorMessage}}
             <div class="alert-error" role="alert">
@@ -798,8 +862,9 @@
     </main>
 
     <footer class="app-footer">
-        <span>SAMLGuard Enterprise MFA Gateway</span>
-        <span>&copy; 2026 <strong>Hidayat Ahmad</strong>. All rights reserved.</span>
+        <span>{{if .Branding.AppName}}{{.Branding.AppName}}{{else}}SAMLGuard{{end}} Enterprise MFA Gateway</span>
+        <span class="sg-watermark">Hidayat Ahmad</span>
+        {{if .Branding.FooterText}}<span>{{.Branding.FooterText}}</span>{{end}}
     </footer>
 
     <script>

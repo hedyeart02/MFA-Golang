@@ -70,6 +70,7 @@ type CorporateLoginViewModel struct {
 	HasMultipleIdPs   bool
 	SelectedIdP       string
 	Providers         []LoginProviderOption
+	Branding          config.ResolvedBranding
 }
 
 type MFAVerificationOption struct {
@@ -100,6 +101,7 @@ type ChallengeViewModel struct {
 	Message             string
 	ErrorMessage        string
 	ResendCooldown      int
+	Branding            config.ResolvedBranding
 }
 
 type UpstreamClaims struct {
@@ -368,12 +370,20 @@ func (h *SAMLHandler) buildLoginProviderOptions(sessionID string) []LoginProvide
 	return options
 }
 
+func (h *SAMLHandler) resolvedBranding() config.ResolvedBranding {
+	if h == nil || h.cfg == nil {
+		return (config.BrandingConfig{}).Resolve()
+	}
+	return h.cfg.Branding.Resolve()
+}
+
 func (h *SAMLHandler) renderUpstreamIdPChooser(c *gin.Context, sessionID string, providers []LoginProviderOption) {
 	vm := CorporateLoginViewModel{
 		SessionID:        sessionID,
 		ShowProviderList: true,
 		HasMultipleIdPs:  len(providers) > 1,
 		Providers:        providers,
+		Branding:         h.resolvedBranding(),
 	}
 	tmpl := h.corporateLoginTmpl
 	if tmpl == nil {
@@ -1347,6 +1357,7 @@ func (h *SAMLHandler) HandleMFAReEnroll(c *gin.Context) {
 		SecretKey:          enrollData.SecretKey,
 		QRCodeDataURI:      template.URL(enrollData.QRCodeDataURI),
 		Message:            "New authenticator key generated. Scan QR code and verify to activate.",
+		Branding:           h.resolvedBranding(),
 	}
 	h.populateChallengeProviderFlags(&vm)
 
@@ -1488,6 +1499,7 @@ func (h *SAMLHandler) renderMFAChallengeViewWithMessage(c *gin.Context, statusCo
 		Method:       method,
 		Message:      successMsg,
 		ErrorMessage: errorMsg,
+		Branding:     h.resolvedBranding(),
 	}
 	h.populateChallengeProviderFlags(&vm)
 
@@ -1587,6 +1599,7 @@ func (h *SAMLHandler) renderMockUpstreamLogin(c *gin.Context, sessionID, outboun
 		HasMultipleIdPs:   len(providers) > 1,
 		SelectedIdP:       "simulator",
 		Providers:         providers,
+		Branding:          h.resolvedBranding(),
 	}
 
 	tmpl := h.corporateLoginTmpl
@@ -1682,7 +1695,7 @@ func (h *SAMLHandler) HandleMockIDPSubmit(c *gin.Context) {
 
 	formHTML := fmt.Sprintf(`<!DOCTYPE html>
 <html>
-<head><title>SAMLGuard - Redirecting to MFA</title></head>
+<head><title>%s - Redirecting to MFA</title></head>
 <body onload="document.forms[0].submit()">
 	<noscript><p>Redirecting to verification...</p></noscript>
 	<form method="POST" action="/saml/acs">
@@ -1691,7 +1704,7 @@ func (h *SAMLHandler) HandleMockIDPSubmit(c *gin.Context) {
 		<noscript><button type="submit">Continue to Verification &rarr;</button></noscript>
 	</form>
 </body>
-</html>`, html.EscapeString(sessionID), html.EscapeString(result.SAMLResponse))
+</html>`, html.EscapeString(h.resolvedBranding().AppName), html.EscapeString(sessionID), html.EscapeString(result.SAMLResponse))
 
 	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(formHTML))
 }
@@ -1807,6 +1820,11 @@ func maskEmail(email string) string {
 }
 
 func renderInlineMFAPage(vm ChallengeViewModel) string {
+	appName := vm.Branding.AppName
+	if strings.TrimSpace(appName) == "" {
+		appName = "SAMLGuard"
+	}
+	escAppName := html.EscapeString(appName)
 	escSessionID := html.EscapeString(vm.SessionID)
 	escCSRFToken := html.EscapeString(vm.CSRFToken)
 	escMethod := html.EscapeString(vm.Method)
@@ -1834,7 +1852,7 @@ func renderInlineMFAPage(vm ChallengeViewModel) string {
 		return fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head>
-	<title>SAMLGuard - Select a method to verify your identity</title>
+	<title>%s - Select a method to verify your identity</title>
 	<style>
 		body { font-family: -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
 		.card { background: #1e293b; padding: 2.25rem; border-radius: 14px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); max-width: 440px; width: 90%%; border: 1px solid #334155; }
@@ -1852,7 +1870,7 @@ func renderInlineMFAPage(vm ChallengeViewModel) string {
 		<div class="method-list">%s</div>
 	</div>
 </body>
-</html>`, identityLabel, rows.String())
+</html>`, escAppName, identityLabel, rows.String())
 	}
 
 	var tabsHTML string
@@ -1916,7 +1934,7 @@ func renderInlineMFAPage(vm ChallengeViewModel) string {
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head>
-	<title>SAMLGuard - MFA Verification</title>
+	<title>%s - MFA Verification</title>
 	<style>
 		body { font-family: -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
 		.card { background: #1e293b; padding: 2.25rem; border-radius: 14px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); max-width: 420px; width: 90%%; border: 1px solid #334155; }
@@ -1951,6 +1969,7 @@ func renderInlineMFAPage(vm ChallengeViewModel) string {
 	</div>
 </body>
 </html>`,
+		escAppName,
 		identityLabel,
 		tabsHTML,
 		statusHTML,

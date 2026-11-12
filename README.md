@@ -1,6 +1,6 @@
 # SAMLGuard
 
-**Enterprise Pure-Go SAML 2.0 MFA Proxy Gateway (`v1.0.4`)**
+**Enterprise Pure-Go SAML 2.0 MFA Proxy Gateway (`v1.1.0`)**
 
 SAMLGuard is a standalone, cross-platform SAML 2.0 Identity Provider Proxy (Proxy IdP) written in Go (`CGO_ENABLED=0`). It sits between Service Providers — such as **Schneider Electric EcoStruxure™ IT Advisor** — and upstream Enterprise Identity Providers (Microsoft Entra ID, Okta, Keycloak, ADFS), enforcing Multi-Factor Authentication (TOTP, Email OTP, and/or SMS OTP) and user authorization before issuing a signed SAML 2.0 assertion downstream.
 
@@ -11,16 +11,16 @@ SAMLGuard is a standalone, cross-platform SAML 2.0 Identity Provider Proxy (Prox
 - **Native OS Service Integration** — Runs natively under **Windows Service Control Manager (SCM)** on Windows and **`systemd`** on Linux, plus an integrated **Webmin management suite** (`.wbm.gz`).
 - **SAML 2.0 Proxy Federation** — Handles HTTP-Redirect and HTTP-POST bindings, XML signature & schema validation, replay protection, role/group claim mapping, and signed SAML assertions.
 - **Multi-Factor Authentication** — Activate one or multiple OTP methods simultaneously with interactive sign-in method selection: Authenticator app **TOTP** (QR enrollment, AES-256-GCM encrypted secrets at rest), **Email OTP** (HMAC-SHA256 digests, SMTP STARTTLS/TLS), and **SMS OTP** (Cloud APIs: Twilio, iSMS, Vonage; Hardware Appliances: SendQuick, SMSEagle, MultiTech iSMS, Teltonika RUT/TRB, Custom HTTP/JSON relays).
-- **EcoStruxure™ IT Advisor Integration** — Optional API user whitelist synchronization and access control management.
-- **Built-In Admin Console** — Web UI at `/admin/settings` with runtime settings persisted to SQLite (`gateway_settings`), dark/light/system theme toggle, test email diagnostics, ITA user sync, and certificate downloads.
+- **EcoStruxure™ IT Advisor & Multi-App SAML Branding** — Optional API user whitelist synchronization, access control management, and **Custom Theme & Branding Profiles** (per-application app names, icons, dark/light logos, favicons, accent colors, and backgrounds stored in SQLite).
+- **Built-In Admin Console & User Guide** — Web UI at `/admin/settings` and interactive User Guide at `/admin/guide` (`(?)` button) with runtime settings persisted to SQLite (`gateway_settings`), dark/light/system theme toggle, test email/SMS diagnostics, ITA user sync, and certificate downloads.
 
 ## Supported Platforms
 
 | Platform | Architecture | Binary / Package | Service Manager |
 |----------|--------------|------------------|-----------------|
-| Windows | `amd64` (x86_64) | `samlguard.exe` / `samlguard-v1.0.4-windows-amd64.zip` | Windows Service (`SAMLGuard` via SCM) |
-| Linux | `amd64` (x86_64) | `samlguard` / `samlguard-v1.0.4-linux-amd64.tar.gz` | `systemd` (`samlguard.service`) + Webmin |
-| Linux | `arm64` (aarch64) | `samlguard` / `samlguard-v1.0.4-linux-arm64.tar.gz` | `systemd` (`samlguard.service`) + Webmin |
+| Windows | `amd64` (x86_64) | `samlguard.exe` / `samlguard-v1.1.0-windows-amd64.zip` | Windows Service (`SAMLGuard` via SCM) |
+| Linux | `amd64` (x86_64) | `samlguard` / `samlguard-v1.1.0-linux-amd64.tar.gz` | `systemd` (`samlguard.service`) + Webmin |
+| Linux | `arm64` (aarch64) | `samlguard` / `samlguard-v1.1.0-linux-arm64.tar.gz` | `systemd` (`samlguard.service`) + Webmin |
 
 > **Development Note:** On macOS/Linux/Windows workstations, SAMLGuard can also run directly from any terminal via `go run ./cmd/samlguard`.
 

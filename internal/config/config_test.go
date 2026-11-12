@@ -706,3 +706,94 @@ func TestConfig_SMSValidationAndRedaction(t *testing.T) {
 	}
 }
 
+func TestBrandingConfig_SanitizationAndResolution(t *testing.T) {
+	if got := NormalizeThemeProfileKey("  Acme App v2!  "); got != "acme-app-v2" {
+		t.Fatalf("unexpected NormalizeThemeProfileKey: %q", got)
+	}
+	if got := NormalizeThemeProfileKey("   "); got != "default" {
+		t.Fatalf("expected empty profile key to normalize to default, got %q", got)
+	}
+
+	if got := SanitizeBrandingColor(" #1d4ed8 "); got != "#1D4ED8" {
+		t.Fatalf("expected sanitized hex color #1D4ED8, got %q", got)
+	}
+	for _, bad := range []string{"red", "#12345", "#GGGGGG", "#000000; background:url(evil)"} {
+		if got := SanitizeBrandingColor(bad); got != "" {
+			t.Fatalf("expected invalid color %q to be rejected, got %q", bad, got)
+		}
+	}
+
+	for _, good := range []string{
+		"/branding/assets/asset-123.png",
+		"/static/img/favicon.svg",
+		"/assets/backgrounds/bg-login-dark.png",
+		"data:image/png;base64,iVBORw0KGgo=",
+		"none",
+	} {
+		if got := SanitizeBrandingAssetRef(good); got == "" {
+			t.Fatalf("expected valid branding asset ref %q to be accepted", good)
+		}
+	}
+	for _, bad := range []string{
+		"javascript:alert(1)",
+		"http://insecure.example.com/logo.png",
+		"https://cdn.example.com/logo.png",
+		"//evil.example.com/logo.png",
+		"data:image/svg+xml;base64,PHN2Zz4=",
+		"/branding/assets/bad\"quote.png",
+		"/branding/assets/bad);background:red",
+		"relative/path.png",
+	} {
+		if got := SanitizeBrandingAssetRef(bad); got != "" {
+			t.Fatalf("expected unsafe branding asset ref %q to be rejected, got %q", bad, got)
+		}
+	}
+
+	// Default resolution preserves built-in EcoStruxure / SAMLGuard values
+	defResolved := (BrandingConfig{}).Resolve()
+	if defResolved.AppName != "SAMLGuard" || defResolved.TargetAppName != "Schneider Electric IT Advisor" || !defResolved.ShowSubtitle || defResolved.Subtitle != "IT Advisor" || defResolved.HasCustomAccent || defResolved.FooterText == "" {
+		t.Fatalf("unexpected default resolved branding: %+v", defResolved)
+	}
+
+	// Custom profile resolution derives CSS tokens & respects "none" visibility controls
+	cfg := &Config{}
+	payload := &AdminSettingsPayload{
+		BrandingActiveProfile: "Acme Portal",
+		BrandingProfiles: map[string]ThemeProfile{
+			"acme-portal": {
+				Name:            "Acme ERP Portal",
+				AppName:         "AcmeSSO",
+				TargetAppName:   "Acme Cloud ERP",
+				Subtitle:        "none",
+				FooterText:      "© 2026 Acme Corp. All rights reserved.",
+				AccentColor:     "#2563EB",
+				AppIcon:         "none",
+				HeaderLogoDark:  "none",
+				HeaderLogoLight: "none",
+				OrgLogo:         "/branding/assets/acme-org.png",
+				LoginBgDark:     "/branding/assets/login-dark.png",
+				ConsoleBgLight:  "/branding/assets/console-light.png",
+			},
+		},
+	}
+	ApplyAdminSettings(cfg, payload)
+
+	resolved := cfg.Branding.Resolve()
+	if resolved.ProfileKey != "acme-portal" || resolved.AppName != "AcmeSSO" || resolved.TargetAppName != "Acme Cloud ERP" || resolved.FooterText != "© 2026 Acme Corp. All rights reserved." {
+		t.Fatalf("unexpected resolved custom naming: %+v", resolved)
+	}
+	if resolved.ShowSubtitle || !resolved.HideAppIcon || resolved.ShowHeaderLogo || !resolved.HasCustomOrgLogo {
+		t.Fatalf("expected visibility flags for none/custom assets, got %+v", resolved)
+	}
+	if !resolved.HasCustomAccent || resolved.AccentColor != "#2563EB" || resolved.AccentHover == "" || resolved.AccentDark == "" || resolved.AccentGlow == "" {
+		t.Fatalf("expected derived accent tokens, got %+v", resolved)
+	}
+	if !resolved.HasCustomLoginBgDark || !strings.Contains(string(resolved.LoginBgDarkCSS), "/branding/assets/login-dark.png") {
+		t.Fatalf("expected custom LoginBgDarkCSS, got %q", resolved.LoginBgDarkCSS)
+	}
+	if !resolved.HasCustomConsoleLight || !strings.Contains(string(resolved.ConsoleBgLightCSS), "/branding/assets/console-light.png") {
+		t.Fatalf("expected custom ConsoleBgLightCSS, got %q", resolved.ConsoleBgLightCSS)
+	}
+}
+
+

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -13,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -22,6 +24,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/hidayat-SE/samlguard/internal/config"
 	"github.com/hidayat-SE/samlguard/internal/ita"
 	"github.com/hidayat-SE/samlguard/internal/mfa"
@@ -69,11 +72,14 @@ type AdminSettingsViewModel struct {
 	AllowedAudiencesStr string
 	CertInfo            CertDetails
 	AuthorizedUsers     []mfa.AuthorizedUser
-	ServerTimeUTC       string
-	ServerTimeLocal     string
-	SuccessMessage      string
-	ErrorMessage        string
-	CSRFToken           string
+	ServerTimeUTC         string
+	ServerTimeLocal       string
+	SuccessMessage        string
+	ErrorMessage          string
+	CSRFToken             string
+	Branding              config.ResolvedBranding
+	BrandingActiveProfile string
+	BrandingProfilesJSON  template.JS
 }
 
 // --- Session & Security Helpers ---
@@ -223,7 +229,9 @@ func isJSONAdminRequest(c *gin.Context) bool {
 		strings.Contains(contentType, "application/json") ||
 		strings.HasPrefix(path, "/admin/ita/") ||
 		strings.HasPrefix(path, "/admin/users/") ||
-		strings.HasPrefix(path, "/admin/settings/test-email")
+		strings.HasPrefix(path, "/admin/settings/test-email") ||
+		strings.HasPrefix(path, "/admin/settings/test-sms") ||
+		strings.HasPrefix(path, "/admin/branding/")
 }
 
 func (h *SAMLHandler) computeAdminCSRFToken(sessionToken string) string {
@@ -495,6 +503,17 @@ func (h *SAMLHandler) HandleAdminSettingsGet(c *gin.Context) {
 	h.renderAdminSettings(c, vm)
 }
 
+// HandleAdminGuideGet renders the built-in administrator user guide page.
+func (h *SAMLHandler) HandleAdminGuideGet(c *gin.Context) {
+	adminUser, _ := c.Get("admin_username")
+	adminUsername, _ := adminUser.(string)
+	vm := h.buildAdminViewModel(adminUsername, "", "")
+	if vm.CSRFToken == "" {
+		vm.CSRFToken = h.getAdminCSRFToken(c)
+	}
+	h.renderAdminTemplate(c, "user_guide.html", web.ParseUserGuideTemplate, "user guide", vm)
+}
+
 // HandleAdminSettingsPost processes form submissions from the admin panel and persists to the database.
 func (cHandler *SAMLHandler) HandleAdminSettingsPost(c *gin.Context) {
 	adminUser, _ := c.Get("admin_username")
@@ -686,6 +705,30 @@ func (cHandler *SAMLHandler) HandleAdminSettingsPost(c *gin.Context) {
 	payload.ITAAPIUsername = strings.TrimSpace(c.PostForm("ita_api_username"))
 	payload.ITAAPIPassword = c.PostForm("ita_api_password") // if empty, SaveConfig preserves current
 	payload.ITAEnforceWhitelist = c.PostForm("ita_enforce_whitelist") == "true"
+
+	// Custom Theme & Branding Profiles
+	if activeBrand := strings.TrimSpace(c.PostForm("branding_active_profile")); activeBrand != "" {
+		payload.BrandingActiveProfile = config.NormalizeThemeProfileKey(activeBrand)
+	} else if cHandler.cfg != nil {
+		payload.BrandingActiveProfile = cHandler.cfg.Branding.EffectiveActiveProfile()
+	}
+	if brandProfilesRaw := strings.TrimSpace(c.PostForm("branding_profiles_json")); brandProfilesRaw != "" {
+		var parsedProfiles map[string]config.ThemeProfile
+		if err := json.Unmarshal([]byte(brandProfilesRaw), &parsedProfiles); err == nil {
+			cleanedProfiles := make(map[string]config.ThemeProfile, len(parsedProfiles))
+			for k, v := range parsedProfiles {
+				nk := config.NormalizeThemeProfileKey(k)
+				cleanedProfiles[nk] = config.SanitizeThemeProfile(v)
+			}
+			payload.BrandingProfiles = cleanedProfiles
+		}
+	}
+	if payload.BrandingProfiles == nil && cHandler.cfg != nil && len(cHandler.cfg.Branding.Profiles) > 0 {
+		payload.BrandingProfiles = make(map[string]config.ThemeProfile, len(cHandler.cfg.Branding.Profiles))
+		for k, v := range cHandler.cfg.Branding.Profiles {
+			payload.BrandingProfiles[k] = v
+		}
+	}
 
 	// Preserve existing secrets and manual allowlist when omitted from the form submission
 	if payload.SMTPPassword == "" {
@@ -1197,6 +1240,163 @@ func (h *SAMLHandler) HandleAdminCertDownload(c *gin.Context) {
 	c.File(filePath)
 }
 
+const maxBrandingUploadBytes = 5 << 20 // 5 MB
+
+// HandleAdminBrandingUploadPost handles POST /admin/branding/upload to store custom theme icons, logos, and backgrounds.
+func (h *SAMLHandler) HandleAdminBrandingUploadPost(c *gin.Context) {
+	if h.mfaService == nil || h.mfaService.Storage() == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"success": false, "error": "Database storage unavailable."})
+		return
+	}
+
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Image file is required."})
+		return
+	}
+	if fileHeader.Size > maxBrandingUploadBytes {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"success": false, "error": "Image file exceeds maximum 5 MB limit."})
+		return
+	}
+
+	f, err := fileHeader.Open()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Failed to read uploaded image."})
+		return
+	}
+	defer f.Close()
+
+	data, err := io.ReadAll(io.LimitReader(f, maxBrandingUploadBytes+1))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Failed to read uploaded image bytes."})
+		return
+	}
+	if len(data) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Uploaded image file is empty."})
+		return
+	}
+	if len(data) > maxBrandingUploadBytes {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"success": false, "error": "Image file exceeds maximum 5 MB limit."})
+		return
+	}
+
+	contentType, ext, ok := detectSafeBrandingImage(fileHeader.Filename, data)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": "Unsupported or unsafe image format. Allowed: PNG, JPG, WebP, GIF, ICO, or safe SVG."})
+		return
+	}
+
+	assetID := "theme-" + uuid.New().String() + ext
+	if err := h.mfaService.Storage().SaveBrandingAsset(c.Request.Context(), mfa.BrandingAsset{
+		ID:          assetID,
+		Filename:    filepath.Base(fileHeader.Filename),
+		ContentType: contentType,
+		Data:        data,
+		CreatedAt:   time.Now().UTC(),
+	}); err != nil {
+		h.logger.Error("failed saving branding asset", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": "Failed to store uploaded image in database."})
+		return
+	}
+
+	adminUser, _ := c.Get("admin_username")
+	adminUsername, _ := adminUser.(string)
+	h.recordAudit("admin_branding_upload", "success",
+		zap.String("admin", adminUsername),
+		zap.String("asset_id", assetID),
+		zap.String("content_type", contentType),
+		zap.Int("size_bytes", len(data)),
+		zap.String("remote_ip", c.ClientIP()),
+	)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":      true,
+		"id":           assetID,
+		"url":          "/branding/assets/" + assetID,
+		"content_type": contentType,
+		"size":         len(data),
+	})
+}
+
+// HandleBrandingAssetGet serves stored custom theme image assets by ID.
+func (h *SAMLHandler) HandleBrandingAssetGet(c *gin.Context) {
+	if h.mfaService == nil || h.mfaService.Storage() == nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	assetID := strings.TrimSpace(c.Param("id"))
+	if assetID == "" || strings.Contains(assetID, "..") || strings.ContainsAny(assetID, "/\\") {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	asset, err := h.mfaService.Storage().GetBrandingAsset(c.Request.Context(), assetID)
+	if err != nil || asset == nil || len(asset.Data) == 0 {
+		c.Status(http.StatusNotFound)
+		return
+	}
+
+	c.Header("Cache-Control", "public, max-age=86400")
+	c.Header("X-Content-Type-Options", "nosniff")
+	if asset.ContentType == "image/svg+xml" {
+		c.Header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+	}
+	c.Data(http.StatusOK, asset.ContentType, asset.Data)
+}
+
+func detectSafeBrandingImage(filename string, data []byte) (contentType, ext string, ok bool) {
+	lowerExt := strings.ToLower(filepath.Ext(strings.TrimSpace(filename)))
+	trimmed := bytes.TrimSpace(data)
+
+	// ICO magic header: 00 00 01 00
+	if len(data) >= 4 && data[0] == 0x00 && data[1] == 0x00 && data[2] == 0x01 && data[3] == 0x00 {
+		return "image/x-icon", ".ico", true
+	}
+
+	// Safe SVG detection (reject active script/event handlers)
+	if lowerExt == ".svg" || (bytes.Contains(bytes.ToLower(trimmed[:minInt(len(trimmed), 256)]), []byte("<svg"))) {
+		lowerBody := bytes.ToLower(trimmed)
+		if bytes.Contains(lowerBody, []byte("<svg")) {
+			for _, forbidden := range [][]byte{
+				[]byte("<script"),
+				[]byte("javascript:"),
+				[]byte("onload="),
+				[]byte("onerror="),
+				[]byte("onclick="),
+				[]byte("onmouseover="),
+				[]byte("<foreignobject"),
+			} {
+				if bytes.Contains(lowerBody, forbidden) {
+					return "", "", false
+				}
+			}
+			return "image/svg+xml", ".svg", true
+		}
+	}
+
+	detected := http.DetectContentType(data)
+	switch detected {
+	case "image/png":
+		return "image/png", ".png", true
+	case "image/jpeg":
+		return "image/jpeg", ".jpg", true
+	case "image/webp":
+		return "image/webp", ".webp", true
+	case "image/gif":
+		return "image/gif", ".gif", true
+	case "image/x-icon", "image/vnd.microsoft.icon":
+		return "image/x-icon", ".ico", true
+	default:
+		return "", "", false
+	}
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func (h *SAMLHandler) buildAdminViewModel(adminUsername, successMsg, errorMsg string) *AdminSettingsViewModel {
 	activeIdP := h.cfg.SAML.EffectiveActiveIdP()
 	enabledIdPs := h.cfg.SAML.ActiveIdPs()
@@ -1245,6 +1445,21 @@ func (h *SAMLHandler) buildAdminViewModel(adminUsername, successMsg, errorMsg st
 		smsProfilesJSON = string(b)
 	}
 
+	brandingActive := h.cfg.Branding.EffectiveActiveProfile()
+	brandingProfiles := make(map[string]config.ThemeProfile)
+	for k, v := range h.cfg.Branding.Profiles {
+		nk := config.NormalizeThemeProfileKey(k)
+		brandingProfiles[nk] = config.SanitizeThemeProfile(v)
+	}
+	if _, ok := brandingProfiles["default"]; !ok {
+		brandingProfiles["default"] = config.DefaultThemeProfile()
+	}
+	brandingProfilesJSON := "{}"
+	if b, err := json.Marshal(brandingProfiles); err == nil {
+		brandingProfilesJSON = string(b)
+	}
+	resolvedBrand := h.cfg.Branding.Resolve()
+
 	payload := &config.AdminSettingsPayload{
 		ActiveIdP:             activeIdP,
 		EnabledIdPs:           enabledIdPs,
@@ -1282,6 +1497,8 @@ func (h *SAMLHandler) buildAdminViewModel(adminUsername, successMsg, errorMsg st
 		ITAAPIUsername:        h.cfg.ITA.APIUsername,
 		ITAEnforceWhitelist:   h.cfg.ITA.EnforceUserWhitelist,
 		ITAManualAllowedUsers: h.cfg.ITA.ManualAllowedUsers,
+		BrandingActiveProfile: brandingActive,
+		BrandingProfiles:      brandingProfiles,
 	}
 
 	now := time.Now()
@@ -1314,10 +1531,29 @@ func (h *SAMLHandler) buildAdminViewModel(adminUsername, successMsg, errorMsg st
 		AllowedAudiencesStr: strings.Join(h.cfg.SAML.AllowedAudiences, ", "),
 		CertInfo:            certInfo,
 		AuthorizedUsers:     authorizedUsers,
-		ServerTimeUTC:       now.UTC().Format("2006-01-02 15:04:05 UTC"),
-		ServerTimeLocal:     now.Format("2006-01-02 15:04:05 MST"),
-		SuccessMessage:      successMsg,
-		ErrorMessage:        errorMsg,
+		ServerTimeUTC:         now.UTC().Format("2006-01-02 15:04:05 UTC"),
+		ServerTimeLocal:       now.Format("2006-01-02 15:04:05 MST"),
+		SuccessMessage:        successMsg,
+		ErrorMessage:          errorMsg,
+		Branding:              resolvedBrand,
+		BrandingActiveProfile: brandingActive,
+		BrandingProfilesJSON:  template.JS(brandingProfilesJSON),
+	}
+}
+
+func (h *SAMLHandler) renderAdminTemplate(c *gin.Context, filename string, parseEmbedded func() (*template.Template, error), label string, data any) {
+	tmplPath := filepath.Join("web", "templates", filename)
+	tmpl, err := template.ParseFiles(tmplPath)
+	if err != nil {
+		tmpl, err = parseEmbedded()
+	}
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Failed to load %s template: %v", label, err)
+		return
+	}
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.Execute(c.Writer, data); err != nil {
+		h.logger.Error("failed executing admin template", zap.String("template", filename), zap.Error(err))
 	}
 }
 
@@ -1325,19 +1561,7 @@ func (h *SAMLHandler) renderAdminSettings(c *gin.Context, vm *AdminSettingsViewM
 	if vm != nil && vm.CSRFToken == "" {
 		vm.CSRFToken = h.getAdminCSRFToken(c)
 	}
-	tmplPath := filepath.Join("web", "templates", "admin_settings.html")
-	tmpl, err := template.ParseFiles(tmplPath)
-	if err != nil {
-		tmpl, err = web.ParseAdminSettingsTemplate()
-	}
-	if err != nil {
-		c.String(http.StatusInternalServerError, "Failed to load admin settings template: %v", err)
-		return
-	}
-	c.Header("Content-Type", "text/html; charset=utf-8")
-	if err := tmpl.Execute(c.Writer, vm); err != nil {
-		h.logger.Error("failed executing admin settings template", zap.Error(err))
-	}
+	h.renderAdminTemplate(c, "admin_settings.html", web.ParseAdminSettingsTemplate, "admin settings", vm)
 }
 
 func (h *SAMLHandler) renderAdminLogin(c *gin.Context, username, errMsg string) {
@@ -1355,6 +1579,7 @@ func (h *SAMLHandler) renderAdminLogin(c *gin.Context, username, errMsg string) 
 		"Username":     username,
 		"ErrorMessage": errMsg,
 		"CSRFToken":    h.getAdminCSRFToken(c),
+		"Branding":     h.resolvedBranding(),
 	})
 }
 
@@ -1373,6 +1598,7 @@ func (h *SAMLHandler) renderAdminChangePassword(c *gin.Context, username, errMsg
 		"Username":     username,
 		"ErrorMessage": errMsg,
 		"CSRFToken":    h.getAdminCSRFToken(c),
+		"Branding":     h.resolvedBranding(),
 	})
 }
 

@@ -128,7 +128,7 @@ func SecurityHeadersWithConfig(opts SecurityHeadersOptions) gin.HandlerFunc {
 		c.Header("Content-Security-Policy", csp)
 
 		path := c.Request.URL.Path
-		if !strings.HasPrefix(path, "/static/") && !strings.HasPrefix(path, "/assets/") && path != "/favicon.ico" {
+		if !strings.HasPrefix(path, "/static/") && !strings.HasPrefix(path, "/assets/") && !strings.HasPrefix(path, "/branding/assets/") && path != "/favicon.ico" {
 			c.Header("Cache-Control", "no-store, no-cache, must-revalidate, private")
 			c.Header("Pragma", "no-cache")
 		}
@@ -174,7 +174,18 @@ func RateLimitMiddleware(limiter ratelimiter.DetailedRateLimiter, scope string, 
 
 // MaxBodyBytesMiddleware caps incoming request bodies to defend against payload flooding.
 func MaxBodyBytesMiddleware(maxBytes int64) gin.HandlerFunc {
+	return MaxBodyBytesWithOverrides(maxBytes, nil)
+}
+
+// MaxBodyBytesWithOverrides caps incoming request bodies, applying route-specific overrides when present.
+func MaxBodyBytesWithOverrides(defaultMaxBytes int64, overrides map[string]int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		maxBytes := defaultMaxBytes
+		if overrides != nil {
+			if override, ok := overrides[c.Request.URL.Path]; ok && override > 0 {
+				maxBytes = override
+			}
+		}
 		if maxBytes > 0 && c.Request.Body != nil {
 			if c.Request.ContentLength > maxBytes {
 				c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, gin.H{

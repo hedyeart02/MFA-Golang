@@ -2,5 +2,5 @@ name=SAMLGuard Debug
 desc=Debug
 category=samlguard
 depends=samlguard_status
-version=1.0.3
+version=1.1.0
 longdesc=Inspect SAMLGuard systemd logs, database files, and socket diagnostics.

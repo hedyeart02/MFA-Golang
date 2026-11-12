@@ -45,7 +45,7 @@ import (
 )
 
 // Version string populated at build time
-var Version = "v1.0.4"
+var Version = "v1.1.0"
 
 // SetupAppWithCleanup constructs and wires all runtime dependencies into the Gin engine
 // and returns a resource cleanup function to be invoked on server shutdown.
@@ -87,7 +87,9 @@ func SetupAppWithCleanup(cfg *config.Config, appLogger *logger.Logger) (*gin.Eng
 
 	// Set up router with middleware chain: Recovery -> MaxBodyBytes -> RequestID/Context -> Logger -> SecurityHeaders -> Identity
 	r.Use(middleware.Recovery())
-	r.Use(middleware.MaxBodyBytesMiddleware(maxBodyBytes))
+	r.Use(middleware.MaxBodyBytesWithOverrides(maxBodyBytes, map[string]int64{
+		"/admin/branding/upload": 5 << 20, // Allow up to 5MB for custom theme icons, logos & backgrounds
+	}))
 	r.Use(middleware.ContextInject(appLogger))
 	r.Use(middleware.Logger())
 	r.Use(middleware.SecurityHeadersWithConfig(middleware.SecurityHeadersOptions{
@@ -250,6 +252,7 @@ func SetupAppWithCleanup(cfg *config.Config, appLogger *logger.Logger) (*gin.Eng
 		})
 		assetsGroup.StaticFS("/", http.FS(assetsFS))
 	}
+	r.GET("/branding/assets/:id", globalRateMW, samlHandler.HandleBrandingAssetGet)
 
 	// Register SAML and MFA routes
 	samlGroup := r.Group("/saml", globalRateMW)
@@ -287,6 +290,7 @@ func SetupAppWithCleanup(cfg *config.Config, appLogger *logger.Logger) (*gin.Eng
 	adminProtected := r.Group("/admin", globalRateMW, samlHandler.RequireAdminAuth(), samlHandler.RequireAdminCSRF())
 	{
 		adminProtected.GET("/settings", samlHandler.HandleAdminSettingsGet)
+		adminProtected.GET("/guide", samlHandler.HandleAdminGuideGet)
 		adminProtected.POST("/settings", samlHandler.HandleAdminSettingsPost)
 		adminProtected.POST("/settings/test-email", samlHandler.HandleAdminTestEmailPost)
 		adminProtected.POST("/settings/test-sms", samlHandler.HandleAdminTestSMSPost)
@@ -296,6 +300,7 @@ func SetupAppWithCleanup(cfg *config.Config, appLogger *logger.Logger) (*gin.Eng
 		adminProtected.POST("/users/delete", samlHandler.HandleAdminUserDeletePost)
 		adminProtected.POST("/users/reset-mfa", samlHandler.HandleAdminUserResetMFAPost)
 		adminProtected.GET("/cert/download", samlHandler.HandleAdminCertDownload)
+		adminProtected.POST("/branding/upload", samlHandler.HandleAdminBrandingUploadPost)
 	}
 
 	r.GET("/admin", func(c *gin.Context) {

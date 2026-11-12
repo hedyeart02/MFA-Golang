@@ -71,6 +71,15 @@ type AdminUser struct {
 	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
+// BrandingAsset represents an uploaded custom theme image asset (logo, icon, favicon, background) stored in SQLite.
+type BrandingAsset struct {
+	ID          string
+	Filename    string
+	ContentType string
+	Data        []byte
+	CreatedAt   time.Time
+}
+
 type Storage interface {
 	Init(ctx context.Context) error
 	Close() error
@@ -112,6 +121,10 @@ type Storage interface {
 	// Admin Gateway Settings persistence
 	SaveAdminSettings(ctx context.Context, settings *config.AdminSettingsPayload) error
 	GetAdminSettings(ctx context.Context) (*config.AdminSettingsPayload, error)
+
+	// Custom Branding Asset persistence
+	SaveBrandingAsset(ctx context.Context, asset BrandingAsset) error
+	GetBrandingAsset(ctx context.Context, id string) (*BrandingAsset, error)
 }
 
 type SQLiteStorage struct {
@@ -318,6 +331,14 @@ func (s *SQLiteStorage) Init(ctx context.Context) error {
 		id INTEGER PRIMARY KEY CHECK (id = 1),
 		settings_json TEXT NOT NULL,
 		updated_at DATETIME NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS branding_assets (
+		id TEXT PRIMARY KEY,
+		filename TEXT NOT NULL,
+		content_type TEXT NOT NULL,
+		data BLOB NOT NULL,
+		created_at DATETIME NOT NULL
 	);
 	`
 
@@ -1082,4 +1103,53 @@ func (s *SQLiteStorage) GetAdminSettings(ctx context.Context) (*config.AdminSett
 		return nil, err
 	}
 	return &settings, nil
+}
+
+// SaveBrandingAsset stores an uploaded branding asset binary in SQLite.
+func (s *SQLiteStorage) SaveBrandingAsset(ctx context.Context, asset BrandingAsset) error {
+	if strings.TrimSpace(asset.ID) == "" || len(asset.Data) == 0 {
+		return errors.New("branding asset id and data are required")
+	}
+	createdAt := asset.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO branding_assets (id, filename, content_type, data, created_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			filename = excluded.filename,
+			content_type = excluded.content_type,
+			data = excluded.data,
+			created_at = excluded.created_at
+	`, asset.ID, asset.Filename, asset.ContentType, asset.Data, createdAt)
+	if err != nil {
+		return fmt.Errorf("saving branding asset: %w", err)
+	}
+	return nil
+}
+
+// GetBrandingAsset retrieves a stored branding asset by ID from SQLite.
+func (s *SQLiteStorage) GetBrandingAsset(ctx context.Context, id string) (*BrandingAsset, error) {
+	trimmed := strings.TrimSpace(id)
+	if trimmed == "" {
+		return nil, ErrNotFound
+	}
+	var asset BrandingAsset
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, filename, content_type, data, created_at
+		FROM branding_assets
+		WHERE id = ?
+	`, trimmed).Scan(&asset.ID, &asset.Filename, &asset.ContentType, &asset.Data, &asset.CreatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("querying branding asset: %w", err)
+	}
+	return &asset, nil
 }

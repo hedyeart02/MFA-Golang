@@ -4,10 +4,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"html/template"
 	"net"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +32,7 @@ type Config struct {
 	SMTP     SMTPConfig     `mapstructure:"smtp"`
 	SMS      SMSConfig      `mapstructure:"sms"`
 	ITA      ITAConfig      `mapstructure:"ita"`
+	Branding BrandingConfig `mapstructure:"branding"`
 	Env      string         `mapstructure:"env"`
 
 	// Gateway Feature Flags
@@ -373,6 +376,400 @@ type ITAConfig struct {
 	EnforceUserWhitelist  bool          `mapstructure:"enforce_user_whitelist"`
 	AutoSyncInterval      time.Duration `mapstructure:"auto_sync_interval"`
 	ManualAllowedUsers    []string      `mapstructure:"manual_allowed_users"`
+}
+
+// ThemeProfile stores custom UI branding, logos, icons, backgrounds, and app naming
+// so SAMLGuard can be tailored per downstream SAML application integration.
+type ThemeProfile struct {
+	Name            string `json:"name" mapstructure:"name" yaml:"name"`
+	AppName         string `json:"app_name" mapstructure:"app_name" yaml:"app_name"`
+	TargetAppName   string `json:"target_app_name" mapstructure:"target_app_name" yaml:"target_app_name"`
+	Subtitle        string `json:"subtitle" mapstructure:"subtitle" yaml:"subtitle"`
+	FooterText      string `json:"footer_text" mapstructure:"footer_text" yaml:"footer_text"`
+	AccentColor     string `json:"accent_color" mapstructure:"accent_color" yaml:"accent_color"`
+	AppIcon         string `json:"app_icon" mapstructure:"app_icon" yaml:"app_icon"`
+	Favicon         string `json:"favicon" mapstructure:"favicon" yaml:"favicon"`
+	HeaderLogoDark  string `json:"header_logo_dark" mapstructure:"header_logo_dark" yaml:"header_logo_dark"`
+	HeaderLogoLight string `json:"header_logo_light" mapstructure:"header_logo_light" yaml:"header_logo_light"`
+	OrgLogo         string `json:"org_logo" mapstructure:"org_logo" yaml:"org_logo"`
+	LoginBgDark     string `json:"login_bg_dark" mapstructure:"login_bg_dark" yaml:"login_bg_dark"`
+	LoginBgLight    string `json:"login_bg_light" mapstructure:"login_bg_light" yaml:"login_bg_light"`
+	ConsoleBgDark   string `json:"console_bg_dark" mapstructure:"console_bg_dark" yaml:"console_bg_dark"`
+	ConsoleBgLight  string `json:"console_bg_light" mapstructure:"console_bg_light" yaml:"console_bg_light"`
+}
+
+// BrandingConfig manages the active theme profile and saved custom theme profiles.
+type BrandingConfig struct {
+	ActiveProfile string                  `json:"active_profile" mapstructure:"active_profile" yaml:"active_profile"`
+	Profiles      map[string]ThemeProfile `json:"profiles" mapstructure:"profiles" yaml:"profiles"`
+}
+
+// ResolvedBranding holds sanitized, template-ready branding values with defaults applied.
+type ResolvedBranding struct {
+	ProfileKey            string
+	ProfileName           string
+	AppName               string
+	TargetAppName         string
+	Subtitle              string
+	ShowSubtitle          bool
+	FooterText            string
+	HeaderTitleSuffix     string
+	AccentColor           template.CSS
+	AccentHover           template.CSS
+	AccentDark            template.CSS
+	AccentGlow            template.CSS
+	HasCustomAccent       bool
+	AppIcon               string
+	HasCustomAppIcon      bool
+	HideAppIcon           bool
+	Favicon               string
+	HasCustomFavicon      bool
+	HeaderLogoDark        string
+	HeaderLogoLight       string
+	ShowHeaderLogo        bool
+	HasCustomHeaderLogo   bool
+	OrgLogo               string
+	ShowOrgLogo           bool
+	HasCustomOrgLogo      bool
+	LoginBgDarkCSS        template.CSS
+	LoginBgLightCSS       template.CSS
+	HasCustomLoginBgDark  bool
+	HasCustomLoginBgLight bool
+	HasCustomLoginStyles  bool
+	ConsoleBgDarkCSS      template.CSS
+	ConsoleBgLightCSS     template.CSS
+	HasCustomConsoleDark  bool
+	HasCustomConsoleLight bool
+	HasCustomConsoleStyle bool
+}
+
+// NormalizeThemeProfileKey normalizes a theme profile key into a safe lowercase slug.
+func NormalizeThemeProfileKey(key string) string {
+	trimmed := strings.ToLower(strings.TrimSpace(key))
+	if trimmed == "" {
+		return "default"
+	}
+	var b strings.Builder
+	lastDash := false
+	for i := 0; i < len(trimmed); i++ {
+		ch := trimmed[i]
+		if (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-' {
+			b.WriteByte(ch)
+			lastDash = false
+		} else if !lastDash && b.Len() > 0 {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	out := strings.Trim(b.String(), "-_")
+	if out == "" {
+		return "default"
+	}
+	return out
+}
+
+// SanitizeBrandingColor validates a 6-digit hex color (#RRGGBB) or returns empty string.
+func SanitizeBrandingColor(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if len(trimmed) != 7 || trimmed[0] != '#' {
+		return ""
+	}
+	for i := 1; i < 7; i++ {
+		ch := trimmed[i]
+		isHex := (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')
+		if !isHex {
+			return ""
+		}
+	}
+	return strings.ToUpper(trimmed)
+}
+
+// SanitizeBrandingAssetRef validates an asset URL/path reference for safe use in HTML src/href and CSS url().
+// Allows empty string (default), "none" (explicitly hidden), safe local relative paths (/...), or safe raster data URIs.
+func SanitizeBrandingAssetRef(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.EqualFold(trimmed, "none") {
+		return "none"
+	}
+	if strings.HasPrefix(trimmed, "/") && !strings.HasPrefix(trimmed, "//") {
+		if strings.ContainsAny(trimmed, "'\"();<>\\ \t\r\n") {
+			return ""
+		}
+		for i := 0; i < len(trimmed); i++ {
+			if trimmed[i] < 0x20 || trimmed[i] == 0x7f {
+				return ""
+			}
+		}
+		return trimmed
+	}
+	lower := strings.ToLower(trimmed)
+	for _, prefix := range []string{
+		"data:image/png;base64,",
+		"data:image/jpeg;base64,",
+		"data:image/jpg;base64,",
+		"data:image/webp;base64,",
+		"data:image/gif;base64,",
+		"data:image/x-icon;base64,",
+		"data:image/vnd.microsoft.icon;base64,",
+	} {
+		if strings.HasPrefix(lower, prefix) {
+			b64 := trimmed[len(prefix):]
+			if b64 == "" {
+				return ""
+			}
+			for i := 0; i < len(b64); i++ {
+				ch := b64[i]
+				valid := (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '+' || ch == '/' || ch == '='
+				if !valid {
+					return ""
+				}
+			}
+			return prefix + b64
+		}
+	}
+	return ""
+}
+
+// SanitizeThemeProfile cleans and validates all fields of a ThemeProfile.
+func SanitizeThemeProfile(p ThemeProfile) ThemeProfile {
+	return ThemeProfile{
+		Name:            strings.TrimSpace(p.Name),
+		AppName:         strings.TrimSpace(p.AppName),
+		TargetAppName:   strings.TrimSpace(p.TargetAppName),
+		Subtitle:        strings.TrimSpace(p.Subtitle),
+		FooterText:      strings.TrimSpace(p.FooterText),
+		AccentColor:     SanitizeBrandingColor(p.AccentColor),
+		AppIcon:         SanitizeBrandingAssetRef(p.AppIcon),
+		Favicon:         SanitizeBrandingAssetRef(p.Favicon),
+		HeaderLogoDark:  SanitizeBrandingAssetRef(p.HeaderLogoDark),
+		HeaderLogoLight: SanitizeBrandingAssetRef(p.HeaderLogoLight),
+		OrgLogo:         SanitizeBrandingAssetRef(p.OrgLogo),
+		LoginBgDark:     SanitizeBrandingAssetRef(p.LoginBgDark),
+		LoginBgLight:    SanitizeBrandingAssetRef(p.LoginBgLight),
+		ConsoleBgDark:   SanitizeBrandingAssetRef(p.ConsoleBgDark),
+		ConsoleBgLight:  SanitizeBrandingAssetRef(p.ConsoleBgLight),
+	}
+}
+
+// DefaultThemeProfile returns the built-in EcoStruxure IT Advisor / SAMLGuard theme profile metadata.
+func DefaultThemeProfile() ThemeProfile {
+	return ThemeProfile{
+		Name:          "EcoStruxure IT Advisor (Default)",
+		AppName:       "SAMLGuard",
+		TargetAppName: "Schneider Electric IT Advisor",
+		Subtitle:      "IT Advisor",
+		FooterText:    "© 2026 SAMLGuard. All rights reserved.",
+		AccentColor:   "#00B050",
+	}
+}
+
+// EffectiveActiveProfile returns the active theme profile key, defaulting to "default".
+func (b BrandingConfig) EffectiveActiveProfile() string {
+	return NormalizeThemeProfileKey(b.ActiveProfile)
+}
+
+// EffectiveProfile returns the sanitized ThemeProfile for the active key.
+func (b BrandingConfig) EffectiveProfile() ThemeProfile {
+	key := b.EffectiveActiveProfile()
+	if b.Profiles != nil {
+		if prof, ok := b.Profiles[key]; ok {
+			return SanitizeThemeProfile(prof)
+		}
+	}
+	if key == "default" {
+		return DefaultThemeProfile()
+	}
+	if b.Profiles != nil {
+		if prof, ok := b.Profiles["default"]; ok {
+			return SanitizeThemeProfile(prof)
+		}
+	}
+	return DefaultThemeProfile()
+}
+
+// Resolve returns template-ready branding settings with sensible defaults and derived CSS tokens.
+func (b BrandingConfig) Resolve() ResolvedBranding {
+	key := b.EffectiveActiveProfile()
+	prof := b.EffectiveProfile()
+
+	appName := prof.AppName
+	if appName == "" {
+		appName = "SAMLGuard"
+	}
+	targetAppName := prof.TargetAppName
+	if targetAppName == "" {
+		targetAppName = "Schneider Electric IT Advisor"
+	}
+	subtitle := prof.Subtitle
+	showSubtitle := true
+	if strings.EqualFold(subtitle, "none") {
+		subtitle = ""
+		showSubtitle = false
+	} else if subtitle == "" {
+		if key == "default" && prof.HeaderLogoDark == "" && prof.HeaderLogoLight == "" {
+			subtitle = "IT Advisor"
+		} else {
+			showSubtitle = false
+		}
+	}
+
+	profileName := prof.Name
+	if profileName == "" {
+		if key == "default" {
+			profileName = "EcoStruxure IT Advisor (Default)"
+		} else {
+			profileName = key
+		}
+	}
+
+	headerTitleSuffix := targetAppName
+	if key == "default" && prof.TargetAppName == "" && prof.Subtitle == "" {
+		headerTitleSuffix = "EcoStruxure™ IT Advisor"
+	} else if showSubtitle && subtitle != "" && prof.TargetAppName == "" {
+		headerTitleSuffix = subtitle
+	}
+
+	footerText := prof.FooterText
+	if strings.EqualFold(footerText, "none") {
+		footerText = ""
+	} else if footerText == "" {
+		footerText = "© 2026 SAMLGuard. All rights reserved."
+	}
+
+	res := ResolvedBranding{
+		ProfileKey:        key,
+		ProfileName:       profileName,
+		AppName:           appName,
+		TargetAppName:     targetAppName,
+		Subtitle:          subtitle,
+		ShowSubtitle:      showSubtitle,
+		FooterText:        footerText,
+		HeaderTitleSuffix: headerTitleSuffix,
+		ShowHeaderLogo:    true,
+		ShowOrgLogo:       true,
+	}
+
+	if prof.AccentColor != "" && !strings.EqualFold(prof.AccentColor, "#00B050") {
+		hoverHex, darkHex, glowRGBA := deriveAccentTokens(prof.AccentColor)
+		res.HasCustomAccent = true
+		res.AccentColor = template.CSS(prof.AccentColor)
+		res.AccentHover = template.CSS(hoverHex)
+		res.AccentDark = template.CSS(darkHex)
+		res.AccentGlow = template.CSS(glowRGBA)
+	}
+
+	switch prof.AppIcon {
+	case "none":
+		res.HideAppIcon = true
+	case "":
+		// use built-in SVG shield
+	default:
+		res.HasCustomAppIcon = true
+		res.AppIcon = prof.AppIcon
+	}
+
+	if prof.Favicon != "" && prof.Favicon != "none" {
+		res.HasCustomFavicon = true
+		res.Favicon = prof.Favicon
+	}
+
+	darkLogo := prof.HeaderLogoDark
+	lightLogo := prof.HeaderLogoLight
+	if darkLogo == "none" && (lightLogo == "" || lightLogo == "none") {
+		res.ShowHeaderLogo = false
+	} else if lightLogo == "none" && darkLogo == "" {
+		res.ShowHeaderLogo = false
+	} else if darkLogo != "" || lightLogo != "" {
+		if darkLogo == "none" {
+			darkLogo = lightLogo
+		}
+		if lightLogo == "none" {
+			lightLogo = darkLogo
+		}
+		if darkLogo == "" {
+			darkLogo = lightLogo
+		}
+		if lightLogo == "" {
+			lightLogo = darkLogo
+		}
+		res.HasCustomHeaderLogo = true
+		res.HeaderLogoDark = darkLogo
+		res.HeaderLogoLight = lightLogo
+	}
+
+	switch prof.OrgLogo {
+	case "none":
+		res.ShowOrgLogo = false
+	case "":
+		// use default Schneider Electric logo
+	default:
+		res.HasCustomOrgLogo = true
+		res.OrgLogo = prof.OrgLogo
+	}
+
+	if prof.LoginBgDark != "" {
+		res.HasCustomLoginBgDark = true
+		if prof.LoginBgDark == "none" {
+			res.LoginBgDarkCSS = template.CSS("none")
+		} else {
+			res.LoginBgDarkCSS = template.CSS("url('" + prof.LoginBgDark + "')")
+		}
+	}
+	if prof.LoginBgLight != "" {
+		res.HasCustomLoginBgLight = true
+		if prof.LoginBgLight == "none" {
+			res.LoginBgLightCSS = template.CSS("none")
+		} else {
+			res.LoginBgLightCSS = template.CSS("url('" + prof.LoginBgLight + "')")
+		}
+	}
+	res.HasCustomLoginStyles = res.HasCustomAccent || res.HasCustomLoginBgDark || res.HasCustomLoginBgLight
+
+	if prof.ConsoleBgDark != "" {
+		res.HasCustomConsoleDark = true
+		if prof.ConsoleBgDark == "none" {
+			res.ConsoleBgDarkCSS = template.CSS("none")
+		} else {
+			res.ConsoleBgDarkCSS = template.CSS("url('" + prof.ConsoleBgDark + "')")
+		}
+	}
+	if prof.ConsoleBgLight != "" {
+		res.HasCustomConsoleLight = true
+		if prof.ConsoleBgLight == "none" {
+			res.ConsoleBgLightCSS = template.CSS("none")
+		} else {
+			res.ConsoleBgLightCSS = template.CSS("url('" + prof.ConsoleBgLight + "')")
+		}
+	}
+	res.HasCustomConsoleStyle = res.HasCustomAccent || res.HasCustomConsoleDark || res.HasCustomConsoleLight
+
+	return res
+}
+
+func deriveAccentTokens(hexColor string) (hover, dark, glow string) {
+	if len(hexColor) != 7 || hexColor[0] != '#' {
+		return "#009845", "#00823a", "rgba(0, 176, 80, 0.30)"
+	}
+	r, err1 := strconv.ParseUint(hexColor[1:3], 16, 8)
+	g, err2 := strconv.ParseUint(hexColor[3:5], 16, 8)
+	b, err3 := strconv.ParseUint(hexColor[5:7], 16, 8)
+	if err1 != nil || err2 != nil || err3 != nil {
+		return "#009845", "#00823a", "rgba(0, 176, 80, 0.30)"
+	}
+	scale := func(v uint64, factor float64) uint64 {
+		scaled := uint64(float64(v) * factor)
+		if scaled > 255 {
+			return 255
+		}
+		return scaled
+	}
+	hover = fmt.Sprintf("#%02X%02X%02X", scale(r, 0.86), scale(g, 0.86), scale(b, 0.86))
+	dark = fmt.Sprintf("#%02X%02X%02X", scale(r, 0.74), scale(g, 0.74), scale(b, 0.74))
+	glow = fmt.Sprintf("rgba(%d, %d, %d, 0.30)", r, g, b)
+	return hover, dark, glow
 }
 
 func (c *Config) IsProduction() bool {
