@@ -292,6 +292,7 @@ func SetupAppWithCleanup(cfg *config.Config, appLogger *logger.Logger) (*gin.Eng
 	{
 		adminProtected.GET("/settings", samlHandler.HandleAdminSettingsGet)
 		adminProtected.GET("/guide", samlHandler.HandleAdminGuideGet)
+		adminProtected.GET("/guide/deployment", samlHandler.HandleAdminDeploymentGuideGet)
 		adminProtected.POST("/settings", samlHandler.HandleAdminSettingsPost)
 		adminProtected.POST("/settings/test-email", samlHandler.HandleAdminTestEmailPost)
 		adminProtected.POST("/settings/test-sms", samlHandler.HandleAdminTestSMSPost)

@@ -1132,3 +1132,26 @@ func TestAdminAutoTLS_SaveAndValidation(t *testing.T) {
 	}
 }
 
+func TestAdminDeploymentGuide_Render(t *testing.T) {
+	r, h, _ := setupTestAdminHandler(t)
+	r.GET("/admin/guide/deployment", h.HandleAdminDeploymentGuideGet)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/admin/guide/deployment", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 GET /admin/guide/deployment, got %d", w.Code)
+	}
+	body := w.Body.String()
+	for _, want := range []string{
+		"Webmin",
+		"Ubuntu, Debian, RHEL",
+		"Windows Server",
+		"config.yaml",
+		"samlguard-webmin.wbm.gz",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected deployment guide HTML to contain %q", want)
+		}
+	}
+}
+

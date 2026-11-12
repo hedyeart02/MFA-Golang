@@ -518,6 +518,17 @@ func (h *SAMLHandler) HandleAdminGuideGet(c *gin.Context) {
 	h.renderAdminTemplate(c, "user_guide.html", web.ParseUserGuideTemplate, "user guide", vm)
 }
 
+// HandleAdminDeploymentGuideGet renders the OS-specific deployment & config.yaml guide page.
+func (h *SAMLHandler) HandleAdminDeploymentGuideGet(c *gin.Context) {
+	adminUser, _ := c.Get("admin_username")
+	adminUsername, _ := adminUser.(string)
+	vm := h.buildAdminViewModel(adminUsername, "", "")
+	if vm.CSRFToken == "" {
+		vm.CSRFToken = h.getAdminCSRFToken(c)
+	}
+	h.renderAdminTemplate(c, "deployment_guide.html", web.ParseDeploymentGuideTemplate, "deployment guide", vm)
+}
+
 // HandleAdminSettingsPost processes form submissions from the admin panel and persists to the database.
 func (cHandler *SAMLHandler) HandleAdminSettingsPost(c *gin.Context) {
 	adminUser, _ := c.Get("admin_username")

@@ -27,6 +27,9 @@ var DefaultCorporateLoginHTML string
 //go:embed templates/user_guide.html
 var DefaultUserGuideHTML string
 
+//go:embed templates/deployment_guide.html
+var DefaultDeploymentGuideHTML string
+
 //go:embed static
 var staticFiles embed.FS
 
@@ -68,4 +71,9 @@ func ParseCorporateLoginTemplate() (*template.Template, error) {
 // ParseUserGuideTemplate parses and returns the embedded administrator user guide template
 func ParseUserGuideTemplate() (*template.Template, error) {
 	return template.New("user_guide.html").Parse(DefaultUserGuideHTML)
+}
+
+// ParseDeploymentGuideTemplate parses and returns the embedded OS deployment guide template
+func ParseDeploymentGuideTemplate() (*template.Template, error) {
+	return template.New("deployment_guide.html").Parse(DefaultDeploymentGuideHTML)
 }

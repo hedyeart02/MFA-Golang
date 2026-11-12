@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{if .Branding.AppName}}{{.Branding.AppName}}{{else}}SAMLGuard{{end}} - OS Deployment &amp; config.yaml Guide</title>
+    {{if .Branding.HasCustomFavicon}}
+    <link rel="icon" href="{{.Branding.Favicon}}">
+    {{else}}
+    <link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" sizes="any">
+    {{end}}
+    <script src="/static/js/theme.js"></script>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root, [data-theme="dark"] {
+            --bg-body: #101B2B;
+            --bg-sidebar: rgba(11, 20, 33, 0.88);
+            --bg-topbar: rgba(16, 27, 43, 0.84);
+            --bg-card: rgba(23, 37, 54, 0.90);
+            --bg-card-subtle: rgba(18, 30, 46, 0.92);
+            --border-main: rgba(148, 178, 214, 0.18);
+            --border-card: rgba(148, 178, 214, 0.16);
+            --text-primary: #f1f6fc;
+            --text-secondary: #b2c5dc;
+            --text-muted: #7f96b3;
+            --brand-green: #00B050;
+            --brand-green-hover: #009845;
+            --brand-green-glow: rgba(0, 176, 80, 0.25);
+            --code-bg: #0c1523;
+            --code-color: #3dcd58;
+            --bg-hero-image: url('/assets/backgrounds/bg-console-dark.png');
+            --bg-console-scrim: linear-gradient(135deg, rgba(16, 27, 43, 0.62) 0%, rgba(16, 27, 43, 0.38) 55%, rgba(16, 27, 43, 0.48) 100%);
+        }
+
+        [data-theme="light"] {
+            --bg-body: #f1f4f8;
+            --bg-sidebar: rgba(255, 255, 255, 0.92);
+            --bg-topbar: rgba(255, 255, 255, 0.90);
+            --bg-card: rgba(255, 255, 255, 0.94);
+            --bg-card-subtle: rgba(248, 250, 252, 0.95);
+            --border-main: rgba(16, 27, 43, 0.10);
+            --border-card: rgba(16, 27, 43, 0.10);
+            --text-primary: #101B2B;
+            --text-secondary: #334155;
+            --text-muted: #64748b;
+            --brand-green: #00B050;
+            --brand-green-hover: #009845;
+            --brand-green-glow: rgba(0, 176, 80, 0.20);
+            --code-bg: #f1f5f9;
+            --code-color: #007d39;
+            --bg-hero-image: url('/assets/backgrounds/bg-console-light.png');
+            --bg-console-scrim: linear-gradient(135deg, rgba(248, 250, 252, 0.68) 0%, rgba(248, 250, 252, 0.45) 55%, rgba(241, 244, 248, 0.56) 100%);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-body);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            line-height: 1.6;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-color: var(--bg-body);
+            background-image: var(--bg-console-scrim), var(--bg-hero-image);
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        {{if .Branding.AccentColor}}
+        :root, [data-theme="dark"], [data-theme="light"] {
+            --brand-green: {{.Branding.AccentColor}};
+            --brand-green-hover: {{.Branding.AccentColor}};
+        }
+        {{end}}
+
+        .sidebar {
+            width: 280px;
+            flex-shrink: 0;
+            background: var(--bg-sidebar);
+            backdrop-filter: blur(18px);
+            border-right: 1px solid var(--border-main);
+            padding: 1.25rem 1rem;
+            position: sticky;
+            top: 0;
+            height: 100vh;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .brand-row {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.25rem 0.5rem 1rem;
+            border-bottom: 1px solid var(--border-main);
+            margin-bottom: 1rem;
+            text-decoration: none;
+            color: inherit;
+        }
+
+        .brand-icon {
+            width: 38px;
+            height: 38px;
+            border-radius: 10px;
+            background: rgba(0, 176, 80, 0.14);
+            border: 1px solid rgba(0, 176, 80, 0.35);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        .brand-icon img { width: 100%; height: 100%; object-fit: contain; }
+        .brand-icon svg { width: 22px; height: 22px; }
+        .brand-name { font-size: 1rem; font-weight: 700; display: block; line-height: 1.2; }
+        .brand-subtitle { font-size: 0.72rem; color: var(--text-muted); display: block; }
+
+        .sidebar-section-label {
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            padding: 0.35rem 0.75rem;
+        }
+
+        .toc-nav { display: flex; flex-direction: column; gap: 0.25rem; margin-top: 0.35rem; }
+
+        .toc-link {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.55rem 0.75rem;
+            border-radius: 8px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: all 0.15s ease;
+        }
+
+        .toc-link:hover { background: rgba(0, 176, 80, 0.12); color: var(--text-primary); }
+        .toc-link.active { background: var(--brand-green); color: #fff; font-weight: 600; box-shadow: 0 4px 12px var(--brand-green-glow); }
+
+        .sidebar-footer {
+            margin-top: 1.5rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border-main);
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .main-shell { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+        .topbar {
+            position: sticky;
+            top: 0;
+            z-index: 20;
+            height: 64px;
+            background: var(--bg-topbar);
+            backdrop-filter: blur(18px);
+            border-bottom: 1px solid var(--border-main);
+            padding: 0 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+        }
+
+        .topbar-title { font-size: 1rem; font-weight: 700; color: var(--text-primary); }
+        .topbar-actions { display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap; }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.48rem 0.9rem;
+            border-radius: 8px;
+            font-size: 0.84rem;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: all 0.15s ease;
+        }
+
+        .btn-primary { background: var(--brand-green); color: #fff; }
+        .btn-primary:hover { background: var(--brand-green-hover); }
+        .btn-secondary { background: var(--bg-card-subtle); color: var(--text-primary); border-color: var(--border-card); }
+        .btn-secondary:hover { border-color: var(--brand-green); color: var(--brand-green); }
+
+        .content {
+            max-width: 1100px;
+            width: 100%;
+            margin: 0 auto;
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .hero-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 16px;
+            padding: 1.75rem 2rem;
+            backdrop-filter: blur(16px);
+        }
+
+        .hero-card h1 { font-size: 1.65rem; margin-bottom: 0.5rem; }
+        .hero-card p { color: var(--text-secondary); font-size: 0.96rem; }
+
+        .os-tabs {
+            display: flex;
+            gap: 0.65rem;
+            flex-wrap: wrap;
+            margin-top: 1.1rem;
+        }
+
+        .os-tab-btn {
+            padding: 0.5rem 0.95rem;
+            border-radius: 8px;
+            border: 1px solid var(--border-card);
+            background: var(--bg-card-subtle);
+            color: var(--text-secondary);
+            font-weight: 600;
+            font-size: 0.85rem;
+            text-decoration: none;
+            transition: all 0.15s ease;
+        }
+
+        .os-tab-btn:hover { border-color: var(--brand-green); color: var(--brand-green); }
+        .os-tab-btn.active { background: var(--brand-green); border-color: var(--brand-green); color: #fff; box-shadow: 0 4px 12px var(--brand-green-glow); }
+
+        .guide-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 14px;
+            padding: 1.5rem 1.75rem;
+            backdrop-filter: blur(16px);
+            scroll-margin-top: 84px;
+        }
+
+        .guide-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin-bottom: 1rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid var(--border-main);
+        }
+
+        .guide-card-header h2 { font-size: 1.2rem; font-weight: 700; }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.24rem 0.65rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .badge-success { background: rgba(0, 176, 80, 0.14); color: #3dcd58; border: 1px solid rgba(0, 176, 80, 0.35); }
+        .badge-info { background: rgba(59, 130, 246, 0.14); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.35); }
+        .badge-warning { background: rgba(245, 158, 11, 0.14); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); }
+
+        .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+
+        .sub-box {
+            background: var(--bg-card-subtle);
+            border: 1px solid var(--border-card);
+            border-radius: 10px;
+            padding: 1rem 1.15rem;
+        }
+
+        .sub-box h3 { font-size: 0.96rem; margin-bottom: 0.55rem; color: var(--text-primary); }
+        .guide-list { padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.45rem; color: var(--text-secondary); font-size: 0.9rem; }
+
+        code {
+            background: var(--code-bg);
+            color: var(--code-color);
+            padding: 0.12rem 0.38rem;
+            border-radius: 5px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 0.84em;
+        }
+
+        pre {
+            background: var(--code-bg);
+            color: var(--code-color);
+            border: 1px solid var(--border-card);
+            border-radius: 10px;
+            padding: 0.9rem 1rem;
+            overflow-x: auto;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 0.82rem;
+            line-height: 1.55;
+            margin-top: 0.65rem;
+        }
+
+        .guide-table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; font-size: 0.88rem; }
+        .guide-table th, .guide-table td { text-align: left; padding: 0.65rem 0.75rem; border-bottom: 1px solid var(--border-main); }
+        .guide-table th { color: var(--text-muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; }
+
+        @media (max-width: 960px) {
+            body { flex-direction: column; }
+            .sidebar { width: 100%; height: auto; position: static; }
+            .grid-2 { grid-template-columns: 1fr; }
+            .topbar { padding: 0 1rem; }
+            .content { padding: 1.25rem; }
+        }
+    </style>
+</head>
+<body>
+    <aside class="sidebar">
+        <div>
+            <a class="brand-row" href="/admin/settings">
+                {{if not .Branding.HideAppIcon}}
+                <div class="brand-icon">
+                    {{if .Branding.AppIcon}}
+                    <img src="{{.Branding.AppIcon}}" alt="{{.Branding.AppName}}">
+                    {{else}}
+                    <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M32 4L10 13V29C10 43.5 19.5 56.2 32 60C44.5 56.2 54 43.5 54 29V13L32 4Z" fill="#00B050" fill-opacity="0.25" stroke="#3dcd58" stroke-width="3"/>
+                        <path d="M23 31L29 37L41 24" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    {{end}}
+                </div>
+                {{end}}
+                <div>
+                    <span class="brand-name">{{if .Branding.AppName}}{{.Branding.AppName}}{{else}}SAMLGuard{{end}}</span>
+                    <span class="brand-subtitle">OS Deployment &amp; Config Guide</span>
+                </div>
+            </a>
+
+            <div class="sidebar-section-label">By Operating System</div>
+            <nav class="toc-nav">
+                <a class="toc-link active" href="#os-webmin">1. Webmin (Linux UI :10000)</a>
+                <a class="toc-link" href="#os-linux">2. Linux (Ubuntu / Debian / RHEL)</a>
+                <a class="toc-link" href="#os-windows">3. Windows Server (SCM Service)</a>
+                <a class="toc-link" href="#config-yaml">4. config.yaml &amp; Let's Encrypt</a>
+            </nav>
+        </div>
+
+        <div class="sidebar-footer">
+            <a href="/admin/guide" class="btn btn-secondary" style="justify-content: center;">&larr; Main User Guide</a>
+            <a href="/admin/settings" class="btn btn-primary" style="justify-content: center;">Gateway Settings</a>
+        </div>
+    </aside>
+
+    <div class="main-shell">
+        <header class="topbar">
+            <div class="topbar-title">OS Deployment, Upload &amp; <code>config.yaml</code> Guide</div>
+            <div class="topbar-actions">
+                <a href="/admin/guide" class="btn btn-secondary">Main User Guide</a>
+                <a href="/admin/settings" class="btn btn-primary">Back to Settings</a>
+            </div>
+        </header>
+
+        <main class="content">
+            <section class="hero-card">
+                <h1>Cross-Platform Deployment &amp; <code>config.yaml</code> Setup</h1>
+                <p>Step-by-step instructions to upload SAMLGuard release packages, configure <code>config.yaml</code>, install certificates, and manage the service across <strong>Webmin</strong>, <strong>Linux (systemd)</strong>, and <strong>Windows Server</strong>.</p>
+                <div class="os-tabs">
+                    <a class="os-tab-btn" href="#os-webmin">Webmin (:10000)</a>
+                    <a class="os-tab-btn" href="#os-linux">Linux (Ubuntu / Debian / RHEL)</a>
+                    <a class="os-tab-btn" href="#os-windows">Windows Server</a>
+                    <a class="os-tab-btn" href="#config-yaml">config.yaml Reference</a>
+                </div>
+            </section>
+
+            <!-- 1. WEBMIN -->
+            <section class="guide-card" id="os-webmin">
+                <div class="guide-card-header">
+                    <h2>1. Webmin (Linux Appliance / Server Management)</h2>
+                    <span class="badge badge-success">Port :10000 + systemd</span>
+                </div>
+                <p style="color: var(--text-secondary); font-size: 0.92rem; margin-bottom: 1rem;">
+                    SAMLGuard includes a native Webmin module package (<code>dist/samlguard-webmin.wbm.gz</code>) that adds a <strong>SAMLGuard</strong> section to the Webmin sidebar with five modules: <strong>About</strong>, <strong>Certificates</strong>, <strong>Debug</strong>, <strong>Setup</strong>, and <strong>Status</strong>.
+                </p>
+                <div class="grid-2">
+                    <div class="sub-box">
+                        <h3>Step 1: Upload &amp; Install the Webmin Module</h3>
+                        <ol class="guide-list">
+                            <li>Install the standalone Linux service first (see Section 2) so <code>/etc/samlguard/config.yaml</code> and <code>samlguard.service</code> exist.</li>
+                            <li>Log in to Webmin at <code>https://&lt;server-ip&gt;:10000</code>.</li>
+                            <li>Navigate to <strong>Webmin &rarr; Webmin Configuration &rarr; Webmin Modules</strong>.</li>
+                            <li>Select <strong>From uploaded file</strong>, choose <code>dist/samlguard-webmin.wbm.gz</code>, and click <strong>Install Module</strong>.</li>
+                            <li>Click <strong>Refresh Modules</strong> in the bottom-left Webmin sidebar to reveal the <strong>SAMLGuard</strong> menu.</li>
+                        </ol>
+                    </div>
+                    <div class="sub-box">
+                        <h3>Step 2: Configure <code>config.yaml</code> &amp; Certificates in Webmin</h3>
+                        <ol class="guide-list">
+                            <li>Open <strong>SAMLGuard &rarr; Setup</strong> to view the gateway summary and edit <code>/etc/samlguard/config.yaml</code> directly from your browser, then save.</li>
+                            <li>Open <strong>SAMLGuard &rarr; Certificates</strong> to inspect X.509 certificates or upload <code>.crt</code> / <code>.key</code> files directly into <code>/etc/samlguard/cert/</code>.</li>
+                            <li>Open <strong>SAMLGuard &rarr; Status</strong> to Start, Stop, Restart, or Enable <code>samlguard.service</code> at boot and verify the health probe.</li>
+                            <li>Open <strong>SAMLGuard &rarr; Debug</strong> to filter or download live <code>journalctl -u samlguard</code> logs.</li>
+                        </ol>
+                    </div>
+                </div>
+                <div class="sub-box" style="margin-top: 1rem;">
+                    <h3>One-Click Application Upgrade via Webmin</h3>
+                    <p style="color: var(--text-secondary); font-size: 0.88rem;">
+                        In <strong>SAMLGuard &rarr; Status &rarr; Upgrade SAMLGuard Application</strong>, upload <code>samlguard-vX.Y.Z-linux-amd64.tar.gz</code> (or <code>arm64</code>). Webmin automatically verifies the binary, backs up <code>/usr/local/bin/samlguard</code> and <code>samlguard.db</code>, swaps the binary, reapplies <code>cap_net_bind_service</code>, restarts the service, and rolls back if startup fails.
+                    </p>
+                </div>
+            </section>
+
+            <!-- 2. LINUX -->
+            <section class="guide-card" id="os-linux">
+                <div class="guide-card-header">
+                    <h2>2. Linux (Ubuntu, Debian, RHEL, Rocky, AlmaLinux, CentOS)</h2>
+                    <span class="badge badge-info">systemd + Pure-Go Binary</span>
+                </div>
+                <div class="grid-2">
+                    <div class="sub-box">
+                        <h3>Step 1: Upload &amp; Extract Package</h3>
+                        <p style="color: var(--text-secondary); font-size: 0.88rem;">Upload the archive for your architecture (<code>linux-amd64</code> or <code>linux-arm64</code>) to the Linux host and extract it:</p>
+                        <pre>scp dist/samlguard-v1.1.1-linux-amd64.tar.gz root@&lt;server-ip&gt;:/tmp/
+ssh root@&lt;server-ip&gt;
+mkdir -p /tmp/samlguard-pkg &amp;&amp; tar -xzf /tmp/samlguard-v1.1.1-linux-amd64.tar.gz -C /tmp/samlguard-pkg
+cd /tmp/samlguard-pkg/*</pre>
+                    </div>
+                    <div class="sub-box">
+                        <h3>Step 2: Run Installer &amp; Upload Certificates</h3>
+                        <p style="color: var(--text-secondary); font-size: 0.88rem;">Run the installer script (creates user <code>samlguard</code>, <code>/etc/samlguard/config.yaml</code>, and grants port <code>80/443</code> capability):</p>
+                        <pre>sudo ./scripts/linux/install.sh ./samlguard
+# Upload or copy your TLS/SAML certs if using static certs:
+sudo cp server.crt server.key saml-signing.crt saml-signing.key /etc/samlguard/cert/
+sudo chown -R samlguard:samlguard /etc/samlguard/cert
+sudo chmod 600 /etc/samlguard/cert/*.key</pre>
+                    </div>
+                </div>
+                <div class="grid-2" style="margin-top: 1rem;">
+                    <div class="sub-box">
+                        <h3>Step 3: Edit <code>/etc/samlguard/config.yaml</code> &amp; Start Service</h3>
+                        <pre>sudo nano /etc/samlguard/config.yaml
+sudo systemctl daemon-reload
+sudo systemctl enable --now samlguard
+sudo systemctl status samlguard
+sudo journalctl -u samlguard -f</pre>
+                    </div>
+                    <div class="sub-box">
+                        <h3>Step 4: Firewall &amp; Future Upgrades</h3>
+                        <pre># Ubuntu / Debian (UFW):
+sudo ufw allow 8443/tcp   # or 80,443/tcp for Let's Encrypt
+
+# RHEL / Rocky / AlmaLinux (firewalld):
+sudo firewall-cmd --permanent --add-port=8443/tcp
+sudo firewall-cmd --reload
+
+# Upgrade later:
+sudo bash scripts/linux/upgrade.sh /tmp/samlguard-v1.1.1-linux-amd64.tar.gz</pre>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 3. WINDOWS -->
+            <section class="guide-card" id="os-windows">
+                <div class="guide-card-header">
+                    <h2>3. Windows Server (Windows Service / SCM)</h2>
+                    <span class="badge badge-info">Windows Server 2019 / 2022 / 11</span>
+                </div>
+                <div class="grid-2">
+                    <div class="sub-box">
+                        <h3>Step 1: Upload &amp; Install Windows Service</h3>
+                        <ol class="guide-list">
+                            <li>Copy <code>dist\samlguard-v1.1.1-windows-amd64.zip</code> to the Windows server and extract it (e.g. <code>C:\Temp\samlguard</code>).</li>
+                            <li>Open <strong>PowerShell as Administrator</strong> inside the extracted folder and run:</li>
+                        </ol>
+                        <pre>.\scripts\windows\install-service.ps1 -BinarySource .\samlguard.exe</pre>
+                        <p style="color: var(--text-muted); font-size: 0.82rem; margin-top: 0.5rem;">
+                            Installs binary to <code>C:\Program Files\SAMLGuard\samlguard.exe</code> and data/config to <code>C:\ProgramData\SAMLGuard\</code>.
+                        </p>
+                    </div>
+                    <div class="sub-box">
+                        <h3>Step 2: Configure <code>config.yaml</code>, Certs &amp; Firewall</h3>
+                        <ol class="guide-list">
+                            <li>Edit <code>C:\ProgramData\SAMLGuard\config.yaml</code> (Notepad / VS Code as Administrator).</li>
+                            <li>Place certificates in <code>C:\ProgramData\SAMLGuard\cert\</code> (if not using Let's Encrypt).</li>
+                            <li>Open the firewall port and manage the service in elevated PowerShell:</li>
+                        </ol>
+                        <pre>New-NetFirewallRule -DisplayName "SAMLGuard" -Direction Inbound -Protocol TCP -LocalPort 8443 -Action Allow
+Start-Service SAMLGuard
+Get-Service SAMLGuard</pre>
+                    </div>
+                </div>
+                <div class="sub-box" style="margin-top: 1rem;">
+                    <h3>Upgrading on Windows Server</h3>
+                    <pre>Stop-Service SAMLGuard
+Copy-Item .\samlguard.exe "C:\Program Files\SAMLGuard\samlguard.exe" -Force
+Start-Service SAMLGuard</pre>
+                </div>
+            </section>
+
+            <!-- 4. CONFIG.YAML REFERENCE -->
+            <section class="guide-card" id="config-yaml">
+                <div class="guide-card-header">
+                    <h2>4. <code>config.yaml</code> Reference &amp; Cloud Let's Encrypt Example</h2>
+                    <a href="/admin/settings#tab-system-settings" class="btn btn-secondary">System Settings &rarr;</a>
+                </div>
+                <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 0.75rem;">
+                    Path locations: <code>/etc/samlguard/config.yaml</code> (Linux/Webmin) or <code>C:\ProgramData\SAMLGuard\config.yaml</code> (Windows).
+                </p>
+                <pre>server:
+  host: "0.0.0.0"
+  port: 443                       # Use 443 for cloud/Let's Encrypt, or 8443/18080 if co-hosted
+
+tls:
+  enabled: true
+  # Option A: Static certificates (on-prem / internal CA)
+  cert_file: "/etc/samlguard/cert/server.crt"
+  key_file: "/etc/samlguard/cert/server.key"
+  # Option B: Automatic Let's Encrypt SSL (cloud / public DNS domain with ports 80 &amp; 443 open)
+  auto_tls:
+    enabled: false
+    domains:
+      - "sso.yourdomain.com"
+    email: "admin@yourdomain.com"
+    cache_dir: "certs/autocert"
+    http_challenge_addr: ":80"
+
+database:
+  driver: "sqlite"
+  path: "/var/lib/samlguard/samlguard.db"  # Windows: C:\ProgramData\SAMLGuard\data\samlguard.db
+
+saml:
+  entity_id: "https://sso.yourdomain.com"
+  sso_url: "https://sso.yourdomain.com/saml/sso"
+  slo_url: "https://sso.yourdomain.com/saml/slo"
+  acs_url: "https://ita.example.com/api/current/authentication/saml2-callback"
+  cert_file: "/etc/samlguard/cert/saml-signing.crt"
+  key_file: "/etc/samlguard/cert/saml-signing.key"
+  customer_tenants:
+    - id: "acme-corp"
+      name: "Acme Corp Enterprise"
+      sp_entity_id: "https://acme.example.com/saml/metadata"
+      acs_url: "https://acme.example.com/api/current/authentication/saml2-callback"
+      enabled: true</pre>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        function setActiveDeploymentNav(targetHash) {
+            const hash = targetHash || window.location.hash || '#os-webmin';
+            document.querySelectorAll('.toc-link, .os-tab-btn').forEach(link => {
+                const href = link.getAttribute('href') || '';
+                link.classList.toggle('active', href === hash);
+            });
+        }
+
+        document.querySelectorAll('.toc-link, .os-tab-btn').forEach(link => {
+            link.addEventListener('click', () => {
+                const href = link.getAttribute('href');
+                if (href && href.startsWith('#')) {
+                    setActiveDeploymentNav(href);
+                }
+            });
+        });
+
+        window.addEventListener('hashchange', () => setActiveDeploymentNav(window.location.hash));
+        window.addEventListener('DOMContentLoaded', () => setActiveDeploymentNav(window.location.hash));
+    </script>
+</body>
+</html>
