@@ -4,12 +4,15 @@ import (
 	"context"
 	"crypto/subtle"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -147,7 +150,9 @@ func SetupAppWithCleanup(cfg *config.Config, appLogger *logger.Logger) (*gin.Eng
 	metadataResolver := resolver.NewDefaultMetadataResolver(
 		metadataSources,
 		cfg.SAML.MetadataURL,
-		&fedmetadata.SmartLoader{},
+		&fedmetadata.SmartLoader{
+			HTTPClient: newMetadataHTTPClient(cfg, appLogger.System()),
+		},
 		&fedmetadata.Parser{},
 	)
 
@@ -514,5 +519,127 @@ func runInteractive(srv *http.Server, cfg *config.Config, appLogger *logger.Logg
 		if cleanup != nil {
 			cleanup()
 		}
+	}
+}
+
+// newMetadataHTTPClient builds an HTTP client for SAML metadata fetching that appends
+// the gateway's configured TLS/IdP certificates into the trusted root pool and, in
+// non-production mode, pins self-hosted metadata loopbacks to cfg.TLS.CertFile so
+// local dev self-signed certificates (including LAN IPs) verify without disabling TLS.
+func newMetadataHTTPClient(cfg *config.Config, log *zap.Logger) *http.Client {
+	return newMetadataHTTPClientWithDialer(cfg, log, nil)
+}
+
+func newMetadataHTTPClientWithDialer(cfg *config.Config, log *zap.Logger, baseDial func(ctx context.Context, network, addr string) (net.Conn, error)) *http.Client {
+	if baseDial == nil {
+		baseDial = (&net.Dialer{Timeout: 10 * time.Second}).DialContext
+	}
+	rootCAs, err := x509.SystemCertPool()
+	if err != nil || rootCAs == nil {
+		rootCAs = x509.NewCertPool()
+	}
+
+	var pinnedCerts [][]byte
+	appendCertFile := func(path string, pin bool) {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			return
+		}
+		pemBytes, readErr := os.ReadFile(path)
+		if readErr != nil {
+			if log != nil {
+				log.Debug("skipping metadata trust load for unreadable cert file", zap.String("path", path), zap.Error(readErr))
+			}
+			return
+		}
+		rootCAs.AppendCertsFromPEM(pemBytes)
+		if !pin {
+			return
+		}
+		rest := pemBytes
+		for len(rest) > 0 {
+			var block *pem.Block
+			block, rest = pem.Decode(rest)
+			if block == nil {
+				break
+			}
+			if block.Type == "CERTIFICATE" && len(block.Bytes) > 0 {
+				pinnedCerts = append(pinnedCerts, block.Bytes)
+			}
+		}
+	}
+
+	if cfg != nil {
+		appendCertFile(cfg.TLS.CertFile, true)
+		if cfg.SAML.IdPCertFile != cfg.TLS.CertFile {
+			appendCertFile(cfg.SAML.IdPCertFile, false)
+		}
+	}
+
+	var selfMetaHost string
+	if cfg != nil && cfg.SAML.MetadataURL != "" {
+		if u, parseErr := url.Parse(strings.TrimSpace(cfg.SAML.MetadataURL)); parseErr == nil {
+			selfMetaHost = u.Hostname()
+		}
+	}
+
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			RootCAs:    rootCAs,
+		},
+		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			rawConn, dialErr := baseDial(ctx, network, addr)
+			if dialErr != nil {
+				return nil, dialErr
+			}
+
+			host, _, splitErr := net.SplitHostPort(addr)
+			if splitErr != nil {
+				host = addr
+			}
+
+			var tlsCfg *tls.Config
+			if cfg != nil && !cfg.IsProduction() && selfMetaHost != "" && len(pinnedCerts) > 0 && strings.EqualFold(host, selfMetaHost) {
+				tlsCfg = &tls.Config{
+					MinVersion:         tls.VersionTLS12,
+					InsecureSkipVerify: true, // Strictly verified against pinned local cfg.TLS.CertFile in VerifyConnection
+					VerifyConnection: func(cs tls.ConnectionState) error {
+						if len(cs.PeerCertificates) == 0 {
+							return errors.New("server presented no TLS certificate")
+						}
+						peer := cs.PeerCertificates[0]
+						now := time.Now().UTC()
+						if now.Before(peer.NotBefore) || now.After(peer.NotAfter) {
+							return errors.New("pinned local TLS certificate is expired or not yet valid")
+						}
+						for _, raw := range pinnedCerts {
+							if subtle.ConstantTimeCompare(peer.Raw, raw) == 1 {
+								return nil
+							}
+						}
+						return errors.New("tls: metadata server certificate does not match configured tls.cert_file")
+					},
+				}
+			} else {
+				tlsCfg = &tls.Config{
+					MinVersion: tls.VersionTLS12,
+					RootCAs:    rootCAs,
+					ServerName: host,
+				}
+			}
+
+			tlsConn := tls.Client(rawConn, tlsCfg)
+			if hsErr := tlsConn.HandshakeContext(ctx); hsErr != nil {
+				_ = rawConn.Close()
+				return nil, hsErr
+			}
+			return tlsConn, nil
+		},
+	}
+
+	return &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: transport,
 	}
 }

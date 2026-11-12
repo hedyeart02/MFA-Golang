@@ -2,9 +2,18 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +21,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/hidayat-SE/samlguard/internal/config"
+	fedmetadata "github.com/hidayat-SE/samlguard/internal/federation/metadata"
 	"github.com/hidayat-SE/samlguard/internal/mfa"
 	"github.com/hidayat-SE/samlguard/pkg/logger"
 	"github.com/hidayat-SE/samlguard/web"
@@ -625,5 +635,161 @@ func TestSetupApp_Phase3_MetricsAuth(t *testing.T) {
 	}
 	if !strings.Contains(wOK.Body.String(), "audit_events_total") && !strings.Contains(wOK.Body.String(), "# HELP") {
 		t.Fatalf("expected Prometheus metrics payload, got: %s", wOK.Body.String())
+	}
+}
+
+type pipeListener struct {
+	conns  chan net.Conn
+	closed chan struct{}
+}
+
+func (l *pipeListener) Accept() (net.Conn, error) {
+	select {
+	case c := <-l.conns:
+		return c, nil
+	case <-l.closed:
+		return nil, net.ErrClosed
+	}
+}
+
+func (l *pipeListener) Close() error {
+	select {
+	case <-l.closed:
+	default:
+		close(l.closed)
+	}
+	return nil
+}
+
+func (l *pipeListener) Addr() net.Addr { return &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 18080} }
+
+func startInMemoryTLSServer(t *testing.T, body string, dnsSAN string) (func(context.Context, string, string) (net.Conn, error), []byte) {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate rsa key: %v", err)
+	}
+	now := time.Now().UTC()
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: dnsSAN},
+		DNSNames:     []string{dnsSAN},
+		NotBefore:    now.Add(-1 * time.Hour),
+		NotAfter:     now.Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("create certificate: %v", err)
+	}
+
+	ln := &pipeListener{conns: make(chan net.Conn, 4), closed: make(chan struct{})}
+	tlsLn := tls.NewListener(ln, &tls.Config{
+		Certificates: []tls.Certificate{{
+			Certificate: [][]byte{der},
+			PrivateKey:  key,
+		}},
+	})
+	srv := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(body))
+		}),
+	}
+	go func() { _ = srv.Serve(tlsLn) }()
+	t.Cleanup(func() {
+		_ = srv.Close()
+		_ = ln.Close()
+	})
+
+	dial := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		cConn, sConn := net.Pipe()
+		select {
+		case ln.conns <- sConn:
+			return cConn, nil
+		case <-ln.closed:
+			_ = cConn.Close()
+			_ = sConn.Close()
+			return nil, net.ErrClosed
+		case <-ctx.Done():
+			_ = cConn.Close()
+			_ = sConn.Close()
+			return nil, ctx.Err()
+		}
+	}
+	return dial, der
+}
+
+func TestMetadataHTTPClient_LocalSelfSignedAndPinEnforcement(t *testing.T) {
+	metaXML := `<EntityDescriptor entityID="https://192.168.0.178:18080"/>`
+	// Self-hosted server serves cert with SAN "samlguard.example.com" while accessed via LAN IP 192.168.0.178
+	selfDial, der := startInMemoryTLSServer(t, metaXML, "samlguard.example.com")
+
+	certPath := filepath.Join(t.TempDir(), "server.crt")
+	certPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: der,
+	})
+	if err := os.WriteFile(certPath, certPEM, 0o600); err != nil {
+		t.Fatalf("write temp cert: %v", err)
+	}
+
+	localMetaURL := "https://192.168.0.178:18080/metadata"
+	cfg := &config.Config{
+		Env: "development",
+		SAML: config.SAMLConfig{
+			MetadataURL: localMetaURL,
+		},
+		TLS: config.TLSConfig{
+			Enabled:  true,
+			CertFile: certPath,
+		},
+	}
+
+	loader := &fedmetadata.SmartLoader{
+		HTTPClient: newMetadataHTTPClientWithDialer(cfg, zap.NewNop(), selfDial),
+	}
+	got, err := loader.Load(context.Background(), localMetaURL)
+	if err != nil {
+		t.Fatalf("expected local dev metadata fetch with pinned tls.cert_file to succeed, got: %v", err)
+	}
+	if string(got) != metaXML {
+		t.Fatalf("unexpected metadata payload: %s", string(got))
+	}
+
+	// Rogue server with a different cert on the same host must be rejected by pin check
+	rogueDial, _ := startInMemoryTLSServer(t, metaXML, "192.168.0.178")
+	rogueLoader := &fedmetadata.SmartLoader{
+		HTTPClient: newMetadataHTTPClientWithDialer(cfg, zap.NewNop(), rogueDial),
+	}
+	if _, err := rogueLoader.Load(context.Background(), localMetaURL); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("expected rogue certificate not matching tls.cert_file to be rejected, got: %v", err)
+	}
+
+	// External host must use standard CA+SAN verification and reject unknown certs
+	extDial, _ := startInMemoryTLSServer(t, metaXML, "external-idp.example.com")
+	extLoader := &fedmetadata.SmartLoader{
+		HTTPClient: newMetadataHTTPClientWithDialer(cfg, zap.NewNop(), extDial),
+	}
+	if _, err := extLoader.Load(context.Background(), "https://external-idp.example.com/metadata"); err == nil {
+		t.Fatal("expected external host with untrusted certificate to be rejected")
+	}
+
+	// Production mode must enforce strict CA+SAN verification and reject mismatched SAN even for selfMetaHost
+	prodCfg := &config.Config{
+		Env: "production",
+		SAML: config.SAMLConfig{
+			MetadataURL: localMetaURL,
+		},
+		TLS: config.TLSConfig{
+			Enabled:  true,
+			CertFile: certPath,
+		},
+	}
+	prodLoader := &fedmetadata.SmartLoader{
+		HTTPClient: newMetadataHTTPClientWithDialer(prodCfg, zap.NewNop(), selfDial),
+	}
+	if _, err := prodLoader.Load(context.Background(), localMetaURL); err == nil {
+		t.Fatal("expected production mode to enforce strict SAN verification and reject mismatch")
 	}
 }

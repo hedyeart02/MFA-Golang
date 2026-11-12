@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -52,6 +53,15 @@ type CertDetails struct {
 type AdminSettingsViewModel struct {
 	AdminUsername       string
 	Settings            *config.AdminSettingsPayload
+	ActiveIdP           string
+	EnabledIdPs         []string
+	SimulatorEnabled    bool
+	EntraEnabled        bool
+	KeycloakEnabled     bool
+	CustomIdPEnabled    bool
+	IdPProfilesJSON     template.JS
+	TotpEnabled         bool
+	EmailEnabled        bool
 	Port                int
 	AllowedAudiencesStr string
 	CertInfo            CertDetails
@@ -489,11 +499,65 @@ func (cHandler *SAMLHandler) HandleAdminSettingsPost(c *gin.Context) {
 
 	var payload config.AdminSettingsPayload
 
-	// Upstream IdP
+	activeIdP := strings.ToLower(strings.TrimSpace(c.PostForm("active_idp")))
+
+	// Upstream IdP & Active Profiles Selection
+	if c.PostForm("idp_providers_submitted") == "1" {
+		rawIdPs := c.PostFormArray("enabled_idps[]")
+		payload.EnabledIdPs = config.NormalizeIdPKeys(rawIdPs)
+		if len(payload.EnabledIdPs) == 0 {
+			vm := cHandler.buildAdminViewModel(adminUsername, "", "Invalid configuration: at least one Upstream Identity Provider must remain active.")
+			cHandler.renderAdminSettings(c, vm)
+			return
+		}
+		if activeIdP == "" {
+			activeIdP = payload.EnabledIdPs[0]
+		}
+	} else if activeIdP != "" {
+		payload.EnabledIdPs = config.NormalizeIdPKeys([]string{activeIdP})
+	} else if cHandler.cfg != nil {
+		payload.EnabledIdPs = cHandler.cfg.SAML.ActiveIdPs()
+	}
+
+	if activeIdP == "" && cHandler.cfg != nil {
+		activeIdP = cHandler.cfg.SAML.EffectiveActiveIdP()
+	}
+	payload.ActiveIdP = activeIdP
 	payload.IdPEntityID = strings.TrimSpace(c.PostForm("idp_entity_id"))
 	payload.IdPSSOURL = strings.TrimSpace(c.PostForm("idp_sso_url"))
 	payload.IdPMetadataURL = strings.TrimSpace(c.PostForm("idp_metadata_url"))
 	payload.IdPCertFile = strings.TrimSpace(c.PostForm("idp_cert_file"))
+
+	payload.IdPProfiles = make(map[string]config.UpstreamIdPProfile)
+	if cHandler.cfg != nil {
+		for k, v := range cHandler.cfg.SAML.IdPProfiles {
+			payload.IdPProfiles[strings.ToLower(strings.TrimSpace(k))] = v
+		}
+	}
+	if profilesRaw := strings.TrimSpace(c.PostForm("idp_profiles_json")); profilesRaw != "" {
+		var parsedProfiles map[string]config.UpstreamIdPProfile
+		if err := json.Unmarshal([]byte(profilesRaw), &parsedProfiles); err == nil {
+			for k, v := range parsedProfiles {
+				normKey := strings.ToLower(strings.TrimSpace(k))
+				if normKey != "" {
+					payload.IdPProfiles[normKey] = config.UpstreamIdPProfile{
+						EntityID:    strings.TrimSpace(v.EntityID),
+						SSOURL:      strings.TrimSpace(v.SSOURL),
+						MetadataURL: strings.TrimSpace(v.MetadataURL),
+						CertFile:    strings.TrimSpace(v.CertFile),
+					}
+				}
+			}
+		}
+	}
+	if payload.ActiveIdP != "" {
+		payload.IdPProfiles[payload.ActiveIdP] = config.UpstreamIdPProfile{
+			EntityID:    payload.IdPEntityID,
+			SSOURL:      payload.IdPSSOURL,
+			MetadataURL: payload.IdPMetadataURL,
+			CertFile:    payload.IdPCertFile,
+		}
+	}
 
 	// Downstream SP (ITA) & Gateway
 	payload.EntityID = strings.TrimSpace(c.PostForm("entity_id"))
@@ -525,8 +589,23 @@ func (cHandler *SAMLHandler) HandleAdminSettingsPost(c *gin.Context) {
 		}
 	}
 
-	// MFA Policies
-	payload.MFADefaultProvider = strings.TrimSpace(c.PostForm("mfa_default_provider"))
+	// MFA Policies & Active OTP Providers
+	if c.PostForm("mfa_providers_submitted") == "1" {
+		rawProviders := c.PostFormArray("mfa_enabled_providers[]")
+		payload.MFAEnabledProviders = config.NormalizeMFAProviders(rawProviders)
+		if len(payload.MFAEnabledProviders) == 0 {
+			vm := cHandler.buildAdminViewModel(adminUsername, "", "Invalid configuration: at least one OTP verification method (Authenticator App or Email OTP) must remain active.")
+			cHandler.renderAdminSettings(c, vm)
+			return
+		}
+	} else if cHandler.cfg != nil {
+		payload.MFAEnabledProviders = cHandler.cfg.MFA.ActiveProviders()
+	}
+
+	payload.MFADefaultProvider = strings.ToLower(strings.TrimSpace(c.PostForm("mfa_default_provider")))
+	if payload.MFADefaultProvider == "" && cHandler.cfg != nil {
+		payload.MFADefaultProvider = cHandler.cfg.MFA.EffectiveDefaultProvider()
+	}
 	payload.MFAIssuer = strings.TrimSpace(c.PostForm("mfa_issuer"))
 	if otpExpStr := strings.TrimSpace(c.PostForm("otp_expiry")); otpExpStr != "" {
 		if d, err := time.ParseDuration(otpExpStr); err == nil && d > 0 {
@@ -593,6 +672,7 @@ func (cHandler *SAMLHandler) HandleAdminSettingsPost(c *gin.Context) {
 		return
 	}
 	config.ApplyAdminSettings(cHandler.cfg, &payload)
+	cHandler.ReloadIDPCertStore()
 
 	// Hot-reload SMTP sender on active MFA service
 	newSMTPSender := mfa.NewSMTPSender(
@@ -609,11 +689,15 @@ func (cHandler *SAMLHandler) HandleAdminSettingsPost(c *gin.Context) {
 
 	cHandler.recordAudit("admin_settings_update", "success",
 		zap.String("admin", adminUsername),
+		zap.String("active_idp", cHandler.cfg.SAML.EffectiveActiveIdP()),
+		zap.Strings("mfa_enabled_providers", cHandler.cfg.MFA.ActiveProviders()),
 		zap.Bool("enforce_whitelist", cHandler.cfg.ITA.EnforceUserWhitelist),
 		zap.String("remote_ip", c.ClientIP()),
 	)
 	cHandler.logger.Info("admin settings successfully updated and saved to database",
 		zap.String("db_path", cHandler.cfg.Database.Path),
+		zap.String("active_idp", cHandler.cfg.SAML.EffectiveActiveIdP()),
+		zap.Strings("mfa_enabled_providers", cHandler.cfg.MFA.ActiveProviders()),
 		zap.String("entity_id", cHandler.cfg.SAML.EntityID),
 		zap.String("acs_url", cHandler.cfg.SAML.ACSURL),
 		zap.Bool("enforce_whitelist", cHandler.cfg.ITA.EnforceUserWhitelist),
@@ -928,7 +1012,34 @@ func (h *SAMLHandler) HandleAdminCertDownload(c *gin.Context) {
 }
 
 func (h *SAMLHandler) buildAdminViewModel(adminUsername, successMsg, errorMsg string) *AdminSettingsViewModel {
+	activeIdP := h.cfg.SAML.EffectiveActiveIdP()
+	enabledIdPs := h.cfg.SAML.ActiveIdPs()
+	profiles := make(map[string]config.UpstreamIdPProfile)
+	for k, v := range h.cfg.SAML.IdPProfiles {
+		profiles[strings.ToLower(strings.TrimSpace(k))] = v
+	}
+	if _, ok := profiles[activeIdP]; !ok {
+		profiles[activeIdP] = config.UpstreamIdPProfile{
+			EntityID:    h.cfg.SAML.IdPEntityID,
+			SSOURL:      h.cfg.SAML.IdPSSOURL,
+			MetadataURL: h.cfg.SAML.IdPMetadataURL,
+			CertFile:    h.cfg.SAML.IdPCertFile,
+		}
+	}
+	profilesJSON := "{}"
+	if b, err := json.Marshal(profiles); err == nil {
+		profilesJSON = string(b)
+	}
+
+	mfaDefaultProvider := h.cfg.MFA.EffectiveDefaultProvider()
+	if h.cfg.MFA.IsMethodSelectDefault() {
+		mfaDefaultProvider = "select"
+	}
+
 	payload := &config.AdminSettingsPayload{
+		ActiveIdP:             activeIdP,
+		EnabledIdPs:           enabledIdPs,
+		IdPProfiles:           profiles,
 		IdPEntityID:           h.cfg.SAML.IdPEntityID,
 		IdPSSOURL:             h.cfg.SAML.IdPSSOURL,
 		IdPMetadataURL:        h.cfg.SAML.IdPMetadataURL,
@@ -939,7 +1050,8 @@ func (h *SAMLHandler) buildAdminViewModel(adminUsername, successMsg, errorMsg st
 		SLOURL:                h.cfg.SAML.SLOURL,
 		AllowedAudiences:      h.cfg.SAML.AllowedAudiences,
 		GroupMapping:          h.cfg.SAML.GroupMapping,
-		MFADefaultProvider:    h.cfg.MFA.DefaultProvider,
+		MFAEnabledProviders:   h.cfg.MFA.ActiveProviders(),
+		MFADefaultProvider:    mfaDefaultProvider,
 		MFAIssuer:             h.cfg.MFA.Issuer,
 		OTPExpiry:             h.cfg.MFA.OTPExpiry,
 		ResendCooldown:        h.cfg.MFA.ResendCooldown,
@@ -970,6 +1082,15 @@ func (h *SAMLHandler) buildAdminViewModel(adminUsername, successMsg, errorMsg st
 	return &AdminSettingsViewModel{
 		AdminUsername:       adminUsername,
 		Settings:            payload,
+		ActiveIdP:           activeIdP,
+		EnabledIdPs:         enabledIdPs,
+		SimulatorEnabled:    h.cfg.SAML.IsIdPEnabled("simulator"),
+		EntraEnabled:        h.cfg.SAML.IsIdPEnabled("entra"),
+		KeycloakEnabled:     h.cfg.SAML.IsIdPEnabled("keycloak"),
+		CustomIdPEnabled:    h.cfg.SAML.IsIdPEnabled("custom"),
+		IdPProfilesJSON:     template.JS(profilesJSON),
+		TotpEnabled:         h.cfg.MFA.IsProviderEnabled("totp"),
+		EmailEnabled:        h.cfg.MFA.IsProviderEnabled("email"),
 		Port:                h.cfg.Server.Port,
 		AllowedAudiencesStr: strings.Join(h.cfg.SAML.AllowedAudiences, ", "),
 		CertInfo:            certInfo,

@@ -555,3 +555,184 @@ func TestAdminCertDownload_ValidationAndNoPathLeak(t *testing.T) {
 		t.Fatalf("expected 404 body not to leak filesystem path, got: %s", wMissing.Body.String())
 	}
 }
+
+func TestAdminSettings_UpstreamIdPAndMultiOTP(t *testing.T) {
+	r, h, _ := setupTestAdminHandler(t)
+
+	// 1. Verify GET renders selectable Upstream IdPs, Multi-OTP toggles, and consolidated Email OTP/SMTP settings without duplicate IDs
+	reqGet := httptest.NewRequest("GET", "/admin/settings", nil)
+	wGet := httptest.NewRecorder()
+	r.ServeHTTP(wGet, reqGet)
+	if wGet.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", wGet.Code)
+	}
+	body := wGet.Body.String()
+	for _, needle := range []string{
+		`selectUpstreamIdP('simulator')`,
+		`selectUpstreamIdP('entra')`,
+		`selectUpstreamIdP('keycloak')`,
+		`selectUpstreamIdP('custom')`,
+		`name="mfa_enabled_providers[]"`,
+		`name="mfa_providers_submitted"`,
+		`Email OTP (SMTP)`,
+	} {
+		if !strings.Contains(body, needle) {
+			t.Errorf("expected admin settings HTML to contain %q", needle)
+		}
+	}
+	if count := strings.Count(body, `id="smtp_host"`); count != 1 {
+		t.Errorf("expected exactly 1 id=\"smtp_host\" across consolidated form, got %d", count)
+	}
+	if count := strings.Count(body, `id="mfa_issuer"`); count != 1 {
+		t.Errorf("expected exactly 1 id=\"mfa_issuer\" across consolidated form, got %d", count)
+	}
+
+	// 2. Reject form submission with mfa_providers_submitted=1 and zero enabled OTP providers
+	emptyOTPForm := url.Values{
+		"active_idp":              {"simulator"},
+		"idp_entity_id":           {"https://samlguard.example.com:8443"},
+		"idp_sso_url":             {"https://samlguard.example.com:8443/mock-idp-login"},
+		"entity_id":               {"https://samlguard.example.com:8443"},
+		"acs_url":                 {"https://ita.example.com/callback"},
+		"mfa_providers_submitted": {"1"},
+		"mfa_issuer":              {"SAMLGuard"},
+	}
+	reqEmptyOTP := httptest.NewRequest("POST", "/admin/settings", strings.NewReader(emptyOTPForm.Encode()))
+	reqEmptyOTP.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	wEmptyOTP := httptest.NewRecorder()
+	r.ServeHTTP(wEmptyOTP, reqEmptyOTP)
+	if !strings.Contains(wEmptyOTP.Body.String(), "at least one OTP verification method") {
+		t.Fatalf("expected rejection error when disabling all OTP methods, got: %s", wEmptyOTP.Body.String())
+	}
+
+	// 3. Activate Microsoft Entra ID + both TOTP and Email OTP simultaneously (with Email OTP default)
+	profilesJSON := `{"simulator":{"entity_id":"https://samlguard.example.com:8443","sso_url":"https://samlguard.example.com:8443/mock-idp-login","cert_file":"./cert/saml-signing.crt"}}`
+	multiOTPForm := url.Values{
+		"active_idp":              {"entra"},
+		"idp_profiles_json":       {profilesJSON},
+		"idp_entity_id":           {"https://sts.windows.net/tenant-multi/"},
+		"idp_sso_url":             {"https://login.microsoftonline.com/tenant-multi/saml2"},
+		"idp_cert_file":           {h.cfg.SAML.CertFile},
+		"entity_id":               {"https://samlguard.example.com:8443"},
+		"acs_url":                 {"https://ita.example.com/callback"},
+		"mfa_providers_submitted": {"1"},
+		"mfa_enabled_providers[]": {"totp", "email"},
+		"mfa_default_provider":    {"email"},
+		"mfa_issuer":              {"SAMLGuard Multi"},
+		"otp_expiry":              {"5m"},
+		"resend_cooldown":         {"60s"},
+		"smtp_host":               {"smtp.office365.com"},
+		"smtp_port":               {"587"},
+	}
+	reqMulti := httptest.NewRequest("POST", "/admin/settings", strings.NewReader(multiOTPForm.Encode()))
+	reqMulti.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	wMulti := httptest.NewRecorder()
+	r.ServeHTTP(wMulti, reqMulti)
+	if wMulti.Code != http.StatusOK || !strings.Contains(wMulti.Body.String(), "Configuration updated successfully") {
+		t.Fatalf("expected multi-OTP settings save success, got status %d body: %s", wMulti.Code, wMulti.Body.String())
+	}
+	if h.cfg.SAML.ActiveIdP != "entra" {
+		t.Errorf("expected ActiveIdP 'entra', got %q", h.cfg.SAML.ActiveIdP)
+	}
+	if _, ok := h.cfg.SAML.IdPProfiles["simulator"]; !ok {
+		t.Errorf("expected simulator profile preserved in IdPProfiles")
+	}
+	if !h.cfg.MFA.IsProviderEnabled("totp") || !h.cfg.MFA.IsProviderEnabled("email") {
+		t.Errorf("expected both totp and email active, got %v", h.cfg.MFA.ActiveProviders())
+	}
+	if h.cfg.MFA.DefaultProvider != "email" {
+		t.Errorf("expected DefaultProvider 'email', got %q", h.cfg.MFA.DefaultProvider)
+	}
+
+	// 4. Switch to Email-OTP-only while submitting stale mfa_default_provider=totp -> auto-aligns to email
+	emailOnlyForm := url.Values{
+		"active_idp":              {"keycloak"},
+		"idp_entity_id":           {"https://kc.example.com/realms/main"},
+		"idp_sso_url":             {"https://kc.example.com/realms/main/protocol/saml"},
+		"entity_id":               {"https://samlguard.example.com:8443"},
+		"acs_url":                 {"https://ita.example.com/callback"},
+		"mfa_providers_submitted": {"1"},
+		"mfa_enabled_providers[]": {"email"},
+		"mfa_default_provider":    {"totp"},
+		"otp_expiry":              {"5m"},
+		"resend_cooldown":         {"60s"},
+		"smtp_host":               {"smtp.office365.com"},
+		"smtp_port":               {"587"},
+	}
+	reqEmailOnly := httptest.NewRequest("POST", "/admin/settings", strings.NewReader(emailOnlyForm.Encode()))
+	reqEmailOnly.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	wEmailOnly := httptest.NewRecorder()
+	r.ServeHTTP(wEmailOnly, reqEmailOnly)
+	if wEmailOnly.Code != http.StatusOK || !strings.Contains(wEmailOnly.Body.String(), "Configuration updated successfully") {
+		t.Fatalf("expected email-only save success, got %d: %s", wEmailOnly.Code, wEmailOnly.Body.String())
+	}
+	if h.cfg.MFA.IsProviderEnabled("totp") || !h.cfg.MFA.IsProviderEnabled("email") {
+		t.Errorf("expected only email enabled, got %v", h.cfg.MFA.ActiveProviders())
+	}
+	if h.cfg.MFA.DefaultProvider != "email" {
+		t.Errorf("expected DefaultProvider auto-aligned to 'email', got %q", h.cfg.MFA.DefaultProvider)
+	}
+}
+
+func TestAdminSettings_MultiIdPAndSelectFlow(t *testing.T) {
+	r, h, _ := setupTestAdminHandler(t)
+
+	// 1. Reject idp_providers_submitted=1 with zero enabled_idps[]
+	emptyIdPForm := url.Values{
+		"idp_providers_submitted": {"1"},
+		"entity_id":               {"https://samlguard.example.com:8443"},
+		"acs_url":                 {"https://ita.example.com/callback"},
+		"mfa_providers_submitted": {"1"},
+		"mfa_enabled_providers[]": {"totp"},
+		"mfa_default_provider":    {"totp"},
+		"mfa_issuer":              {"SAMLGuard"},
+	}
+	reqEmptyIdP := httptest.NewRequest("POST", "/admin/settings", strings.NewReader(emptyIdPForm.Encode()))
+	reqEmptyIdP.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	wEmptyIdP := httptest.NewRecorder()
+	r.ServeHTTP(wEmptyIdP, reqEmptyIdP)
+	if !strings.Contains(wEmptyIdP.Body.String(), "at least one Upstream Identity Provider") {
+		t.Fatalf("expected rejection error when disabling all upstream IdPs, got: %s", wEmptyIdP.Body.String())
+	}
+
+	// 2. Enable multiple Upstream IdPs (simulator + entra) with isolated profiles and MFA default = select
+	profilesJSON := `{"simulator":{"entity_id":"https://samlguard.example.com:8443","sso_url":"https://samlguard.example.com:8443/mock-idp-login","cert_file":"./cert/saml-signing.crt"}}`
+	multiIdPForm := url.Values{
+		"idp_providers_submitted": {"1"},
+		"enabled_idps[]":          {"simulator", "entra"},
+		"active_idp":              {"entra"},
+		"idp_profiles_json":       {profilesJSON},
+		"idp_entity_id":           {"https://sts.windows.net/tenant-123/"},
+		"idp_sso_url":             {"https://login.microsoftonline.com/tenant-123/saml2"},
+		"idp_cert_file":           {h.cfg.SAML.CertFile},
+		"entity_id":               {"https://samlguard.example.com:8443"},
+		"acs_url":                 {"https://ita.example.com/callback"},
+		"mfa_providers_submitted": {"1"},
+		"mfa_enabled_providers[]": {"totp", "email"},
+		"mfa_default_provider":    {"select"},
+		"mfa_issuer":              {"SAMLGuard"},
+		"otp_expiry":              {"5m"},
+		"resend_cooldown":         {"60s"},
+		"smtp_host":               {"smtp.office365.com"},
+		"smtp_port":               {"587"},
+	}
+	reqMulti := httptest.NewRequest("POST", "/admin/settings", strings.NewReader(multiIdPForm.Encode()))
+	reqMulti.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	wMulti := httptest.NewRecorder()
+	r.ServeHTTP(wMulti, reqMulti)
+	if wMulti.Code != http.StatusOK || !strings.Contains(wMulti.Body.String(), "Configuration updated successfully") {
+		t.Fatalf("expected multi-IdP settings save success, got status %d body: %s", wMulti.Code, wMulti.Body.String())
+	}
+	if !h.cfg.SAML.IsIdPEnabled("simulator") || !h.cfg.SAML.IsIdPEnabled("entra") {
+		t.Errorf("expected both simulator and entra enabled, got %v", h.cfg.SAML.ActiveIdPs())
+	}
+	if h.cfg.SAML.ProfileForIdP("simulator").SSOURL != "https://samlguard.example.com:8443/mock-idp-login" {
+		t.Errorf("expected simulator profile preserved independently, got %+v", h.cfg.SAML.ProfileForIdP("simulator"))
+	}
+	if h.cfg.SAML.ProfileForIdP("entra").EntityID != "https://sts.windows.net/tenant-123/" {
+		t.Errorf("expected entra profile saved independently, got %+v", h.cfg.SAML.ProfileForIdP("entra"))
+	}
+	if h.cfg.MFA.DefaultProvider != "select" || !h.cfg.MFA.IsMethodSelectDefault() {
+		t.Errorf("expected DefaultProvider 'select' preserved, got %q", h.cfg.MFA.DefaultProvider)
+	}
+}

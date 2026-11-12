@@ -39,6 +39,7 @@ type SAMLHandler struct {
 	mfaService           *mfa.Service
 	responseGen          *gateway.ResponseGenerator
 	correlationStore     *CorrelationStore
+	idpCertMu            sync.RWMutex
 	idpCertStore         *goxmldsig.MemoryX509CertificateStore
 	cfg                  *config.Config
 	templates            *template.Template
@@ -51,26 +52,50 @@ type SAMLHandler struct {
 	assertionReplay      *replay.MemoryReplayDetector
 }
 
+type LoginProviderOption struct {
+	Key         string
+	Name        string
+	Description string
+	URL         string
+}
+
 type CorporateLoginViewModel struct {
 	SessionID         string
 	OutboundID        string
 	SAMLResponseInput template.HTML
 	Username          string
 	ErrorMessage      string
+	ShowProviderList  bool
+	HasMultipleIdPs   bool
+	SelectedIdP       string
+	Providers         []LoginProviderOption
+}
+
+type MFAVerificationOption struct {
+	Key         string
+	Title       string
+	Description string
+	URL         string
+	Active      bool
 }
 
 type ChallengeViewModel struct {
-	SessionID          string
-	CSRFToken          string
-	Email              string
-	MaskedEmail        string
-	Method             string // "totp", "email"
-	EnrollmentRequired bool
-	SecretKey          string
-	QRCodeDataURI      template.URL
-	Message            string
-	ErrorMessage       string
-	ResendCooldown     int
+	SessionID           string
+	CSRFToken           string
+	Email               string
+	MaskedEmail         string
+	Method              string // "totp", "email"
+	MethodSelectView    bool
+	VerificationMethods []MFAVerificationOption
+	TotpEnabled         bool
+	EmailEnabled        bool
+	MultiOTPEnabled     bool
+	EnrollmentRequired  bool
+	SecretKey           string
+	QRCodeDataURI       template.URL
+	Message             string
+	ErrorMessage        string
+	ResendCooldown      int
 }
 
 type UpstreamClaims struct {
@@ -110,52 +135,7 @@ func NewSAMLHandler(
 		corpTmpl = embeddedCorpTmpl
 	}
 
-	var idpCertStore *goxmldsig.MemoryX509CertificateStore
-	certPath := cfg.SAML.IdPCertFile
-	if certPath == "" {
-		certPath = cfg.SAML.CertFile
-	}
-	if certPath != "" {
-		certData, err := os.ReadFile(certPath)
-		if err == nil {
-			now := time.Now().UTC()
-			var roots []*x509.Certificate
-			rest := certData
-			for len(rest) > 0 {
-				var block *pem.Block
-				block, rest = pem.Decode(rest)
-				if block == nil {
-					break
-				}
-				if block.Type == "CERTIFICATE" {
-					if parsedCert, err := x509.ParseCertificate(block.Bytes); err == nil {
-						if now.Before(parsedCert.NotBefore) || now.After(parsedCert.NotAfter) {
-							if log != nil {
-								log.Warn("skipping expired or not-yet-valid IdP signing certificate",
-									zap.String("subject", parsedCert.Subject.String()),
-									zap.Time("not_before", parsedCert.NotBefore),
-									zap.Time("not_after", parsedCert.NotAfter),
-								)
-							}
-							continue
-						}
-						if parsedCert.NotAfter.Sub(now) < 30*24*time.Hour && log != nil {
-							log.Warn("IdP signing certificate is expiring within 30 days",
-								zap.String("subject", parsedCert.Subject.String()),
-								zap.Time("not_after", parsedCert.NotAfter),
-							)
-						}
-						roots = append(roots, parsedCert)
-					}
-				}
-			}
-			if len(roots) > 0 {
-				idpCertStore = &goxmldsig.MemoryX509CertificateStore{
-					Roots: roots,
-				}
-			}
-		}
-	}
+	idpCertStore := loadIDPCertStore(cfg, log)
 
 	var ephemeralSecret []byte
 	if cfg == nil || !cfg.IsProduction() {
@@ -176,6 +156,80 @@ func NewSAMLHandler(
 		ephemeralAdminSecret: ephemeralSecret,
 		assertionReplay:      replay.NewMemoryReplayDetector(),
 	}, nil
+}
+
+// loadIDPCertStoreFromPath loads X.509 certificates from a single PEM file path.
+func loadIDPCertStoreFromPath(certPath string, log *zap.Logger) *goxmldsig.MemoryX509CertificateStore {
+	if strings.TrimSpace(certPath) == "" {
+		return nil
+	}
+
+	certData, err := os.ReadFile(certPath)
+	if err != nil {
+		return nil
+	}
+
+	now := time.Now().UTC()
+	var roots []*x509.Certificate
+	rest := certData
+	for len(rest) > 0 {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type == "CERTIFICATE" {
+			if parsedCert, err := x509.ParseCertificate(block.Bytes); err == nil {
+				if now.Before(parsedCert.NotBefore) || now.After(parsedCert.NotAfter) {
+					if log != nil {
+						log.Warn("skipping expired or not-yet-valid IdP signing certificate",
+							zap.String("subject", parsedCert.Subject.String()),
+							zap.Time("not_before", parsedCert.NotBefore),
+							zap.Time("not_after", parsedCert.NotAfter),
+						)
+					}
+					continue
+				}
+				if parsedCert.NotAfter.Sub(now) < 30*24*time.Hour && log != nil {
+					log.Warn("IdP signing certificate is expiring within 30 days",
+						zap.String("subject", parsedCert.Subject.String()),
+						zap.Time("not_after", parsedCert.NotAfter),
+					)
+				}
+				roots = append(roots, parsedCert)
+			}
+		}
+	}
+	if len(roots) == 0 {
+		return nil
+	}
+	return &goxmldsig.MemoryX509CertificateStore{
+		Roots: roots,
+	}
+}
+
+// loadIDPCertStore loads X.509 certificates from cfg.SAML.IdPCertFile (or CertFile fallback)
+// as well as any enabled upstream IdP profile certificates.
+func loadIDPCertStore(cfg *config.Config, log *zap.Logger) *goxmldsig.MemoryX509CertificateStore {
+	if cfg == nil {
+		return nil
+	}
+	certPath := cfg.SAML.IdPCertFile
+	if certPath == "" {
+		certPath = cfg.SAML.CertFile
+	}
+	return loadIDPCertStoreFromPath(certPath, log)
+}
+
+// ReloadIDPCertStore reloads the upstream IdP verification certificate store from current config.
+func (h *SAMLHandler) ReloadIDPCertStore() {
+	store := loadIDPCertStore(h.cfg, h.logger)
+	if store == nil {
+		return
+	}
+	h.idpCertMu.Lock()
+	h.idpCertStore = store
+	h.idpCertMu.Unlock()
 }
 
 // SetAuditLogger configures the dedicated security audit logger on the handler.
@@ -259,86 +313,213 @@ func DetermineAuthnContextClassRef(method string, globalConfig string) string {
 }
 
 func (h *SAMLHandler) SetIDPCertStore(store *goxmldsig.MemoryX509CertificateStore) {
+	h.idpCertMu.Lock()
 	h.idpCertStore = store
+	h.idpCertMu.Unlock()
 }
 
 func (h *SAMLHandler) SetIDPCertificate(cert *x509.Certificate) {
 	if cert != nil {
+		h.idpCertMu.Lock()
 		h.idpCertStore = &goxmldsig.MemoryX509CertificateStore{
 			Roots: []*x509.Certificate{cert},
 		}
+		h.idpCertMu.Unlock()
 	}
+}
+
+func (h *SAMLHandler) buildLoginProviderOptions(sessionID string) []LoginProviderOption {
+	if h.cfg == nil {
+		return nil
+	}
+	active := h.cfg.SAML.ActiveIdPs()
+	options := make([]LoginProviderOption, 0, len(active))
+	for _, key := range active {
+		if h.cfg.IsProduction() && key == "simulator" {
+			continue
+		}
+		var name, desc string
+		switch key {
+		case "simulator":
+			name = "Corporate Account (Local Sign-In)"
+			desc = "Sign in with your local username or corporate email"
+		case "entra":
+			name = "Microsoft Entra ID"
+			desc = "Sign in with Microsoft Entra / Azure AD SSO"
+		case "keycloak":
+			name = "Keycloak SSO"
+			desc = "Sign in with your Keycloak enterprise realm"
+		default:
+			name = "Custom SAML 2.0 Identity Provider"
+			desc = "Sign in using your configured SAML 2.0 IdP"
+		}
+		options = append(options, LoginProviderOption{
+			Key:         key,
+			Name:        name,
+			Description: desc,
+			URL:         fmt.Sprintf("/saml/sso?session_id=%s&idp=%s", url.QueryEscape(sessionID), url.QueryEscape(key)),
+		})
+	}
+	return options
+}
+
+func (h *SAMLHandler) renderUpstreamIdPChooser(c *gin.Context, sessionID string, providers []LoginProviderOption) {
+	vm := CorporateLoginViewModel{
+		SessionID:        sessionID,
+		ShowProviderList: true,
+		HasMultipleIdPs:  len(providers) > 1,
+		Providers:        providers,
+	}
+	tmpl := h.corporateLoginTmpl
+	if tmpl == nil {
+		tmpl, _ = web.ParseCorporateLoginTemplate()
+	}
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	if tmpl != nil {
+		c.Status(http.StatusOK)
+		if err := tmpl.Execute(c.Writer, vm); err == nil {
+			return
+		}
+	}
+	c.String(http.StatusInternalServerError, "Failed to render identity provider selection page")
 }
 
 // HandleSSO accepts GET /saml/sso or /login (HTTP-Redirect from ITA)
 func (h *SAMLHandler) HandleSSO(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	authCtx, err := h.pipeline.Execute(ctx, c.Request)
-	if err != nil {
-		response.Error(c, http.StatusBadRequest, err)
-		return
+	var state *AuthSessionState
+	var sessionID string
+	var outboundID string
+
+	if existingID := strings.TrimSpace(c.Query("session_id")); existingID != "" {
+		if st, err := h.correlationStore.Get(existingID); err == nil && st != nil && !st.AssertionConsumed && !st.Consumed {
+			cookieID, _ := c.Cookie("samlguard_auth_state")
+			if cookieID == "" || cookieID == existingID {
+				state = st
+				sessionID = existingID
+				outboundID = st.OutboundRequestID
+			}
+		}
 	}
 
-	itaRequestID := authCtx.RequestIDFromSP
-	if itaRequestID == "" {
-		itaRequestID = c.Query("request_id")
-	}
-	itaRelayState := authCtx.RelayState
-	if itaRelayState == "" {
-		itaRelayState = c.Query("RelayState")
-	}
-	itaACSURL := strings.TrimSpace(authCtx.AssertionConsumerServiceURL)
-	if itaACSURL != "" {
-		var metaEndpoints []string
-		if md, ok := authCtx.Metadata.(*fedmodel.MetadataDescriptor); ok && md != nil {
-			for _, ep := range md.SSOEndpoints {
-				if ep.Location != "" {
-					metaEndpoints = append(metaEndpoints, ep.Location)
+	if state == nil {
+		authCtx, err := h.pipeline.Execute(ctx, c.Request)
+		if err != nil {
+			response.Error(c, http.StatusBadRequest, err)
+			return
+		}
+
+		itaRequestID := authCtx.RequestIDFromSP
+		if itaRequestID == "" {
+			itaRequestID = c.Query("request_id")
+		}
+		itaRelayState := authCtx.RelayState
+		if itaRelayState == "" {
+			itaRelayState = c.Query("RelayState")
+		}
+		itaACSURL := strings.TrimSpace(authCtx.AssertionConsumerServiceURL)
+		if itaACSURL != "" {
+			var metaEndpoints []string
+			if md, ok := authCtx.Metadata.(*fedmodel.MetadataDescriptor); ok && md != nil {
+				for _, ep := range md.SSOEndpoints {
+					if ep.Location != "" {
+						metaEndpoints = append(metaEndpoints, ep.Location)
+					}
 				}
 			}
-		}
-		if !h.cfg.IsAllowedDownstreamACSURL(itaACSURL, metaEndpoints...) {
-			if h.logger != nil {
-				h.logger.Warn("rejected untrusted AssertionConsumerServiceURL in inbound AuthnRequest",
-					zap.String("acs_url", itaACSURL),
-					zap.String("issuer", authCtx.Issuer),
-				)
+			if !h.cfg.IsAllowedDownstreamACSURL(itaACSURL, metaEndpoints...) {
+				if h.logger != nil {
+					h.logger.Warn("rejected untrusted AssertionConsumerServiceURL in inbound AuthnRequest",
+						zap.String("acs_url", itaACSURL),
+						zap.String("issuer", authCtx.Issuer),
+					)
+				}
+				response.Error(c, http.StatusBadRequest, errors.New("security violation: AssertionConsumerServiceURL is not in configured downstream allowlist"))
+				return
 			}
-			response.Error(c, http.StatusBadRequest, errors.New("security violation: AssertionConsumerServiceURL is not in configured downstream allowlist"))
+		} else {
+			itaACSURL = h.cfg.SAML.ACSURL
+		}
+
+		// Generate outbound request ID for correlation
+		outboundID = "SG_" + uuid.New().String()
+
+		state = &AuthSessionState{
+			ITAAuthnRequestID: itaRequestID,
+			ITARelayState:     itaRelayState,
+			ITAACSURL:         itaACSURL,
+			OutboundRequestID: outboundID,
+		}
+
+		var errCreate error
+		sessionID, errCreate = h.correlationStore.Create(state)
+		if errCreate != nil {
+			if errors.Is(errCreate, ErrCorrelationStoreFull) {
+				response.Error(c, http.StatusServiceUnavailable, errCreate)
+				return
+			}
+			response.Error(c, http.StatusInternalServerError, errors.New("failed to initialize auth correlation state"))
 			return
 		}
-	} else {
-		itaACSURL = h.cfg.SAML.ACSURL
+
+		isSecure := h.isHTTPSRequest(c)
+		c.SetSameSite(http.SameSiteLaxMode)
+		c.SetCookie("samlguard_auth_state", sessionID, 900, "/", "", isSecure, true)
 	}
 
-	// Generate outbound request ID for correlation
-	outboundID := "SG_" + uuid.New().String()
+	providers := h.buildLoginProviderOptions(sessionID)
+	selectedIdP := strings.ToLower(strings.TrimSpace(c.Query("idp")))
+	viewMode := strings.ToLower(strings.TrimSpace(c.Query("view")))
 
-	state := &AuthSessionState{
-		ITAAuthnRequestID: itaRequestID,
-		ITARelayState:     itaRelayState,
-		ITAACSURL:         itaACSURL,
-		OutboundRequestID: outboundID,
-	}
-
-	sessionID, err := h.correlationStore.Create(state)
-	if err != nil {
-		if errors.Is(err, ErrCorrelationStoreFull) {
-			response.Error(c, http.StatusServiceUnavailable, err)
-			return
-		}
-		response.Error(c, http.StatusInternalServerError, errors.New("failed to initialize auth correlation state"))
+	// When multiple upstream IdPs are enabled and no specific IdP has been selected yet (or user clicked Back),
+	// show the front-end login page selector list.
+	if len(providers) > 1 && (selectedIdP == "" || viewMode == "providers") {
+		h.renderUpstreamIdPChooser(c, sessionID, providers)
 		return
 	}
 
-	isSecure := h.isHTTPSRequest(c)
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie("samlguard_auth_state", sessionID, 900, "/", "", isSecure, true)
+	if selectedIdP == "" {
+		if len(providers) == 1 {
+			selectedIdP = providers[0].Key
+		} else {
+			selectedIdP = h.cfg.SAML.EffectiveActiveIdP()
+		}
+	} else if !h.cfg.SAML.IsIdPEnabled(selectedIdP) {
+		if len(providers) > 1 {
+			h.renderUpstreamIdPChooser(c, sessionID, providers)
+			return
+		}
+		selectedIdP = h.cfg.SAML.EffectiveActiveIdP()
+	}
 
-	// If mock IdP is configured or used for development testing
-	mockURL := h.cfg.SAML.IdPSSOURL
-	if mockURL != "" && strings.Contains(mockURL, "mock-idp") {
+	prof := h.cfg.SAML.ProfileForIdP(selectedIdP)
+	expectedEntityID := strings.TrimSpace(prof.EntityID)
+	ssoURL := strings.TrimSpace(prof.SSOURL)
+	certFile := strings.TrimSpace(prof.CertFile)
+
+	if selectedIdP == "simulator" {
+		if expectedEntityID == "" {
+			expectedEntityID = strings.TrimSpace(h.cfg.SAML.IdPEntityID)
+		}
+		if expectedEntityID == "" {
+			expectedEntityID = "https://mock-idp.samlguard.local"
+		}
+		if ssoURL == "" {
+			ssoURL = h.cfg.SAML.IdPSSOURL
+		}
+		if certFile == "" {
+			certFile = h.cfg.SAML.CertFile
+		}
+	}
+
+	state.SelectedIdP = selectedIdP
+	state.UpstreamEntityID = expectedEntityID
+	state.UpstreamCertFile = certFile
+	_ = h.correlationStore.Update(sessionID, state)
+
+	// If mock/simulator IdP is selected
+	if selectedIdP == "simulator" || (ssoURL != "" && strings.Contains(ssoURL, "mock-idp")) {
 		if h.cfg.IsProduction() {
 			response.Error(c, http.StatusForbidden, errors.New("mock IdP login is forbidden in production mode"))
 			return
@@ -348,13 +529,22 @@ func (h *SAMLHandler) HandleSSO(c *gin.Context) {
 		return
 	}
 
+	if ssoURL == "" {
+		response.Error(c, http.StatusInternalServerError, fmt.Errorf("upstream IdP %q is missing SSO URL configuration", selectedIdP))
+		return
+	}
+
 	// For standard upstream IdP: redirect with preserved RelayState (bound to sessionID)
-	redirectURL := fmt.Sprintf("%s?SAMLRequest=%s&RelayState=%s", mockURL, outboundID, sessionID)
+	redirectURL := fmt.Sprintf("%s?SAMLRequest=%s&RelayState=%s", ssoURL, outboundID, sessionID)
 	c.Redirect(http.StatusFound, redirectURL)
 }
 
 // validateUpstreamSAMLResponse decodes and verifies the upstream SAML 2.0 Response XMLDSig and assertions
 func (h *SAMLHandler) validateUpstreamSAMLResponse(rawB64 string, expectedOutboundID string) (*UpstreamClaims, error) {
+	return h.validateUpstreamSAMLResponseForSession(rawB64, expectedOutboundID, "", "")
+}
+
+func (h *SAMLHandler) validateUpstreamSAMLResponseForSession(rawB64, expectedOutboundID, expectedEntityID, certFile string) (*UpstreamClaims, error) {
 	if strings.TrimSpace(rawB64) == "" {
 		return nil, errors.New("missing SAMLResponse parameter")
 	}
@@ -406,11 +596,20 @@ func (h *SAMLHandler) validateUpstreamSAMLResponse(rawB64 string, expectedOutbou
 		}
 	}
 
-	// Validate XMLDSig
-	if h.idpCertStore == nil {
+	// Validate XMLDSig (prefer the session-specific IdP certificate if configured, falling back to combined store)
+	var idpCertStore *goxmldsig.MemoryX509CertificateStore
+	if strings.TrimSpace(certFile) != "" {
+		idpCertStore = loadIDPCertStoreFromPath(certFile, h.logger)
+	}
+	if idpCertStore == nil {
+		h.idpCertMu.RLock()
+		idpCertStore = h.idpCertStore
+		h.idpCertMu.RUnlock()
+	}
+	if idpCertStore == nil {
 		return nil, errors.New("upstream IdP certificate store not configured: cannot verify XMLDSig")
 	}
-	valCtx := goxmldsig.NewDefaultValidationContext(h.idpCertStore)
+	valCtx := goxmldsig.NewDefaultValidationContext(idpCertStore)
 
 	hasAssertionSig := assertionEl.FindElement("./Signature") != nil || assertionEl.FindElement("./{http://www.w3.org/2000/09/xmldsig#}Signature") != nil
 	hasResponseSig := root.FindElement("./Signature") != nil || root.FindElement("./{http://www.w3.org/2000/09/xmldsig#}Signature") != nil
@@ -443,9 +642,12 @@ func (h *SAMLHandler) validateUpstreamSAMLResponse(rawB64 string, expectedOutbou
 	if issuer == "" {
 		return nil, errors.New("upstream SAML validation failed: empty Issuer in upstream SAML response")
 	}
-	expectedIssuer := strings.TrimSpace(h.cfg.SAML.IdPEntityID)
+	expectedIssuer := strings.TrimSpace(expectedEntityID)
+	if expectedIssuer == "" && h.cfg != nil {
+		expectedIssuer = strings.TrimSpace(h.cfg.SAML.IdPEntityID)
+	}
 	if expectedIssuer == "" {
-		if h.cfg.IsProduction() {
+		if h.cfg != nil && h.cfg.IsProduction() {
 			return nil, errors.New("upstream SAML validation failed: saml.idp_entity_id is mandatory in production mode; mock IdP issuer fallback is forbidden")
 		}
 		expectedIssuer = "https://mock-idp.samlguard.local"
@@ -704,7 +906,7 @@ func (h *SAMLHandler) HandleACS(c *gin.Context) {
 		return
 	}
 
-	claims, err := h.validateUpstreamSAMLResponse(samlRespB64, state.OutboundRequestID)
+	claims, err := h.validateUpstreamSAMLResponseForSession(samlRespB64, state.OutboundRequestID, state.UpstreamEntityID, state.UpstreamCertFile)
 	if err != nil {
 		metrics.SAMLErrors.WithLabelValues("upstream_validation").Inc()
 		metrics.AuthFailure.Inc()
@@ -724,7 +926,10 @@ func (h *SAMLHandler) HandleACS(c *gin.Context) {
 		zap.String("remote_ip", c.ClientIP()),
 	)
 
-	upstreamEntityID := strings.TrimSpace(h.cfg.SAML.IdPEntityID)
+	upstreamEntityID := strings.TrimSpace(state.UpstreamEntityID)
+	if upstreamEntityID == "" {
+		upstreamEntityID = strings.TrimSpace(h.cfg.SAML.IdPEntityID)
+	}
 	if upstreamEntityID == "" {
 		if h.cfg.IsProduction() {
 			response.Error(c, http.StatusInternalServerError, errors.New("upstream IdP Entity ID is mandatory in production mode"))
@@ -768,8 +973,16 @@ func (h *SAMLHandler) HandleACS(c *gin.Context) {
 
 	_ = h.correlationStore.Update(sessionID, state)
 
-	// Check MFA status for user and render challenge
-	h.renderMFAChallengeView(c, state, "totp", "")
+	// Check MFA status for user and render challenge using configured default OTP flow
+	method := "totp"
+	if h.cfg != nil {
+		if h.cfg.MFA.IsMethodSelectDefault() {
+			method = "select"
+		} else {
+			method = h.cfg.MFA.ResolveChallengeMethod("")
+		}
+	}
+	h.renderMFAChallengeView(c, state, method, "")
 }
 
 // HandleACSGet handles GET /saml/acs and GET /acs (for method switching, tab clicks, and page reloads)
@@ -790,8 +1003,22 @@ func (h *SAMLHandler) HandleACSGet(c *gin.Context) {
 		return
 	}
 
-	method := c.DefaultQuery("method", "totp")
-	if method != "totp" && method != "email" {
+	viewMode := strings.ToLower(strings.TrimSpace(c.Query("view")))
+	method := strings.ToLower(strings.TrimSpace(c.Query("method")))
+	if viewMode == "methods" || method == "select" {
+		if h.cfg == nil || len(h.cfg.MFA.ActiveProviders()) > 1 {
+			h.renderMFAChallengeView(c, state, "select", "")
+			return
+		}
+		method = ""
+	}
+	if method == "" && h.cfg != nil && h.cfg.MFA.IsMethodSelectDefault() {
+		h.renderMFAChallengeView(c, state, "select", "")
+		return
+	}
+	if h.cfg != nil {
+		method = h.cfg.MFA.ResolveChallengeMethod(method)
+	} else if method != "totp" && method != "email" {
 		method = "totp"
 	}
 
@@ -819,9 +1046,18 @@ func (h *SAMLHandler) HandleMFAVerify(c *gin.Context) {
 	}
 
 	code := strings.TrimSpace(c.PostForm("code"))
-	method := strings.TrimSpace(c.PostForm("method"))
+	method := strings.ToLower(strings.TrimSpace(c.PostForm("method")))
 	if method == "" {
-		method = "totp"
+		if h.cfg != nil {
+			method = h.cfg.MFA.ResolveChallengeMethod("")
+		} else {
+			method = "totp"
+		}
+	}
+
+	if (method == "totp" || method == "email") && h.cfg != nil && !h.cfg.MFA.IsProviderEnabled(method) {
+		response.Error(c, http.StatusForbidden, fmt.Errorf("MFA method %q is disabled by administrator", method))
+		return
 	}
 
 	var verified bool
@@ -952,6 +1188,11 @@ func (h *SAMLHandler) HandleMFAResend(c *gin.Context) {
 		return
 	}
 
+	if h.cfg != nil && !h.cfg.MFA.IsProviderEnabled("email") {
+		response.Error(c, http.StatusForbidden, errors.New("email OTP method is disabled by administrator"))
+		return
+	}
+
 	ctx := c.Request.Context()
 	err = h.mfaService.GenerateAndSendEmailOTP(ctx, state.UserIdentityKey, state.UserEmail)
 	if err != nil {
@@ -959,7 +1200,7 @@ func (h *SAMLHandler) HandleMFAResend(c *gin.Context) {
 		return
 	}
 
-	h.renderMFAChallengeView(c, state, "email", "A new one-time code has been sent to your email.")
+	h.renderMFAChallengeViewWithMessage(c, http.StatusOK, state, "email", "A new one-time code has been sent to your email.", "")
 }
 
 // HandleMFAReEnroll handles POST /mfa/re-enroll to generate a new TOTP enrollment without destroying existing active TOTP.
@@ -983,6 +1224,11 @@ func (h *SAMLHandler) HandleMFAReEnroll(c *gin.Context) {
 		return
 	}
 
+	if h.cfg != nil && !h.cfg.MFA.IsProviderEnabled("totp") {
+		response.Error(c, http.StatusForbidden, errors.New("authenticator (TOTP) method is disabled by administrator"))
+		return
+	}
+
 	ctx := c.Request.Context()
 	hasActiveTOTP := h.mfaService.HasActiveTOTP(ctx, state.UserIdentityKey)
 	if hasActiveTOTP && !state.ReEnrollAuthorized {
@@ -990,6 +1236,14 @@ func (h *SAMLHandler) HandleMFAReEnroll(c *gin.Context) {
 		verifyMethod := strings.ToLower(strings.TrimSpace(c.PostForm("verify_method")))
 		if verifyMethod == "" {
 			verifyMethod = "totp"
+		}
+		if verifyMethod != "totp" && verifyMethod != "email" {
+			response.Error(c, http.StatusForbidden, fmt.Errorf("unsupported verification method %q", verifyMethod))
+			return
+		}
+		if h.cfg != nil && !h.cfg.MFA.IsProviderEnabled(verifyMethod) {
+			response.Error(c, http.StatusForbidden, fmt.Errorf("MFA method %q is disabled by administrator", verifyMethod))
+			return
 		}
 
 		if currentCode == "" {
@@ -1047,8 +1301,8 @@ func (h *SAMLHandler) HandleMFAReEnroll(c *gin.Context) {
 		SecretKey:          enrollData.SecretKey,
 		QRCodeDataURI:      template.URL(enrollData.QRCodeDataURI),
 		Message:            "New authenticator key generated. Scan QR code and verify to activate.",
-		ResendCooldown:     60,
 	}
+	h.populateChallengeProviderFlags(&vm)
 
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	if h.templates != nil {
@@ -1060,25 +1314,92 @@ func (h *SAMLHandler) HandleMFAReEnroll(c *gin.Context) {
 	c.String(http.StatusOK, renderInlineMFAPage(vm))
 }
 
+func (h *SAMLHandler) populateChallengeProviderFlags(vm *ChallengeViewModel) {
+	if h.cfg != nil {
+		vm.TotpEnabled = h.cfg.MFA.IsProviderEnabled("totp")
+		vm.EmailEnabled = h.cfg.MFA.IsProviderEnabled("email")
+		vm.MultiOTPEnabled = vm.TotpEnabled && vm.EmailEnabled
+		if h.cfg.MFA.ResendCooldown > 0 {
+			vm.ResendCooldown = int(h.cfg.MFA.ResendCooldown.Seconds())
+		}
+	} else {
+		vm.TotpEnabled = true
+		vm.EmailEnabled = true
+		vm.MultiOTPEnabled = true
+	}
+	if vm.ResendCooldown <= 0 {
+		vm.ResendCooldown = 60
+	}
+
+	vm.VerificationMethods = buildMFAVerificationOptions(vm.SessionID, vm.MaskedEmail, vm.Method, vm.TotpEnabled, vm.EmailEnabled)
+}
+
+func buildMFAVerificationOptions(sessionID, maskedEmail, activeMethod string, totpEnabled, emailEnabled bool) []MFAVerificationOption {
+	escSession := url.QueryEscape(sessionID)
+	var opts []MFAVerificationOption
+	if totpEnabled {
+		opts = append(opts, MFAVerificationOption{
+			Key:         "totp",
+			Title:       "Authenticator App",
+			Description: "Enter a 6-digit code from Microsoft or Google Authenticator",
+			URL:         "?method=totp&session_id=" + escSession,
+			Active:      activeMethod == "totp",
+		})
+	}
+	if emailEnabled {
+		desc := "Send a one-time verification code to your verified email"
+		if maskedEmail != "" && maskedEmail != "***" {
+			desc = "Send one-time code to " + maskedEmail
+		}
+		opts = append(opts, MFAVerificationOption{
+			Key:         "email",
+			Title:       "Email",
+			Description: desc,
+			URL:         "?method=email&session_id=" + escSession,
+			Active:      activeMethod == "email",
+		})
+	}
+	return opts
+}
+
 func (h *SAMLHandler) renderMFAChallengeView(c *gin.Context, state *AuthSessionState, method, errorMsg string) {
 	h.renderMFAChallengeViewWithStatus(c, http.StatusOK, state, method, errorMsg)
 }
 
 func (h *SAMLHandler) renderMFAChallengeViewWithStatus(c *gin.Context, statusCode int, state *AuthSessionState, method, errorMsg string) {
+	h.renderMFAChallengeViewWithMessage(c, statusCode, state, method, "", errorMsg)
+}
+
+func (h *SAMLHandler) renderMFAChallengeViewWithMessage(c *gin.Context, statusCode int, state *AuthSessionState, method, successMsg, errorMsg string) {
 	ctx := c.Request.Context()
+	selectRequested := strings.EqualFold(strings.TrimSpace(method), "select")
+	if selectRequested {
+		if h.cfg != nil {
+			method = h.cfg.MFA.ResolveChallengeMethod("")
+		} else {
+			method = "totp"
+		}
+	} else if h.cfg != nil {
+		method = h.cfg.MFA.ResolveChallengeMethod(method)
+	} else if method != "totp" && method != "email" {
+		method = "totp"
+	}
 	hasActiveTOTP := h.mfaService.HasActiveTOTP(ctx, state.UserIdentityKey)
 
 	vm := ChallengeViewModel{
-		SessionID:      state.SessionID,
-		CSRFToken:      state.CSRFToken,
-		Email:          state.UserEmail,
-		MaskedEmail:    maskEmail(state.UserEmail),
-		Method:         method,
-		ErrorMessage:   errorMsg,
-		ResendCooldown: 60,
+		SessionID:    state.SessionID,
+		CSRFToken:    state.CSRFToken,
+		Email:        state.UserEmail,
+		MaskedEmail:  maskEmail(state.UserEmail),
+		Method:       method,
+		Message:      successMsg,
+		ErrorMessage: errorMsg,
 	}
+	h.populateChallengeProviderFlags(&vm)
 
-	if method == "totp" {
+	if selectRequested && vm.MultiOTPEnabled {
+		vm.MethodSelectView = true
+	} else if method == "totp" {
 		if !hasActiveTOTP {
 			// Needs enrollment: generate pending secret & QR code
 			enrollData, err := h.mfaService.StartTOTPEnrollment(ctx, state.UserIdentityKey, state.UserEmail)
@@ -1117,7 +1438,16 @@ func (h *SAMLHandler) renderMockUpstreamLogin(c *gin.Context, sessionID, outboun
 	if mockDestination == "" {
 		mockDestination = "/saml/acs"
 	}
-	mockIssuer := h.cfg.SAML.IdPEntityID
+	mockIssuer := ""
+	if state, err := h.correlationStore.Get(sessionID); err == nil && state != nil {
+		mockIssuer = strings.TrimSpace(state.UpstreamEntityID)
+	}
+	if mockIssuer == "" {
+		mockIssuer = strings.TrimSpace(h.cfg.SAML.ProfileForIdP("simulator").EntityID)
+	}
+	if mockIssuer == "" {
+		mockIssuer = strings.TrimSpace(h.cfg.SAML.IdPEntityID)
+	}
 	if mockIssuer == "" {
 		mockIssuer = "https://mock-idp.samlguard.local"
 	}
@@ -1146,12 +1476,16 @@ func (h *SAMLHandler) renderMockUpstreamLogin(c *gin.Context, sessionID, outboun
 		defaultSAMLResponse = result.SAMLResponse
 	}
 
+	providers := h.buildLoginProviderOptions(sessionID)
 	vm := CorporateLoginViewModel{
 		SessionID:         sessionID,
 		OutboundID:        outboundID,
 		SAMLResponseInput: template.HTML(fmt.Sprintf(`<input type="hidden" name="SAMLResponse" value="%s"/>`, html.EscapeString(defaultSAMLResponse))),
 		Username:          prefillUser,
 		ErrorMessage:      errorMessage,
+		HasMultipleIdPs:   len(providers) > 1,
+		SelectedIdP:       "simulator",
+		Providers:         providers,
 	}
 
 	tmpl := h.corporateLoginTmpl
@@ -1204,7 +1538,13 @@ func (h *SAMLHandler) HandleMockIDPSubmit(c *gin.Context) {
 	if mockDestination == "" {
 		mockDestination = "/saml/acs"
 	}
-	mockIssuer := h.cfg.SAML.IdPEntityID
+	mockIssuer := strings.TrimSpace(state.UpstreamEntityID)
+	if mockIssuer == "" {
+		mockIssuer = strings.TrimSpace(h.cfg.SAML.ProfileForIdP("simulator").EntityID)
+	}
+	if mockIssuer == "" {
+		mockIssuer = strings.TrimSpace(h.cfg.SAML.IdPEntityID)
+	}
 	if mockIssuer == "" {
 		mockIssuer = "https://mock-idp.samlguard.local"
 	}
@@ -1372,7 +1712,51 @@ func renderInlineMFAPage(vm ChallengeViewModel) string {
 	escMaskedEmail := html.EscapeString(vm.MaskedEmail)
 	escSecretKey := html.EscapeString(vm.SecretKey)
 	escQRDataURI := html.EscapeString(string(vm.QRCodeDataURI))
+	escMessage := html.EscapeString(vm.Message)
 	escError := html.EscapeString(vm.ErrorMessage)
+
+	totpEnabled := vm.TotpEnabled || (!vm.TotpEnabled && !vm.EmailEnabled)
+	emailEnabled := vm.EmailEnabled || (!vm.TotpEnabled && !vm.EmailEnabled)
+
+	if vm.MethodSelectView && vm.MultiOTPEnabled {
+		var rows strings.Builder
+		for _, opt := range vm.VerificationMethods {
+			fmt.Fprintf(&rows, `<a class="method-row" href="%s"><span><strong>%s</strong><br><small style="color:#94a3b8;">%s</small></span><span>&rsaquo;</span></a>`,
+				html.EscapeString(opt.URL), html.EscapeString(opt.Title), html.EscapeString(opt.Description))
+		}
+		return fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+	<title>SAMLGuard - Select a method to verify your identity</title>
+	<style>
+		body { font-family: -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+		.card { background: #1e293b; padding: 2.25rem; border-radius: 14px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); max-width: 440px; width: 90%%; border: 1px solid #334155; }
+		h1 { color: #f8fafc; font-size: 1.35rem; margin: 0 0 0.5rem; }
+		.sub { color: #94a3b8; font-size: 0.85rem; margin-bottom: 1.25rem; }
+		.method-list { border-top: 1px solid #334155; }
+		.method-row { display: flex; align-items: center; justify-content: space-between; padding: 0.9rem 0.4rem; border-bottom: 1px solid #334155; color: #f8fafc; text-decoration: none; }
+		.method-row:hover { background: rgba(255,255,255,0.04); }
+	</style>
+</head>
+<body>
+	<div class="card">
+		<h1>Select a method to verify your identity</h1>
+		<div class="sub">Verified Identity: %s</div>
+		<div class="method-list">%s</div>
+	</div>
+</body>
+</html>`, escMaskedEmail, rows.String())
+	}
+
+	var tabsHTML string
+	var tabItems strings.Builder
+	if totpEnabled {
+		fmt.Fprintf(&tabItems, `<a class="tab %s" href="?method=totp&session_id=%s">Authenticator</a>`, activeTab(vm.Method == "totp"), escSessionID)
+	}
+	if emailEnabled {
+		fmt.Fprintf(&tabItems, `<a class="tab %s" href="?method=email&session_id=%s">Email OTP</a>`, activeTab(vm.Method == "email"), escSessionID)
+	}
+	tabsHTML = fmt.Sprintf(`<div class="tabs">%s</div>`, tabItems.String())
 
 	var qrHTML string
 	if vm.EnrollmentRequired && vm.QRCodeDataURI != "" {
@@ -1384,9 +1768,12 @@ func renderInlineMFAPage(vm ChallengeViewModel) string {
 		</div>`, escQRDataURI, escSecretKey)
 	}
 
-	var errorHTML string
+	var statusHTML string
+	if vm.Message != "" {
+		statusHTML += fmt.Sprintf(`<div style="padding: 0.75rem; border-radius: 8px; background: #0f3a2e; border: 1px solid #10b981; color: #6ee7b7; margin-bottom: 1rem; font-size: 0.85rem;">%s</div>`, escMessage)
+	}
 	if vm.ErrorMessage != "" {
-		errorHTML = fmt.Sprintf(`<div style="padding: 0.75rem; border-radius: 8px; background: #3b1c26; border: 1px solid #dc2626; color: #fca5a5; margin-bottom: 1rem; font-size: 0.85rem;">%s</div>`, escError)
+		statusHTML += fmt.Sprintf(`<div style="padding: 0.75rem; border-radius: 8px; background: #3b1c26; border: 1px solid #dc2626; color: #fca5a5; margin-bottom: 1rem; font-size: 0.85rem;">%s</div>`, escError)
 	}
 
 	isPendingValue := "false"
@@ -1438,10 +1825,7 @@ func renderInlineMFAPage(vm ChallengeViewModel) string {
 	<div class="card">
 		<h1>🔐 Multi-Factor Verification</h1>
 		<div class="sub">Verified Identity: %s</div>
-		<div class="tabs">
-			<a class="tab %s" href="?method=totp&session_id=%s">Authenticator</a>
-			<a class="tab %s" href="?method=email&session_id=%s">Email OTP</a>
-		</div>
+		%s
 		%s
 		%s
 		<form method="POST" action="/mfa/verify">
@@ -1458,11 +1842,8 @@ func renderInlineMFAPage(vm ChallengeViewModel) string {
 </body>
 </html>`,
 		escMaskedEmail,
-		activeTab(vm.Method == "totp"),
-		escSessionID,
-		activeTab(vm.Method == "email"),
-		escSessionID,
-		errorHTML,
+		tabsHTML,
+		statusHTML,
 		qrHTML,
 		escSessionID,
 		escCSRFToken,

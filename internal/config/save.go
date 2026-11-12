@@ -13,10 +13,13 @@ import (
 // AdminSettingsPayload holds the editable settings from the Admin UI.
 type AdminSettingsPayload struct {
 	// Upstream IdP
-	IdPEntityID    string `json:"idp_entity_id" form:"idp_entity_id"`
-	IdPSSOURL      string `json:"idp_sso_url" form:"idp_sso_url"`
-	IdPMetadataURL string `json:"idp_metadata_url" form:"idp_metadata_url"`
-	IdPCertFile    string `json:"idp_cert_file" form:"idp_cert_file"`
+	ActiveIdP      string                        `json:"active_idp" form:"active_idp"`
+	EnabledIdPs    []string                      `json:"enabled_idps" form:"enabled_idps"`
+	IdPProfiles    map[string]UpstreamIdPProfile `json:"idp_profiles,omitempty"`
+	IdPEntityID    string                        `json:"idp_entity_id" form:"idp_entity_id"`
+	IdPSSOURL      string                        `json:"idp_sso_url" form:"idp_sso_url"`
+	IdPMetadataURL string                        `json:"idp_metadata_url" form:"idp_metadata_url"`
+	IdPCertFile    string                        `json:"idp_cert_file" form:"idp_cert_file"`
 
 	// Downstream SP (Schneider ITA) & Gateway
 	EntityID         string            `json:"entity_id" form:"entity_id"`
@@ -27,11 +30,12 @@ type AdminSettingsPayload struct {
 	GroupMapping     map[string]string `json:"group_mapping" form:"group_mapping"`
 
 	// MFA & Policies
-	MFADefaultProvider string        `json:"mfa_default_provider" form:"mfa_default_provider"`
-	MFAIssuer          string        `json:"mfa_issuer" form:"mfa_issuer"`
-	OTPExpiry          time.Duration `json:"otp_expiry" form:"otp_expiry"`
-	ResendCooldown     time.Duration `json:"resend_cooldown" form:"resend_cooldown"`
-	AllowDummyOTP      bool          `json:"allow_dummy_otp" form:"allow_dummy_otp"`
+	MFAEnabledProviders []string      `json:"mfa_enabled_providers" form:"mfa_enabled_providers"`
+	MFADefaultProvider  string        `json:"mfa_default_provider" form:"mfa_default_provider"`
+	MFAIssuer           string        `json:"mfa_issuer" form:"mfa_issuer"`
+	OTPExpiry           time.Duration `json:"otp_expiry" form:"otp_expiry"`
+	ResendCooldown      time.Duration `json:"resend_cooldown" form:"resend_cooldown"`
+	AllowDummyOTP       bool          `json:"allow_dummy_otp" form:"allow_dummy_otp"`
 
 	// SMTP Email Server
 	SMTPHost       string `json:"smtp_host" form:"smtp_host"`
@@ -68,11 +72,77 @@ func ApplyAdminSettings(cfg *Config, payload *AdminSettingsPayload) {
 	if v := strings.TrimSpace(payload.SLOURL); v != "" {
 		cfg.SAML.SLOURL = v
 	}
-	cfg.SAML.IdPEntityID = strings.TrimSpace(payload.IdPEntityID)
-	cfg.SAML.IdPSSOURL = strings.TrimSpace(payload.IdPSSOURL)
-	cfg.SAML.IdPMetadataURL = strings.TrimSpace(payload.IdPMetadataURL)
-	if v := strings.TrimSpace(payload.IdPCertFile); v != "" {
-		cfg.SAML.IdPCertFile = v
+	if normIdPs := NormalizeIdPKeys(payload.EnabledIdPs); len(normIdPs) > 0 {
+		cfg.SAML.EnabledIdPs = normIdPs
+	}
+	editedIdP := strings.ToLower(strings.TrimSpace(payload.ActiveIdP))
+	switch editedIdP {
+	case "simulator", "entra", "keycloak", "custom":
+		cfg.SAML.ActiveIdP = editedIdP
+	default:
+		editedIdP = ""
+	}
+	if payload.IdPProfiles != nil {
+		if cfg.SAML.IdPProfiles == nil {
+			cfg.SAML.IdPProfiles = make(map[string]UpstreamIdPProfile)
+		}
+		for k, prof := range payload.IdPProfiles {
+			nk := strings.ToLower(strings.TrimSpace(k))
+			if nk == "" {
+				continue
+			}
+			cfg.SAML.IdPProfiles[nk] = UpstreamIdPProfile{
+				EntityID:    strings.TrimSpace(prof.EntityID),
+				SSOURL:      strings.TrimSpace(prof.SSOURL),
+				MetadataURL: strings.TrimSpace(prof.MetadataURL),
+				CertFile:    strings.TrimSpace(prof.CertFile),
+			}
+		}
+	}
+	if editedIdP != "" && (payload.IdPEntityID != "" || payload.IdPSSOURL != "" || payload.IdPMetadataURL != "" || payload.IdPCertFile != "") {
+		if cfg.SAML.IdPProfiles == nil {
+			cfg.SAML.IdPProfiles = make(map[string]UpstreamIdPProfile)
+		}
+		certFile := strings.TrimSpace(payload.IdPCertFile)
+		if certFile == "" {
+			certFile = cfg.SAML.IdPProfiles[editedIdP].CertFile
+		}
+		cfg.SAML.IdPProfiles[editedIdP] = UpstreamIdPProfile{
+			EntityID:    strings.TrimSpace(payload.IdPEntityID),
+			SSOURL:      strings.TrimSpace(payload.IdPSSOURL),
+			MetadataURL: strings.TrimSpace(payload.IdPMetadataURL),
+			CertFile:    certFile,
+		}
+	}
+	if len(cfg.SAML.EnabledIdPs) > 0 && !cfg.SAML.IsIdPEnabled(cfg.SAML.EffectiveActiveIdP()) {
+		cfg.SAML.ActiveIdP = cfg.SAML.EnabledIdPs[0]
+	}
+	activeIdPKey := cfg.SAML.EffectiveActiveIdP()
+	if prof, ok := cfg.SAML.IdPProfiles[activeIdPKey]; ok {
+		cfg.SAML.IdPEntityID = prof.EntityID
+		cfg.SAML.IdPSSOURL = prof.SSOURL
+		cfg.SAML.IdPMetadataURL = prof.MetadataURL
+		if strings.TrimSpace(prof.CertFile) != "" {
+			cfg.SAML.IdPCertFile = prof.CertFile
+		}
+	} else {
+		cfg.SAML.IdPEntityID = strings.TrimSpace(payload.IdPEntityID)
+		cfg.SAML.IdPSSOURL = strings.TrimSpace(payload.IdPSSOURL)
+		cfg.SAML.IdPMetadataURL = strings.TrimSpace(payload.IdPMetadataURL)
+		if v := strings.TrimSpace(payload.IdPCertFile); v != "" {
+			cfg.SAML.IdPCertFile = v
+		}
+		if cfg.SAML.IdPEntityID != "" || cfg.SAML.IdPSSOURL != "" || cfg.SAML.IdPMetadataURL != "" {
+			if cfg.SAML.IdPProfiles == nil {
+				cfg.SAML.IdPProfiles = make(map[string]UpstreamIdPProfile)
+			}
+			cfg.SAML.IdPProfiles[activeIdPKey] = UpstreamIdPProfile{
+				EntityID:    cfg.SAML.IdPEntityID,
+				SSOURL:      cfg.SAML.IdPSSOURL,
+				MetadataURL: cfg.SAML.IdPMetadataURL,
+				CertFile:    cfg.SAML.IdPCertFile,
+			}
+		}
 	}
 
 	if len(payload.AllowedAudiences) > 0 {
@@ -99,8 +169,14 @@ func ApplyAdminSettings(cfg *Config, payload *AdminSettingsPayload) {
 		cfg.SAML.GroupMapping = gm
 	}
 
-	if v := strings.TrimSpace(payload.MFADefaultProvider); v != "" {
+	if normProviders := NormalizeMFAProviders(payload.MFAEnabledProviders); len(normProviders) > 0 {
+		cfg.MFA.EnabledProviders = normProviders
+	}
+	if v := strings.ToLower(strings.TrimSpace(payload.MFADefaultProvider)); v != "" {
 		cfg.MFA.DefaultProvider = v
+	}
+	if cfg.MFA.DefaultProvider != "" && cfg.MFA.DefaultProvider != "select" && !cfg.MFA.IsProviderEnabled(cfg.MFA.DefaultProvider) {
+		cfg.MFA.DefaultProvider = cfg.MFA.EffectiveDefaultProvider()
 	}
 	if v := strings.TrimSpace(payload.MFAIssuer); v != "" {
 		cfg.MFA.Issuer = v
@@ -195,6 +271,28 @@ func SaveConfig(filePath string, cfg *Config, payload *AdminSettingsPayload) err
 	if payload.SLOURL != "" {
 		samlMap["slo_url"] = cfg.SAML.SLOURL
 	}
+	if cfg.SAML.ActiveIdP != "" {
+		samlMap["active_idp"] = cfg.SAML.ActiveIdP
+	}
+	if len(cfg.SAML.EnabledIdPs) > 0 {
+		enabledIdPs := make([]interface{}, 0, len(cfg.SAML.EnabledIdPs))
+		for _, id := range cfg.SAML.ActiveIdPs() {
+			enabledIdPs = append(enabledIdPs, id)
+		}
+		samlMap["enabled_idps"] = enabledIdPs
+	}
+	if len(cfg.SAML.IdPProfiles) > 0 {
+		profilesMap := make(map[string]interface{}, len(cfg.SAML.IdPProfiles))
+		for k, prof := range cfg.SAML.IdPProfiles {
+			profilesMap[k] = map[string]interface{}{
+				"entity_id":    prof.EntityID,
+				"sso_url":      prof.SSOURL,
+				"metadata_url": prof.MetadataURL,
+				"cert_file":    prof.CertFile,
+			}
+		}
+		samlMap["idp_profiles"] = profilesMap
+	}
 	samlMap["idp_entity_id"] = cfg.SAML.IdPEntityID
 	samlMap["idp_sso_url"] = cfg.SAML.IdPSSOURL
 	samlMap["idp_metadata_url"] = cfg.SAML.IdPMetadataURL
@@ -225,8 +323,19 @@ func SaveConfig(filePath string, cfg *Config, payload *AdminSettingsPayload) err
 		mfaMap = make(map[string]interface{})
 		raw["mfa"] = mfaMap
 	}
-	if payload.MFADefaultProvider != "" {
-		mfaMap["default_provider"] = cfg.MFA.DefaultProvider
+	if len(cfg.MFA.EnabledProviders) > 0 {
+		enabled := make([]interface{}, 0, len(cfg.MFA.EnabledProviders))
+		for _, p := range cfg.MFA.ActiveProviders() {
+			enabled = append(enabled, p)
+		}
+		mfaMap["enabled_providers"] = enabled
+	}
+	if payload.MFADefaultProvider != "" || cfg.MFA.DefaultProvider != "" {
+		if strings.EqualFold(cfg.MFA.DefaultProvider, "select") {
+			mfaMap["default_provider"] = "select"
+		} else {
+			mfaMap["default_provider"] = cfg.MFA.EffectiveDefaultProvider()
+		}
 	}
 	if payload.MFAIssuer != "" {
 		mfaMap["issuer"] = cfg.MFA.Issuer

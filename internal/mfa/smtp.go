@@ -3,6 +3,7 @@ package mfa
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/smtp"
@@ -51,6 +52,9 @@ func NewSMTPSender(host string, port int, username, password, from, fromName, en
 
 // Send sends an email with the verification code. In local/development mode with localhost, it logs the simulated code.
 func (s *SMTPSender) Send(ctx context.Context, recipient, code string) error {
+	if s == nil {
+		return errors.New("SMTP sender is not configured")
+	}
 	if s.logger != nil {
 		s.logger.Info("dispatching MFA email OTP",
 			zap.String("recipient", maskRecipient(recipient)),

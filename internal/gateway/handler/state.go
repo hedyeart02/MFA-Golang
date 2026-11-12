@@ -22,7 +22,9 @@ type AuthSessionState struct {
 	ITARelayState       string
 	ITAACSURL           string
 	OutboundRequestID   string
+	SelectedIdP         string
 	UpstreamEntityID    string
+	UpstreamCertFile    string
 	SubjectNameID       string
 	SubjectNameIDFormat string
 	UserIdentityKey     string

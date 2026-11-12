@@ -501,3 +501,143 @@ func TestConfig_Phase3_ITATLSAndMetricsRedaction(t *testing.T) {
 	}
 }
 
+func TestMFAConfig_EnabledProvidersAndResolution(t *testing.T) {
+	// Default: both totp and email active, totp default
+	var defMFA MFAConfig
+	if len(defMFA.ActiveProviders()) != 2 || !defMFA.IsProviderEnabled("totp") || !defMFA.IsProviderEnabled("email") {
+		t.Fatalf("expected default active providers [totp email], got %v", defMFA.ActiveProviders())
+	}
+	if defMFA.ResolveChallengeMethod("") != "totp" || defMFA.ResolveChallengeMethod("email") != "email" {
+		t.Fatalf("unexpected default resolution behavior")
+	}
+
+	// Single OTP: Email OTP only -> forced to "email" even if "totp" requested
+	emailOnly := MFAConfig{
+		EnabledProviders: []string{"email"},
+		DefaultProvider:  "totp",
+	}
+	if !emailOnly.IsProviderEnabled("email") || emailOnly.IsProviderEnabled("totp") {
+		t.Fatalf("expected only email enabled, got %v", emailOnly.ActiveProviders())
+	}
+	if got := emailOnly.EffectiveDefaultProvider(); got != "email" {
+		t.Fatalf("expected EffectiveDefaultProvider 'email', got %q", got)
+	}
+	if got := emailOnly.ResolveChallengeMethod("totp"); got != "email" {
+		t.Fatalf("expected ResolveChallengeMethod('totp') -> 'email' when totp disabled, got %q", got)
+	}
+
+	// Multi-OTP with email default
+	multiEmailDefault := MFAConfig{
+		EnabledProviders: []string{"totp", "email"},
+		DefaultProvider:  "email",
+	}
+	if got := multiEmailDefault.ResolveChallengeMethod(""); got != "email" {
+		t.Fatalf("expected empty request to resolve to 'email', got %q", got)
+	}
+	if got := multiEmailDefault.ResolveChallengeMethod("totp"); got != "totp" {
+		t.Fatalf("expected explicit 'totp' request to resolve to 'totp', got %q", got)
+	}
+
+	// EffectiveActiveIdP inference and explicit value
+	samlEntra := SAMLConfig{IdPSSOURL: "https://login.microsoftonline.com/tenant/saml2"}
+	if got := samlEntra.EffectiveActiveIdP(); got != "entra" {
+		t.Fatalf("expected inferred active IdP 'entra', got %q", got)
+	}
+	samlExplicit := SAMLConfig{ActiveIdP: "keycloak", IdPSSOURL: "https://login.microsoftonline.com/tenant/saml2"}
+	if got := samlExplicit.EffectiveActiveIdP(); got != "keycloak" {
+		t.Fatalf("expected explicit active IdP 'keycloak', got %q", got)
+	}
+}
+
+func TestConfig_Validate_UpstreamIdPAndMFAProviders(t *testing.T) {
+	// Simulator active_idp must fail in production
+	cfg := validProdConfig()
+	cfg.SAML.ActiveIdP = "simulator"
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "simulator") {
+		t.Fatalf("expected error for active_idp=simulator in production, got: %v", err)
+	}
+
+	// Unsupported MFA provider must fail validation
+	cfg = validProdConfig()
+	cfg.MFA.EnabledProviders = []string{"sms"}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "enabled_providers") {
+		t.Fatalf("expected error for unsupported enabled_providers entry, got: %v", err)
+	}
+
+	// Default provider not in enabled_providers must fail validation
+	cfg = validProdConfig()
+	cfg.MFA.EnabledProviders = []string{"email"}
+	cfg.MFA.DefaultProvider = "totp"
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "default_provider") {
+		t.Fatalf("expected error when default_provider is not enabled, got: %v", err)
+	}
+
+	// When Email OTP is disabled in production, empty SMTP host is allowed
+	cfg = validProdConfig()
+	cfg.MFA.EnabledProviders = []string{"totp"}
+	cfg.MFA.DefaultProvider = "totp"
+	cfg.SMTP.Host = ""
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected production validation to pass without SMTP when Email OTP is disabled, got: %v", err)
+	}
+}
+
+func TestConfig_MultiEnabledIdPsAndMethodSelect(t *testing.T) {
+	norm := NormalizeIdPKeys([]string{" Entra ", "simulator", "entra", "unknown"})
+	if len(norm) != 2 || norm[0] != "entra" || norm[1] != "simulator" {
+		t.Fatalf("expected normalized IdPs [entra simulator], got %v", norm)
+	}
+
+	samlCfg := SAMLConfig{
+		ActiveIdP:   "simulator",
+		EnabledIdPs: []string{"simulator", "entra"},
+		IdPEntityID: "https://sim.local",
+		IdPSSOURL:   "https://sim.local/mock-idp-login",
+		IdPProfiles: map[string]UpstreamIdPProfile{
+			"entra": {
+				EntityID: "https://sts.windows.net/t1/",
+				SSOURL:   "https://login.microsoftonline.com/t1/saml2",
+			},
+		},
+	}
+	if !samlCfg.IsIdPEnabled("simulator") || !samlCfg.IsIdPEnabled("entra") || samlCfg.IsIdPEnabled("keycloak") {
+		t.Fatalf("unexpected IsIdPEnabled states for %v", samlCfg.ActiveIdPs())
+	}
+	if got := samlCfg.ProfileForIdP("entra").EntityID; got != "https://sts.windows.net/t1/" {
+		t.Fatalf("expected entra profile EntityID, got %q", got)
+	}
+
+	mfaSelect := MFAConfig{
+		EnabledProviders: []string{"totp", "email"},
+		DefaultProvider:  "select",
+	}
+	if !mfaSelect.IsMethodSelectDefault() {
+		t.Fatalf("expected IsMethodSelectDefault true when multi-OTP + select")
+	}
+	if got := mfaSelect.EffectiveDefaultProvider(); got != "totp" {
+		t.Fatalf("expected EffectiveDefaultProvider fallback 'totp', got %q", got)
+	}
+	mfaSingle := MFAConfig{
+		EnabledProviders: []string{"email"},
+		DefaultProvider:  "select",
+	}
+	if mfaSingle.IsMethodSelectDefault() {
+		t.Fatalf("expected IsMethodSelectDefault false when only 1 OTP method active")
+	}
+
+	// Production validation rejects simulator inside enabled_idps
+	prodCfg := validProdConfig()
+	prodCfg.SAML.EnabledIdPs = []string{"entra", "simulator"}
+	if err := prodCfg.Validate(); err == nil || !strings.Contains(err.Error(), "simulator") {
+		t.Fatalf("expected error for simulator in saml.enabled_idps in production, got: %v", err)
+	}
+
+	// Production validation accepts default_provider: "select" when multiple providers active
+	prodCfg = validProdConfig()
+	prodCfg.MFA.EnabledProviders = []string{"totp", "email"}
+	prodCfg.MFA.DefaultProvider = "select"
+	if err := prodCfg.Validate(); err != nil {
+		t.Fatalf("expected default_provider=select to validate cleanly in multi-OTP mode, got: %v", err)
+	}
+}
+

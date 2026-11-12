@@ -268,6 +268,24 @@
             color: #ef4444;
         }
 
+        .alert-success {
+            padding: 0.75rem 0.95rem;
+            border-radius: 8px;
+            font-size: 0.82rem;
+            margin-bottom: 1.25rem;
+            text-align: left;
+            background: rgba(16, 185, 129, 0.12);
+            border: 1px solid rgba(16, 185, 129, 0.35);
+            color: var(--brand-green);
+        }
+
+        .method-hint {
+            font-size: 0.76rem;
+            color: var(--text-secondary);
+            margin-top: -0.75rem;
+            margin-bottom: 1rem;
+        }
+
         .qr-section {
             text-align: center;
             background: var(--box-bg);
@@ -388,6 +406,137 @@
             font-weight: 600;
         }
 
+        .title-back-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.45rem;
+            position: relative;
+            margin-bottom: 0.35rem;
+        }
+
+        .title-back-row.align-left {
+            justify-content: flex-start;
+        }
+
+        .back-chevron-link {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: background 0.15s ease, color 0.15s ease;
+            flex-shrink: 0;
+        }
+
+        .back-chevron-link:hover {
+            background: rgba(125, 155, 195, 0.14);
+            color: var(--text-primary);
+        }
+
+        .method-list {
+            margin-top: 1.15rem;
+            border-top: 1px solid var(--border-input);
+            text-align: left;
+        }
+
+        .method-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.85rem;
+            padding: 0.95rem 0.6rem;
+            border-bottom: 1px solid var(--border-input);
+            text-decoration: none;
+            color: var(--text-primary);
+            transition: background 0.15s ease, padding-left 0.15s ease;
+        }
+
+        .method-row:hover {
+            background: rgba(0, 176, 80, 0.08);
+            padding-left: 0.85rem;
+        }
+
+        .method-row-left {
+            display: flex;
+            align-items: center;
+            gap: 0.85rem;
+            min-width: 0;
+        }
+
+        .method-row-icon {
+            width: 34px;
+            height: 34px;
+            border-radius: 8px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(125, 155, 195, 0.12);
+            color: var(--text-secondary);
+            flex-shrink: 0;
+        }
+
+        .method-row:hover .method-row-icon {
+            color: var(--brand-green);
+            background: rgba(0, 176, 80, 0.14);
+        }
+
+        .method-row-title {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .method-row-desc {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-top: 0.12rem;
+        }
+
+        .method-row-chevron {
+            color: var(--text-muted);
+            flex-shrink: 0;
+            transition: transform 0.15s ease, color 0.15s ease;
+        }
+
+        .method-row:hover .method-row-chevron {
+            color: var(--brand-green);
+            transform: translateX(2px);
+        }
+
+        .alt-methods-section {
+            margin-top: 1.5rem;
+            text-align: left;
+        }
+
+        .alt-methods-label {
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-bottom: 0.35rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .reenroll-input {
+            width: 160px;
+            padding: 0.45rem 0.65rem;
+            border-radius: 6px;
+            border: 1px solid var(--border-input);
+            background: var(--bg-input);
+            color: var(--text-primary);
+            font-size: 0.85rem;
+            text-align: center;
+        }
+
+        .reenroll-input:focus {
+            outline: none;
+            border-color: var(--border-focus);
+        }
+
         @media (max-width: 640px) {
             .top-navbar { padding: 1rem 1.25rem; }
             .auth-card { padding: 2rem 1.5rem; }
@@ -477,13 +626,66 @@
                 </svg>
             </div>
 
-            <h1 class="app-title">Multi-Factor Verification</h1>
-            <p class="app-sub">{{.MaskedEmail}}</p>
+            {{if and .MethodSelectView .MultiOTPEnabled}}
+            <div class="title-back-row align-left" style="margin-bottom: 0.5rem;">
+                <a class="back-chevron-link" href="/saml/sso?session_id={{.SessionID}}&view=providers" title="Back to sign in" aria-label="Back to sign in">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                </a>
+                <h1 class="app-title" style="text-align:left; margin-bottom:0; font-size:1.35rem; line-height:1.25;">Select a method to verify your identity</h1>
+            </div>
+            <p class="app-sub" style="text-align:left; padding-left:2.45rem; margin-bottom:0.75rem;">{{.MaskedEmail}}</p>
+
+            {{if .Message}}
+            <div class="alert-success">{{.Message}}</div>
+            {{end}}
+
+            {{if .ErrorMessage}}
+            <div class="alert-error">{{.ErrorMessage}}</div>
+            {{end}}
+
+            <div class="method-list" role="list" aria-label="Verification methods">
+                {{range .VerificationMethods}}
+                <a class="method-row" href="{{.URL}}" role="listitem" data-mfa-option="{{.Key}}">
+                    <span class="method-row-left">
+                        <span class="method-row-icon" aria-hidden="true">
+                            {{if eq .Key "totp"}}
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+                            {{else}}
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+                            {{end}}
+                        </span>
+                        <span>
+                            <div class="method-row-title">{{.Title}}</div>
+                            <div class="method-row-desc">{{.Description}}</div>
+                        </span>
+                    </span>
+                    <svg class="method-row-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+                </a>
+                {{end}}
+            </div>
+            {{else}}
+            <div class="{{if .MultiOTPEnabled}}title-back-row{{end}}">
+                {{if .MultiOTPEnabled}}
+                <a class="back-chevron-link" href="?view=methods&session_id={{.SessionID}}" title="Select a method to verify your identity" aria-label="Select another verification method">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                </a>
+                {{end}}
+                <h1 class="app-title" style="margin-bottom:0;">Multi-Factor Verification</h1>
+            </div>
+            <p class="app-sub" style="margin-top:0.3rem;">{{.MaskedEmail}}</p>
 
             <div class="tabs">
+                {{if .TotpEnabled}}
                 <a class="tab {{if eq .Method "totp"}}active{{end}}" href="?method=totp&session_id={{.SessionID}}">Authenticator App</a>
+                {{end}}
+                {{if .EmailEnabled}}
                 <a class="tab {{if eq .Method "email"}}active{{end}}" href="?method=email&session_id={{.SessionID}}">Email OTP</a>
+                {{end}}
             </div>
+
+            {{if .Message}}
+            <div class="alert-success">{{.Message}}</div>
+            {{end}}
 
             {{if .ErrorMessage}}
             <div class="alert-error">{{.ErrorMessage}}</div>
@@ -520,7 +722,7 @@
                        autofocus
                        required/>
 
-                <button type="submit" class="btn-submit">Verify Code & Continue</button>
+                <button type="submit" class="btn-submit">Verify Code &amp; Continue</button>
             </form>
 
             {{if and (not .EnrollmentRequired) (eq .Method "totp")}}
@@ -530,7 +732,7 @@
                     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
                     <input type="hidden" name="verify_method" value="totp">
                     <div style="display:flex; gap:0.5rem; align-items:center; justify-content:center; flex-wrap:wrap;">
-                        <input type="text" name="current_code" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="one-time-code" placeholder="Current TOTP code" required style="width:160px; padding:0.45rem 0.65rem; border-radius:6px; border:1px solid #334155; background:#0f172a; color:#f8fafc; font-size:0.85rem; text-align:center;">
+                        <input type="text" name="current_code" class="reenroll-input" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="one-time-code" placeholder="Current TOTP code" required>
                         <button type="submit" class="resend-btn">Re-enroll Authenticator</button>
                     </div>
                 </form>
@@ -546,6 +748,35 @@
                     <button type="submit" id="resend-btn" class="resend-btn">Resend OTP Code</button>
                 </form>
             </div>
+            {{end}}
+
+            {{if .MultiOTPEnabled}}
+            <div class="alt-methods-section">
+                <div class="alt-methods-label">Or verify another way</div>
+                <div class="method-list" style="margin-top:0.25rem;" role="list">
+                    {{range .VerificationMethods}}
+                    {{if not .Active}}
+                    <a class="method-row" href="{{.URL}}" role="listitem" data-mfa-alt="{{.Key}}">
+                        <span class="method-row-left">
+                            <span class="method-row-icon" aria-hidden="true">
+                                {{if eq .Key "totp"}}
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+                                {{else}}
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+                                {{end}}
+                            </span>
+                            <span>
+                                <div class="method-row-title">{{.Title}}</div>
+                                <div class="method-row-desc">{{.Description}}</div>
+                            </span>
+                        </span>
+                        <svg class="method-row-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+                    </a>
+                    {{end}}
+                    {{end}}
+                </div>
+            </div>
+            {{end}}
             {{end}}
 
         </div>

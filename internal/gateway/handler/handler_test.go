@@ -13,6 +13,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -681,5 +682,218 @@ func TestNewSAMLHandler_FiltersExpiredIdPCertificate(t *testing.T) {
 	}
 	if hBundle.idpCertStore.Roots[0].SerialNumber.Int64() != 1002 {
 		t.Fatalf("expected valid cert serial 1002 to remain, got %v", hBundle.idpCertStore.Roots[0].SerialNumber)
+	}
+}
+
+func TestMFA_MultiOTPAndProviderEnforcement(t *testing.T) {
+	h, cfg := setupTestHandler(t, &mockPipeline{})
+	h.mfaService.UpdateSMTPSender(mfa.NewSMTPSender("localhost", 1025, "", "", "noreply@example.com", "SAMLGuard", "none", zap.NewNop()))
+	cfg.MFA.EnabledProviders = []string{"email"}
+	cfg.MFA.DefaultProvider = "email"
+
+	state := &AuthSessionState{
+		SubjectNameID:   "alice",
+		UserIdentityKey: "alice",
+		UserEmail:       "alice@example.com",
+	}
+	sessionID, err := h.correlationStore.Create(state)
+	if err != nil {
+		t.Fatalf("create correlation session: %v", err)
+	}
+	csrfToken := state.CSRFToken
+
+	r := gin.New()
+	r.GET("/saml/acs", h.HandleACSGet)
+	r.POST("/mfa/verify", h.HandleMFAVerify)
+	r.POST("/mfa/resend", h.HandleMFAResend)
+	r.POST("/mfa/re-enroll", h.HandleMFAReEnroll)
+
+	// 1. Email-OTP-only mode: GET /saml/acs?method=totp resolves to Email OTP and hides Authenticator tab
+	wACS := httptest.NewRecorder()
+	reqACS := httptest.NewRequest(http.MethodGet, "/saml/acs?session_id="+sessionID+"&method=totp", nil)
+	r.ServeHTTP(wACS, reqACS)
+	if wACS.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from GET /saml/acs, got %d", wACS.Code)
+	}
+	bodyEmailOnly := wACS.Body.String()
+	if !strings.Contains(bodyEmailOnly, "Email OTP") {
+		t.Errorf("expected Email OTP tab when email is enabled")
+	}
+	if strings.Contains(bodyEmailOnly, "Authenticator App") {
+		t.Errorf("expected Authenticator App tab to be hidden when totp is disabled")
+	}
+
+	// 2. Disabled TOTP verify & re-enroll must be rejected with 403 Forbidden
+	verifyTotpForm := url.Values{
+		"session_id": {sessionID},
+		"csrf_token": {csrfToken},
+		"method":     {"totp"},
+		"code":       {"000000"},
+	}
+	wVerifyTotp := httptest.NewRecorder()
+	reqVerifyTotp := httptest.NewRequest(http.MethodPost, "/mfa/verify", strings.NewReader(verifyTotpForm.Encode()))
+	reqVerifyTotp.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.ServeHTTP(wVerifyTotp, reqVerifyTotp)
+	if wVerifyTotp.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden verifying disabled totp method, got %d", wVerifyTotp.Code)
+	}
+
+	reEnrollForm := url.Values{
+		"session_id": {sessionID},
+		"csrf_token": {csrfToken},
+	}
+	wReEnroll := httptest.NewRecorder()
+	reqReEnroll := httptest.NewRequest(http.MethodPost, "/mfa/re-enroll", strings.NewReader(reEnrollForm.Encode()))
+	reqReEnroll.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.ServeHTTP(wReEnroll, reqReEnroll)
+	if wReEnroll.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden re-enrolling totp while totp disabled, got %d", wReEnroll.Code)
+	}
+
+	// 3. Multi-OTP mode (both totp and email active): customer can see and switch between both tabs
+	cfg.MFA.EnabledProviders = []string{"totp", "email"}
+	cfg.MFA.DefaultProvider = "totp"
+	wMulti := httptest.NewRecorder()
+	reqMulti := httptest.NewRequest(http.MethodGet, "/saml/acs?session_id="+sessionID, nil)
+	r.ServeHTTP(wMulti, reqMulti)
+	if wMulti.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK in multi-OTP mode, got %d", wMulti.Code)
+	}
+	bodyMulti := wMulti.Body.String()
+	if !strings.Contains(bodyMulti, "Authenticator App") || !strings.Contains(bodyMulti, "Email OTP") {
+		t.Errorf("expected both Authenticator App and Email OTP tabs rendered when multi-OTP enabled")
+	}
+
+	// 4. TOTP-only mode: /mfa/resend must return 403 Forbidden
+	cfg.MFA.EnabledProviders = []string{"totp"}
+	resendForm := url.Values{
+		"session_id": {sessionID},
+		"csrf_token": {csrfToken},
+	}
+	wResendDisabled := httptest.NewRecorder()
+	reqResendDisabled := httptest.NewRequest(http.MethodPost, "/mfa/resend", strings.NewReader(resendForm.Encode()))
+	reqResendDisabled.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.ServeHTTP(wResendDisabled, reqResendDisabled)
+	if wResendDisabled.Code != http.StatusForbidden {
+		t.Errorf("expected 403 Forbidden for /mfa/resend when email OTP is disabled, got %d", wResendDisabled.Code)
+	}
+}
+
+func TestSAMLHandler_ReloadIDPCertStore(t *testing.T) {
+	cfg := &config.Config{Env: "development"}
+	h, err := NewSAMLHandler(&mockPipeline{}, nil, nil, cfg, zap.NewNop())
+	if err != nil {
+		t.Fatalf("NewSAMLHandler failed: %v", err)
+	}
+	if h.idpCertStore != nil {
+		t.Fatalf("expected nil idpCertStore initially")
+	}
+
+	certPath, _ := filepath.Abs("../../../cert/saml-signing.crt")
+	cfg.SAML.IdPCertFile = certPath
+	h.ReloadIDPCertStore()
+
+	h.idpCertMu.RLock()
+	store := h.idpCertStore
+	h.idpCertMu.RUnlock()
+	if store == nil || len(store.Roots) == 0 {
+		t.Fatalf("expected ReloadIDPCertStore to load root certificate(s)")
+	}
+}
+
+func TestFrontEnd_MultiIdPChooserAndMFAMethodList(t *testing.T) {
+	h, cfg := setupTestHandler(t, &mockPipeline{})
+	cfg.SAML.ActiveIdP = "simulator"
+	cfg.SAML.EnabledIdPs = []string{"simulator", "entra"}
+	cfg.SAML.IdPProfiles = map[string]config.UpstreamIdPProfile{
+		"simulator": {
+			EntityID: "https://mock-idp.samlguard.local",
+			SSOURL:   "https://localhost:8443/mock-idp-login",
+		},
+		"entra": {
+			EntityID: "https://sts.windows.net/tenant-abc/",
+			SSOURL:   "https://login.microsoftonline.com/tenant-abc/saml2",
+		},
+	}
+	cfg.MFA.EnabledProviders = []string{"totp", "email"}
+	cfg.MFA.DefaultProvider = "select"
+
+	r := gin.New()
+	r.GET("/saml/sso", h.HandleSSO)
+	r.GET("/saml/acs", h.HandleACSGet)
+
+	// 1. /saml/sso shows "Select a sign-in method" list with both enabled upstream IdPs
+	wChooser := httptest.NewRecorder()
+	reqChooser := httptest.NewRequest(http.MethodGet, "/saml/sso", nil)
+	r.ServeHTTP(wChooser, reqChooser)
+	if wChooser.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for multi-IdP chooser, got %d", wChooser.Code)
+	}
+	chooserBody := wChooser.Body.String()
+	for _, want := range []string{"Select a sign-in method", "Corporate Account (Local Sign-In)", "Microsoft Entra ID", "idp=simulator", "idp=entra"} {
+		if !strings.Contains(chooserBody, want) {
+			t.Errorf("expected chooser HTML to contain %q", want)
+		}
+	}
+
+	// Extract session_id from chooser link and click Simulator -> shows Corporate Sign In with back link
+	var sessionID string
+	for _, cookie := range wChooser.Result().Cookies() {
+		if cookie.Name == "samlguard_auth_state" {
+			sessionID = cookie.Value
+		}
+	}
+	if sessionID == "" {
+		t.Fatalf("expected samlguard_auth_state cookie from /saml/sso chooser")
+	}
+
+	wSim := httptest.NewRecorder()
+	reqSim := httptest.NewRequest(http.MethodGet, "/saml/sso?session_id="+sessionID+"&idp=simulator", nil)
+	r.ServeHTTP(wSim, reqSim)
+	if wSim.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for simulator login form, got %d", wSim.Code)
+	}
+	simBody := wSim.Body.String()
+	if !strings.Contains(simBody, "Corporate Sign In") || !strings.Contains(simBody, "&view=providers") {
+		t.Errorf("expected Corporate Sign In form with back-to-providers link when multiple IdPs are enabled")
+	}
+
+	// 2. With MFA default_provider="select", /saml/acs renders "Select a method to verify your identity" list
+	state, err := h.correlationStore.Get(sessionID)
+	if err != nil {
+		t.Fatalf("get session state: %v", err)
+	}
+	state.UserIdentityKey = "https://mock-idp.samlguard.local|apc"
+	state.UserEmail = "apc@example.com"
+	_ = h.correlationStore.Update(sessionID, state)
+
+	wSelect := httptest.NewRecorder()
+	reqSelect := httptest.NewRequest(http.MethodGet, "/saml/acs?session_id="+sessionID, nil)
+	r.ServeHTTP(wSelect, reqSelect)
+	if wSelect.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for MFA method selection view, got %d", wSelect.Code)
+	}
+	selectBody := wSelect.Body.String()
+	for _, want := range []string{"Select a method to verify your identity", "Authenticator App", "Email", "?method=totp&amp;session_id=" + sessionID, "?method=email&amp;session_id=" + sessionID} {
+		if !strings.Contains(selectBody, want) {
+			t.Errorf("expected MFA select HTML to contain %q", want)
+		}
+	}
+	if strings.Contains(selectBody, `id="mfa-form"`) {
+		t.Errorf("did not expect direct code entry form while on method selection screen")
+	}
+
+	// 3. Selecting ?method=totp renders verification form, back chevron (?view=methods), and "Or verify another way"
+	wTotp := httptest.NewRecorder()
+	reqTotp := httptest.NewRequest(http.MethodGet, "/saml/acs?session_id="+sessionID+"&method=totp", nil)
+	r.ServeHTTP(wTotp, reqTotp)
+	if wTotp.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for ?method=totp, got %d", wTotp.Code)
+	}
+	totpBody := wTotp.Body.String()
+	for _, want := range []string{"Multi-Factor Verification", "?view=methods&session_id=" + sessionID, "Or verify another way", `id="mfa-form"`} {
+		if !strings.Contains(totpBody, want) {
+			t.Errorf("expected totp challenge HTML to contain %q", want)
+		}
 	}
 }

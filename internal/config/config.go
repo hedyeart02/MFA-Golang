@@ -64,28 +64,120 @@ type TLSConfig struct {
 	KeyFile  string `mapstructure:"key_file"`
 }
 
+type UpstreamIdPProfile struct {
+	EntityID    string `json:"entity_id" mapstructure:"entity_id" yaml:"entity_id"`
+	SSOURL      string `json:"sso_url" mapstructure:"sso_url" yaml:"sso_url"`
+	MetadataURL string `json:"metadata_url" mapstructure:"metadata_url" yaml:"metadata_url"`
+	CertFile    string `json:"cert_file" mapstructure:"cert_file" yaml:"cert_file"`
+}
+
 type SAMLConfig struct {
-	EntityID              string            `mapstructure:"entity_id"`
-	Issuer                string            `mapstructure:"issuer"`
-	SSOURL                string            `mapstructure:"sso_url"`
-	SLOURL                string            `mapstructure:"slo_url"`
-	ACSURL                string            `mapstructure:"acs_url"`
-	MetadataURL           string            `mapstructure:"metadata_url"`
-	CertFile              string            `mapstructure:"cert_file"`
-	KeyFile               string            `mapstructure:"key_file"`
-	SignRequests          bool              `mapstructure:"sign_requests"`
-	SignAssertions        bool              `mapstructure:"sign_assertions"`
-	SignResponses         bool              `mapstructure:"sign_responses"`
-	IdPMetadataURL        string            `mapstructure:"idp_metadata_url"`
-	IdPEntityID           string            `mapstructure:"idp_entity_id"`
-	IdPSSOURL             string            `mapstructure:"idp_sso_url"`
-	IdPCertFile           string            `mapstructure:"idp_cert_file"`
-	AllowedAudiences      []string          `mapstructure:"allowed_audiences"`
-	DownstreamACSURLs     []string          `mapstructure:"downstream_acs_urls"`
-	GroupMapping          map[string]string `mapstructure:"group_mapping"`
-	DefaultGroups         []string          `mapstructure:"default_groups"`
-	AuthnContextClassRef  string            `mapstructure:"authn_context_class_ref"`
-	SPEntityID            string            `mapstructure:"sp_entity_id"`
+	EntityID              string                        `mapstructure:"entity_id"`
+	Issuer                string                        `mapstructure:"issuer"`
+	SSOURL                string                        `mapstructure:"sso_url"`
+	SLOURL                string                        `mapstructure:"slo_url"`
+	ACSURL                string                        `mapstructure:"acs_url"`
+	MetadataURL           string                        `mapstructure:"metadata_url"`
+	CertFile              string                        `mapstructure:"cert_file"`
+	KeyFile               string                        `mapstructure:"key_file"`
+	SignRequests          bool                          `mapstructure:"sign_requests"`
+	SignAssertions        bool                          `mapstructure:"sign_assertions"`
+	SignResponses         bool                          `mapstructure:"sign_responses"`
+	ActiveIdP             string                        `mapstructure:"active_idp"`
+	EnabledIdPs           []string                      `mapstructure:"enabled_idps"`
+	IdPProfiles           map[string]UpstreamIdPProfile `mapstructure:"idp_profiles"`
+	IdPMetadataURL        string                        `mapstructure:"idp_metadata_url"`
+	IdPEntityID           string                        `mapstructure:"idp_entity_id"`
+	IdPSSOURL             string                        `mapstructure:"idp_sso_url"`
+	IdPCertFile           string                        `mapstructure:"idp_cert_file"`
+	AllowedAudiences      []string                      `mapstructure:"allowed_audiences"`
+	DownstreamACSURLs     []string                      `mapstructure:"downstream_acs_urls"`
+	GroupMapping          map[string]string             `mapstructure:"group_mapping"`
+	DefaultGroups         []string                      `mapstructure:"default_groups"`
+	AuthnContextClassRef  string                        `mapstructure:"authn_context_class_ref"`
+	SPEntityID            string                        `mapstructure:"sp_entity_id"`
+}
+
+// EffectiveActiveIdP returns the active upstream SAML IdP identifier ("simulator", "entra", "keycloak", or "custom").
+func (s SAMLConfig) EffectiveActiveIdP() string {
+	active := strings.ToLower(strings.TrimSpace(s.ActiveIdP))
+	switch active {
+	case "simulator", "entra", "keycloak", "custom":
+		return active
+	}
+	ssoLower := strings.ToLower(strings.TrimSpace(s.IdPSSOURL))
+	entityLower := strings.ToLower(strings.TrimSpace(s.IdPEntityID))
+	switch {
+	case strings.Contains(ssoLower, "mock-idp"):
+		return "simulator"
+	case strings.Contains(ssoLower, "microsoftonline.com") || strings.Contains(entityLower, "sts.windows.net") || strings.Contains(entityLower, "microsoftonline.com"):
+		return "entra"
+	case strings.Contains(ssoLower, "/protocol/saml"):
+		return "keycloak"
+	case entityLower != "" || ssoLower != "":
+		return "custom"
+	default:
+		return "simulator"
+	}
+}
+
+// NormalizeIdPKeys filters and deduplicates supported upstream SAML IdP identifiers.
+func NormalizeIdPKeys(idps []string) []string {
+	seen := make(map[string]struct{}, len(idps))
+	var out []string
+	for _, id := range idps {
+		norm := strings.ToLower(strings.TrimSpace(id))
+		switch norm {
+		case "simulator", "entra", "keycloak", "custom":
+			if _, ok := seen[norm]; !ok {
+				seen[norm] = struct{}{}
+				out = append(out, norm)
+			}
+		}
+	}
+	return out
+}
+
+// ActiveIdPs returns the enabled upstream Identity Providers selectable on the front-end login page.
+// Falls back to EffectiveActiveIdP() when EnabledIdPs is not explicitly configured.
+func (s SAMLConfig) ActiveIdPs() []string {
+	norm := NormalizeIdPKeys(s.EnabledIdPs)
+	if len(norm) == 0 {
+		return []string{s.EffectiveActiveIdP()}
+	}
+	return norm
+}
+
+// IsIdPEnabled reports whether the given upstream IdP key is currently enabled.
+func (s SAMLConfig) IsIdPEnabled(id string) bool {
+	norm := strings.ToLower(strings.TrimSpace(id))
+	for _, p := range s.ActiveIdPs() {
+		if p == norm {
+			return true
+		}
+	}
+	return false
+}
+
+// ProfileForIdP returns the configured UpstreamIdPProfile for the given IdP key.
+func (s SAMLConfig) ProfileForIdP(id string) UpstreamIdPProfile {
+	norm := strings.ToLower(strings.TrimSpace(id))
+	if s.IdPProfiles != nil {
+		if prof, ok := s.IdPProfiles[norm]; ok {
+			if prof.EntityID != "" || prof.SSOURL != "" || prof.MetadataURL != "" || prof.CertFile != "" {
+				return prof
+			}
+		}
+	}
+	if norm == s.EffectiveActiveIdP() {
+		return UpstreamIdPProfile{
+			EntityID:    s.IdPEntityID,
+			SSOURL:      s.IdPSSOURL,
+			MetadataURL: s.IdPMetadataURL,
+			CertFile:    s.IdPCertFile,
+		}
+	}
+	return UpstreamIdPProfile{}
 }
 
 type DatabaseConfig struct {
@@ -109,6 +201,7 @@ type JWTConfig struct {
 
 type MFAConfig struct {
 	DefaultProvider  string        `mapstructure:"default_provider"`
+	EnabledProviders []string      `mapstructure:"enabled_providers"`
 	Timeout          time.Duration `mapstructure:"timeout"`
 	Issuer           string        `mapstructure:"issuer"`
 	MaxRetries       int           `mapstructure:"max_retries"`
@@ -123,6 +216,72 @@ type MFAConfig struct {
 	AllowDummyOTP    bool          `mapstructure:"allow_dummy_otp"`
 	ResendCooldown   time.Duration `mapstructure:"resend_cooldown"`
 	ServerPepper     string        `mapstructure:"server_pepper"`
+}
+
+// NormalizeMFAProviders filters and deduplicates supported OTP provider names ("totp", "email").
+func NormalizeMFAProviders(providers []string) []string {
+	seen := make(map[string]struct{}, len(providers))
+	var out []string
+	for _, p := range providers {
+		norm := strings.ToLower(strings.TrimSpace(p))
+		if norm != "totp" && norm != "email" {
+			continue
+		}
+		if _, ok := seen[norm]; !ok {
+			seen[norm] = struct{}{}
+			out = append(out, norm)
+		}
+	}
+	return out
+}
+
+// ActiveProviders returns the list of enabled OTP verification methods.
+// Defaults to both "totp" and "email" when EnabledProviders is unset so customers can choose either.
+func (m MFAConfig) ActiveProviders() []string {
+	norm := NormalizeMFAProviders(m.EnabledProviders)
+	if len(norm) == 0 {
+		return []string{"totp", "email"}
+	}
+	return norm
+}
+
+// IsProviderEnabled reports whether the given OTP method ("totp" or "email") is currently active.
+func (m MFAConfig) IsProviderEnabled(method string) bool {
+	norm := strings.ToLower(strings.TrimSpace(method))
+	for _, p := range m.ActiveProviders() {
+		if p == norm {
+			return true
+		}
+	}
+	return false
+}
+
+// IsMethodSelectDefault reports whether users should land on the verification method selection list first.
+func (m MFAConfig) IsMethodSelectDefault() bool {
+	return strings.EqualFold(strings.TrimSpace(m.DefaultProvider), "select") && len(m.ActiveProviders()) > 1
+}
+
+// EffectiveDefaultProvider returns the active concrete default OTP method ("totp" or "email"),
+// falling back to the first enabled method.
+func (m MFAConfig) EffectiveDefaultProvider() string {
+	def := strings.ToLower(strings.TrimSpace(m.DefaultProvider))
+	if def != "" && def != "select" && m.IsProviderEnabled(def) {
+		return def
+	}
+	active := m.ActiveProviders()
+	if len(active) > 0 {
+		return active[0]
+	}
+	return "totp"
+}
+
+// ResolveChallengeMethod resolves a requested OTP method against enabled providers, falling back to default.
+func (m MFAConfig) ResolveChallengeMethod(requested string) string {
+	norm := strings.ToLower(strings.TrimSpace(requested))
+	if norm != "" && m.IsProviderEnabled(norm) {
+		return norm
+	}
+	return m.EffectiveDefaultProvider()
 }
 
 type SMTPConfig struct {
@@ -224,6 +383,7 @@ func SetDefaults(v *viper.Viper) {
 	v.SetDefault("jwt.issuer", "samlguard")
 
 	v.SetDefault("mfa.default_provider", "totp")
+	v.SetDefault("mfa.enabled_providers", []string{"totp", "email"})
 	v.SetDefault("mfa.timeout", 5*time.Minute)
 	v.SetDefault("mfa.issuer", "SAMLGuard")
 	v.SetDefault("mfa.max_retries", 5)
@@ -473,6 +633,28 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("ita.tls_ca_file does not exist: %s", caFile)
 	}
 
+	for _, idp := range c.SAML.EnabledIdPs {
+		norm := strings.ToLower(strings.TrimSpace(idp))
+		if norm != "" && norm != "simulator" && norm != "entra" && norm != "keycloak" && norm != "custom" {
+			return fmt.Errorf("invalid saml.enabled_idps entry %q: must be 'simulator', 'entra', 'keycloak', or 'custom'", idp)
+		}
+	}
+
+	for _, p := range c.MFA.EnabledProviders {
+		norm := strings.ToLower(strings.TrimSpace(p))
+		if norm != "" && norm != "totp" && norm != "email" {
+			return fmt.Errorf("invalid mfa.enabled_providers entry %q: must be 'totp' or 'email'", p)
+		}
+	}
+	if def := strings.ToLower(strings.TrimSpace(c.MFA.DefaultProvider)); def != "" {
+		if def != "totp" && def != "email" && def != "select" {
+			return fmt.Errorf("invalid mfa.default_provider %q: must be 'totp', 'email', or 'select'", c.MFA.DefaultProvider)
+		}
+		if def != "select" && len(c.MFA.EnabledProviders) > 0 && !c.MFA.IsProviderEnabled(def) {
+			return fmt.Errorf("mfa.default_provider %q must be included in mfa.enabled_providers", c.MFA.DefaultProvider)
+		}
+	}
+
 	if c.IsProduction() {
 		if c.ITA.TLSInsecureSkipVerify {
 			return errors.New("security violation: ita.tls_insecure_skip_verify cannot be enabled in production mode; configure ita.tls_ca_file instead")
@@ -494,12 +676,17 @@ func (c *Config) Validate() error {
 			trimmedPepper == "samlguard-default-server-pepper-secret-key" {
 			return errors.New("security violation: mfa.server_pepper must be configured with a unique high-entropy secret in production mode")
 		}
-		host := strings.TrimSpace(strings.ToLower(c.SMTP.Host))
-		if host == "" || host == "localhost" || host == "127.0.0.1" {
-			return errors.New("security violation: smtp.host must be configured with a real external SMTP server in production mode")
+		if c.MFA.IsProviderEnabled("email") {
+			host := strings.TrimSpace(strings.ToLower(c.SMTP.Host))
+			if host == "" || host == "localhost" || host == "127.0.0.1" {
+				return errors.New("security violation: smtp.host must be configured with a real external SMTP server in production mode")
+			}
 		}
 
 		// SAML Production Mandatory Settings & Mock Fallback Prohibitions
+		if strings.EqualFold(strings.TrimSpace(c.SAML.ActiveIdP), "simulator") || (len(c.SAML.EnabledIdPs) > 0 && c.SAML.IsIdPEnabled("simulator")) {
+			return errors.New("security violation: mock IdP simulator cannot be activated in production mode")
+		}
 		if strings.TrimSpace(c.SAML.IdPEntityID) == "" {
 			return errors.New("security violation: saml.idp_entity_id is mandatory in production mode")
 		}

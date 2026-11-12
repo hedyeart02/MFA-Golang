@@ -97,3 +97,124 @@ smtp:
 	}
 }
 
+func TestSaveConfig_IdPProfilesAndEnabledProviders(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgFile := filepath.Join(tmpDir, "config.yaml")
+
+	initialYAML := `server:
+  host: "0.0.0.0"
+  port: 18080
+saml:
+  entity_id: "https://initial:18080"
+  acs_url: "https://initial/callback"
+mfa:
+  enabled_providers:
+    - "totp"
+    - "email"
+  default_provider: "totp"
+`
+	if err := os.WriteFile(cfgFile, []byte(initialYAML), 0644); err != nil {
+		t.Fatalf("failed to write initial config: %v", err)
+	}
+
+	cfg, err := Load(cfgFile)
+	if err != nil {
+		t.Fatalf("failed to load initial config: %v", err)
+	}
+
+	payload := &AdminSettingsPayload{
+		ActiveIdP: "keycloak",
+		IdPProfiles: map[string]UpstreamIdPProfile{
+			"entra": {
+				EntityID: "https://sts.windows.net/t1/",
+				SSOURL:   "https://login.microsoftonline.com/t1/saml2",
+			},
+			"keycloak": {
+				EntityID: "https://sso.corp.local/realms/prod",
+				SSOURL:   "https://sso.corp.local/realms/prod/protocol/saml",
+			},
+		},
+		IdPEntityID:         "https://sso.corp.local/realms/prod",
+		IdPSSOURL:           "https://sso.corp.local/realms/prod/protocol/saml",
+		EntityID:            "https://samlguard.example.com:8443",
+		ACSURL:              "https://ita.example.com/api/current/authentication/saml2-callback",
+		MFAEnabledProviders: []string{"email"},
+		MFADefaultProvider:  "totp", // Should auto-align to "email"
+	}
+
+	if err := SaveConfig(cfgFile, cfg, payload); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	reloaded, err := Load(cfgFile)
+	if err != nil {
+		t.Fatalf("reload failed: %v", err)
+	}
+	if reloaded.SAML.ActiveIdP != "keycloak" {
+		t.Errorf("expected ActiveIdP 'keycloak', got %q", reloaded.SAML.ActiveIdP)
+	}
+	if len(reloaded.SAML.IdPProfiles) != 2 || reloaded.SAML.IdPProfiles["entra"].EntityID != "https://sts.windows.net/t1/" {
+		t.Errorf("expected persisted IdPProfiles, got %+v", reloaded.SAML.IdPProfiles)
+	}
+	if len(reloaded.MFA.EnabledProviders) != 1 || reloaded.MFA.EnabledProviders[0] != "email" {
+		t.Errorf("expected EnabledProviders ['email'], got %v", reloaded.MFA.EnabledProviders)
+	}
+	if reloaded.MFA.DefaultProvider != "email" {
+		t.Errorf("expected DefaultProvider auto-aligned to 'email', got %q", reloaded.MFA.DefaultProvider)
+	}
+}
+
+func TestSaveConfig_MultiIdPsAndSelectDefault(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgFile := filepath.Join(tmpDir, "config.yaml")
+
+	initialYAML := `server:
+  host: "0.0.0.0"
+  port: 18080
+saml:
+  entity_id: "https://initial:18080"
+  acs_url: "https://initial/callback"
+`
+	if err := os.WriteFile(cfgFile, []byte(initialYAML), 0644); err != nil {
+		t.Fatalf("write initial config: %v", err)
+	}
+	cfg, err := Load(cfgFile)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	payload := &AdminSettingsPayload{
+		ActiveIdP:   "simulator",
+		EnabledIdPs: []string{"simulator", "entra"},
+		IdPProfiles: map[string]UpstreamIdPProfile{
+			"simulator": {
+				EntityID: "https://initial:18080",
+				SSOURL:   "https://initial:18080/mock-idp-login",
+			},
+			"entra": {
+				EntityID: "https://sts.windows.net/t2/",
+				SSOURL:   "https://login.microsoftonline.com/t2/saml2",
+			},
+		},
+		EntityID:            "https://initial:18080",
+		ACSURL:              "https://initial/callback",
+		MFAEnabledProviders: []string{"totp", "email"},
+		MFADefaultProvider:  "select",
+	}
+
+	if err := SaveConfig(cfgFile, cfg, payload); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	reloaded, err := Load(cfgFile)
+	if err != nil {
+		t.Fatalf("reload failed: %v", err)
+	}
+	if len(reloaded.SAML.EnabledIdPs) != 2 || reloaded.SAML.EnabledIdPs[0] != "simulator" || reloaded.SAML.EnabledIdPs[1] != "entra" {
+		t.Errorf("expected EnabledIdPs [simulator entra], got %v", reloaded.SAML.EnabledIdPs)
+	}
+	if reloaded.MFA.DefaultProvider != "select" {
+		t.Errorf("expected MFADefaultProvider 'select', got %q", reloaded.MFA.DefaultProvider)
+	}
+}
+

@@ -43,6 +43,11 @@ saml:
   sign_assertions: true
   sign_responses: true
 
+  # Active Upstream Identity Provider profile ("entra", "keycloak", "custom"; never "simulator" in production)
+  # Specify multiple entries in enabled_idps to show a front-end sign-in method chooser.
+  active_idp: "entra"
+  enabled_idps:
+    - "entra"
   # Upstream Identity Provider (e.g., Microsoft Entra ID, Okta, PingIdentity)
   idp_entity_id: "https://login.microsoftonline.com/your-tenant-id/v2.0"
   idp_sso_url: "https://login.microsoftonline.com/your-tenant-id/saml2"
@@ -66,6 +71,12 @@ saml:
   default_groups: []
 
 mfa:
+  # Activate one or multiple OTP providers simultaneously ("totp", "email")
+  enabled_providers:
+    - "totp"
+    - "email"
+  # "totp", "email", or "select" (shows "Select a method to verify your identity" list first when multiple OTPs are active)
+  default_provider: "totp"
   issuer: "SAMLGuard"
   max_retries: 5
   otp_expiry: 5m

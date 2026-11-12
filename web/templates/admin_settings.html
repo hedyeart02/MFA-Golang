@@ -1144,6 +1144,96 @@
             .sidebar { position: fixed; top: 0; left: 0; height: 100vh; transform: translateX(-100%); }
             .sidebar.mobile-open { transform: translateX(0); }
         }
+
+        /* Selectable Upstream IdP & Multi-OTP Provider Cards */
+        .idp-selector-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            gap: 0.85rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .idp-option-card {
+            text-align: left;
+            background: var(--bg-card-subtle);
+            border: 1px solid var(--border-card);
+            border-radius: 10px;
+            padding: 0.95rem 1rem;
+            cursor: pointer;
+            transition: all 0.18s ease;
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+            color: var(--text-primary);
+            font-family: inherit;
+        }
+
+        .idp-option-card:hover {
+            border-color: var(--brand-green);
+            transform: translateY(-1px);
+        }
+
+        .idp-option-card.active {
+            border-color: var(--brand-green);
+            background: rgba(16, 185, 129, 0.08);
+        }
+
+        .idp-option-card.editing {
+            box-shadow: 0 0 0 2px var(--brand-green);
+        }
+
+        .idp-option-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
+            font-weight: 600;
+            font-size: 0.92rem;
+        }
+
+        .idp-option-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
+            margin-top: 0.35rem;
+            padding-top: 0.45rem;
+            border-top: 1px solid var(--border-main);
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .idp-option-desc {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            line-height: 1.4;
+        }
+
+        .otp-provider-card {
+            border: 1px solid var(--border-card);
+            border-radius: 12px;
+            padding: 1.25rem;
+            background: var(--bg-card-subtle);
+            transition: border-color 0.2s, opacity 0.2s;
+        }
+
+        .otp-provider-card.active {
+            border-color: var(--brand-green);
+        }
+
+        .otp-provider-card.inactive {
+            opacity: 0.78;
+        }
+
+        .otp-provider-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 1rem;
+            padding-bottom: 1rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border-main);
+        }
     </style>
 </head>
 <body>
@@ -1187,7 +1277,7 @@
                 </button>
 
                 <!-- 2. Identity Providers -->
-                <button type="button" class="nav-item" onclick="switchNavTab(this, 'tab-upstream', 'Identity Providers', 'Configure upstream SAML 2.0 IdP federation (Microsoft Entra ID, Keycloak, Okta).')">
+                <button type="button" class="nav-item" id="nav-tab-upstream" onclick="switchNavTab(this, 'tab-upstream', 'Identity &amp; OTP Providers', 'Select and activate upstream SAML 2.0 IdPs and one or more OTP verification methods (Authenticator App &amp; Email OTP).')">
                     <svg viewBox="0 0 24 24" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><line x1="15" y1="8" x2="17" y2="8"/><line x1="15" y1="12" x2="17" y2="12"/><line x1="7" y1="16" x2="17" y2="16"/></svg>
                     <span>Identity Providers</span>
                 </button>
@@ -1211,7 +1301,7 @@
                 </button>
 
                 <!-- 6. System Settings -->
-                <button type="button" class="nav-item" onclick="switchNavTab(this, 'tab-system-settings', 'System Settings', 'Configure multi-factor authentication policies, SMTP delivery, certificates, and metadata.')">
+                <button type="button" class="nav-item" id="nav-tab-system-settings" onclick="switchNavTab(this, 'tab-system-settings', 'System Settings', 'Manage Gateway SAML metadata XML endpoints, signing certificates, and key health.')">
                     <svg viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                     <span>System Settings</span>
                 </button>
@@ -1460,30 +1550,105 @@
                     </div>
                 </div>
 
-                <!-- TAB 2: IDENTITY PROVIDERS (Upstream IdP) -->
+                <!-- TAB 2: IDENTITY PROVIDERS (Upstream SAML IdP + Multi-OTP Providers including Email OTP) -->
                 <div id="tab-upstream" class="tab-content-pane">
-                    <div class="card">
+                    <div class="card" style="margin-bottom: 1.5rem;">
                         <div class="card-header">
                             <h2>🪪 Upstream Identity Provider (SAML 2.0 IdP)</h2>
                             <div class="preset-bar">
-                                <span style="font-size: 0.8rem; color: var(--text-muted); align-self: center;">Quick Presets:</span>
-                                <button type="button" class="preset-btn" onclick="applyPreset('simulator')">💻 Local Simulator</button>
-                                <button type="button" class="preset-btn" onclick="applyPreset('entra')">☁️ Microsoft Entra ID</button>
-                                <button type="button" class="preset-btn" onclick="applyPreset('keycloak')">🗝️ Keycloak</button>
+                                <span style="font-size: 0.8rem; color: var(--text-muted); align-self: center;">Quick Autofill:</span>
+                                <button type="button" class="preset-btn" onclick="applyPreset('simulator')">💻 Reset Simulator URLs</button>
+                                <button type="button" class="preset-btn" onclick="applyPreset('entra')">☁️ Fill Entra Tenant ID</button>
+                                <button type="button" class="preset-btn" onclick="applyPreset('keycloak')">🗝️ Fill Keycloak Realm</button>
                             </div>
+                        </div>
+
+                        <p class="help-text" style="margin-bottom: 1rem;">
+                            Activate one or <strong>multiple Upstream SAML 2.0 Identity Providers</strong> simultaneously. When multiple providers are active, users see a clean <strong>Select a sign-in method</strong> list on the front-end login page. Click any card below to edit its endpoint profile.
+                        </p>
+
+                        <input type="hidden" name="idp_providers_submitted" value="1">
+                        <input type="hidden" id="active_idp" name="active_idp" value="{{.ActiveIdP}}">
+                        <input type="hidden" id="idp_profiles_json" name="idp_profiles_json" value="">
+
+                        <div class="idp-selector-grid" role="group" aria-label="Upstream SAML Identity Providers">
+                            <div class="idp-option-card {{if .SimulatorEnabled}}active{{end}} {{if eq .ActiveIdP "simulator"}}editing{{end}}" data-idp-choice="simulator" onclick="selectUpstreamIdP('simulator')">
+                                <div class="idp-option-header">
+                                    <span>💻 Local Simulator</span>
+                                    <label class="toggle-label" style="margin: 0;" onclick="event.stopPropagation()" title="Activate Local Simulator">
+                                        <input type="checkbox" id="idp_enable_simulator" name="enabled_idps[]" value="simulator" {{if .SimulatorEnabled}}checked{{end}} onchange="onIdPToggleChange(this)">
+                                        <span class="toggle-switch"></span>
+                                    </label>
+                                </div>
+                                <div class="idp-option-desc">Built-in mock corporate IdP for local development and QA verification.</div>
+                                <div class="idp-option-footer">
+                                    <span data-idp-editing-label="simulator">{{if eq .ActiveIdP "simulator"}}Editing profile{{else}}Click to edit{{end}}</span>
+                                    <span class="badge {{if .SimulatorEnabled}}badge-success{{else}}badge-info{{end}}" data-idp-badge="simulator">{{if .SimulatorEnabled}}Active{{else}}Standby{{end}}</span>
+                                </div>
+                            </div>
+
+                            <div class="idp-option-card {{if .EntraEnabled}}active{{end}} {{if eq .ActiveIdP "entra"}}editing{{end}}" data-idp-choice="entra" onclick="selectUpstreamIdP('entra')">
+                                <div class="idp-option-header">
+                                    <span>☁️ Microsoft Entra ID</span>
+                                    <label class="toggle-label" style="margin: 0;" onclick="event.stopPropagation()" title="Activate Microsoft Entra ID">
+                                        <input type="checkbox" id="idp_enable_entra" name="enabled_idps[]" value="entra" {{if .EntraEnabled}}checked{{end}} onchange="onIdPToggleChange(this)">
+                                        <span class="toggle-switch"></span>
+                                    </label>
+                                </div>
+                                <div class="idp-option-desc">Enterprise SSO federation with Azure AD / Microsoft Entra SAML 2.0.</div>
+                                <div class="idp-option-footer">
+                                    <span data-idp-editing-label="entra">{{if eq .ActiveIdP "entra"}}Editing profile{{else}}Click to edit{{end}}</span>
+                                    <span class="badge {{if .EntraEnabled}}badge-success{{else}}badge-info{{end}}" data-idp-badge="entra">{{if .EntraEnabled}}Active{{else}}Standby{{end}}</span>
+                                </div>
+                            </div>
+
+                            <div class="idp-option-card {{if .KeycloakEnabled}}active{{end}} {{if eq .ActiveIdP "keycloak"}}editing{{end}}" data-idp-choice="keycloak" onclick="selectUpstreamIdP('keycloak')">
+                                <div class="idp-option-header">
+                                    <span>🗝️ Keycloak</span>
+                                    <label class="toggle-label" style="margin: 0;" onclick="event.stopPropagation()" title="Activate Keycloak">
+                                        <input type="checkbox" id="idp_enable_keycloak" name="enabled_idps[]" value="keycloak" {{if .KeycloakEnabled}}checked{{end}} onchange="onIdPToggleChange(this)">
+                                        <span class="toggle-switch"></span>
+                                    </label>
+                                </div>
+                                <div class="idp-option-desc">Self-hosted or managed Keycloak realm SAML identity broker.</div>
+                                <div class="idp-option-footer">
+                                    <span data-idp-editing-label="keycloak">{{if eq .ActiveIdP "keycloak"}}Editing profile{{else}}Click to edit{{end}}</span>
+                                    <span class="badge {{if .KeycloakEnabled}}badge-success{{else}}badge-info{{end}}" data-idp-badge="keycloak">{{if .KeycloakEnabled}}Active{{else}}Standby{{end}}</span>
+                                </div>
+                            </div>
+
+                            <div class="idp-option-card {{if .CustomIdPEnabled}}active{{end}} {{if eq .ActiveIdP "custom"}}editing{{end}}" data-idp-choice="custom" onclick="selectUpstreamIdP('custom')">
+                                <div class="idp-option-header">
+                                    <span>🧩 Custom SAML 2.0 IdP</span>
+                                    <label class="toggle-label" style="margin: 0;" onclick="event.stopPropagation()" title="Activate Custom SAML 2.0 IdP">
+                                        <input type="checkbox" id="idp_enable_custom" name="enabled_idps[]" value="custom" {{if .CustomIdPEnabled}}checked{{end}} onchange="onIdPToggleChange(this)">
+                                        <span class="toggle-switch"></span>
+                                    </label>
+                                </div>
+                                <div class="idp-option-desc">Okta, Ping Identity, ADFS, or any standards-compliant SAML 2.0 IdP.</div>
+                                <div class="idp-option-footer">
+                                    <span data-idp-editing-label="custom">{{if eq .ActiveIdP "custom"}}Editing profile{{else}}Click to edit{{end}}</span>
+                                    <span class="badge {{if .CustomIdPEnabled}}badge-success{{else}}badge-info{{end}}" data-idp-badge="custom">{{if .CustomIdPEnabled}}Active{{else}}Standby{{end}}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; padding: 0.55rem 0.85rem; background: var(--bg-card-subtle); border: 1px solid var(--border-main); border-radius: 8px; font-size: 0.83rem;">
+                            <span>Editing Profile: <strong id="editingIdPName">{{.ActiveIdP}}</strong></span>
+                            <span class="badge badge-info" id="idpSummaryBadge">Upstream SAML</span>
                         </div>
 
                         <div class="grid-2">
                             <div class="form-group">
                                 <label for="idp_entity_id">Upstream IdP Entity ID (Issuer)</label>
-                                <input type="text" id="idp_entity_id" name="idp_entity_id" value="{{.Settings.IdPEntityID}}" placeholder="e.g. https://sts.windows.net/{tenant-id}/" required>
-                                <p class="help-text">Unique identifier of your primary Identity Provider (Azure AD Entity ID or Keycloak realm).</p>
+                                <input type="text" id="idp_entity_id" name="idp_entity_id" value="{{.Settings.IdPEntityID}}" placeholder="e.g. https://sts.windows.net/{tenant-id}/">
+                                <p class="help-text">Unique identifier of the selected Identity Provider profile.</p>
                             </div>
 
                             <div class="form-group">
                                 <label for="idp_sso_url">Upstream IdP Single Sign-On (SSO) URL</label>
-                                <input type="text" id="idp_sso_url" name="idp_sso_url" value="{{.Settings.IdPSSOURL}}" placeholder="e.g. https://login.microsoftonline.com/{tenant-id}/saml2" required>
-                                <p class="help-text">Endpoint where SAMLGuard redirects users for upstream primary authentication.</p>
+                                <input type="text" id="idp_sso_url" name="idp_sso_url" value="{{.Settings.IdPSSOURL}}" placeholder="e.g. https://login.microsoftonline.com/{tenant-id}/saml2">
+                                <p class="help-text">Endpoint where SAMLGuard redirects users when this provider is chosen.</p>
                             </div>
                         </div>
 
@@ -1521,6 +1686,171 @@
                                 <span style="width: 200px;">Sign-on URL:</span>
                                 <span class="val" id="entraSignonURL">{{.Settings.EntityID}}/login</span>
                                 <button type="button" class="btn btn-sm btn-secondary" onclick="copyToClipboard('entraSignonURL')">Copy</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- OTP & Multi-Factor Verification Providers Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>🔐 OTP &amp; MFA Verification Providers</h2>
+                            <span class="badge badge-info" id="otpSummaryBadge">Multi-OTP Supported</span>
+                        </div>
+
+                        <p class="help-text" style="margin-bottom: 1.15rem;">
+                            Activate one or <strong>multiple OTP verification methods simultaneously</strong> (for example both Authenticator App and Email OTP). All settings for each active OTP provider are managed directly below, and customers can switch between any active methods at sign-in.
+                        </p>
+
+                        <input type="hidden" name="mfa_providers_submitted" value="1">
+
+                        <div class="form-group" style="padding: 0.9rem 1rem; border-radius: 10px; background: var(--bg-card-subtle); border: 1px solid var(--border-card); margin-bottom: 1.25rem;">
+                            <label style="margin-bottom: 0.45rem;">Customer Verification Flow on Sign-In</label>
+                            <div style="display: flex; flex-wrap: wrap; gap: 1.25rem; align-items: center;">
+                                <label style="font-weight: normal; display: flex; align-items: center; gap: 0.45rem; cursor: pointer; margin-bottom: 0;">
+                                    <input type="radio" id="default_provider_select" name="mfa_default_provider" value="select" {{if eq .Settings.MFADefaultProvider "select"}}checked{{end}} onchange="syncOTPProviderState()">
+                                    <span>📋 Show Method Selection List First</span>
+                                </label>
+                                <label style="font-weight: normal; display: flex; align-items: center; gap: 0.45rem; cursor: pointer; margin-bottom: 0;">
+                                    <input type="radio" id="default_provider_totp" name="mfa_default_provider" value="totp" {{if eq .Settings.MFADefaultProvider "totp"}}checked{{end}} onchange="syncOTPProviderState()">
+                                    <span>📱 Authenticator App (TOTP)</span>
+                                </label>
+                                <label style="font-weight: normal; display: flex; align-items: center; gap: 0.45rem; cursor: pointer; margin-bottom: 0;">
+                                    <input type="radio" id="default_provider_email" name="mfa_default_provider" value="email" {{if eq .Settings.MFADefaultProvider "email"}}checked{{end}} onchange="syncOTPProviderState()">
+                                    <span>📧 Email OTP</span>
+                                </label>
+                            </div>
+                            <p class="help-text">When multiple OTP methods are active, choose whether customers see the vertical "Select a method to verify your identity" list first or land directly on a default method (with a Back button to switch).</p>
+                        </div>
+
+                        <div class="grid-2">
+                            <!-- Authenticator App (TOTP) Provider Card -->
+                            <div class="otp-provider-card {{if .TotpEnabled}}active{{else}}inactive{{end}}" id="card-otp-totp">
+                                <div class="otp-provider-head">
+                                    <div>
+                                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                            <h3 style="margin: 0; font-size: 1rem;">📱 Authenticator App (TOTP)</h3>
+                                            <span class="badge {{if .TotpEnabled}}badge-success{{else}}badge-warning{{end}}" id="badge-otp-totp">{{if .TotpEnabled}}Active{{else}}Disabled{{end}}</span>
+                                        </div>
+                                        <p class="help-text" style="margin-top: 0.25rem;">RFC 6238 time-based 6-digit codes via Microsoft / Google Authenticator.</p>
+                                    </div>
+                                    <label class="toggle-label" style="margin: 0;" title="Activate Authenticator App (TOTP)">
+                                        <input type="checkbox" id="otp_enable_totp" name="mfa_enabled_providers[]" value="totp" {{if .TotpEnabled}}checked{{end}} onchange="onOTPToggleChange(this)">
+                                        <span class="toggle-switch"></span>
+                                    </label>
+                                </div>
+
+                                <div id="totp-settings-body">
+                                    <div class="form-group">
+                                        <label for="mfa_issuer">Authenticator App Issuer Display Name</label>
+                                        <input type="text" id="mfa_issuer" name="mfa_issuer" value="{{.Settings.MFAIssuer}}" placeholder="e.g. SAMLGuard or EcoStruxure ITA" required>
+                                        <p class="help-text">Title displayed above the OTP code inside the customer's authenticator app.</p>
+                                    </div>
+
+                                    <div class="form-group" style="margin-top: 1rem; padding: 0.9rem; background: var(--bg-main); border-radius: 8px; border: 1px solid var(--border-card);">
+                                        <label class="toggle-label" style="margin-bottom: 0;">
+                                            <input type="checkbox" id="allow_dummy_otp" name="allow_dummy_otp" value="true" {{if .Settings.AllowDummyOTP}}checked{{end}}>
+                                            <span class="toggle-switch"></span>
+                                            <div>
+                                                <span style="font-weight: 600; color: var(--text-primary);">Allow Dummy OTP (000000)</span>
+                                                <p class="help-text" style="margin-top: 0;">Bypasses real verification with 000000. <strong>FOR LOCAL TESTING ONLY.</strong></p>
+                                            </div>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Email OTP Provider Card -->
+                            <div class="otp-provider-card {{if .EmailEnabled}}active{{else}}inactive{{end}}" id="card-otp-email">
+                                <div class="otp-provider-head">
+                                    <div>
+                                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                            <h3 style="margin: 0; font-size: 1rem;">📧 Email OTP (SMTP)</h3>
+                                            <span class="badge {{if .EmailEnabled}}badge-success{{else}}badge-warning{{end}}" id="badge-otp-email">{{if .EmailEnabled}}Active{{else}}Disabled{{end}}</span>
+                                        </div>
+                                        <p class="help-text" style="margin-top: 0.25rem;">Delivers single-use verification codes to the customer's verified email address.</p>
+                                    </div>
+                                    <label class="toggle-label" style="margin: 0;" title="Activate Email OTP">
+                                        <input type="checkbox" id="otp_enable_email" name="mfa_enabled_providers[]" value="email" {{if .EmailEnabled}}checked{{end}} onchange="onOTPToggleChange(this)">
+                                        <span class="toggle-switch"></span>
+                                    </label>
+                                </div>
+
+                                <div id="email-otp-settings-body">
+                                    <div class="grid-2">
+                                        <div class="form-group">
+                                            <label for="otp_expiry">Email OTP Validity Duration</label>
+                                            <input type="text" id="otp_expiry" name="otp_expiry" value="{{.Settings.OTPExpiry}}" placeholder="5m" required>
+                                            <p class="help-text">Lifetime before code expires (e.g. 5m, 10m).</p>
+                                        </div>
+
+                                        <div class="form-group">
+                                            <label for="resend_cooldown">OTP Resend Cooldown</label>
+                                            <input type="text" id="resend_cooldown" name="resend_cooldown" value="{{.Settings.ResendCooldown}}" placeholder="60s" required>
+                                            <p class="help-text">Minimum wait between resend requests.</p>
+                                        </div>
+                                    </div>
+
+                                    <div class="grid-2">
+                                        <div class="form-group">
+                                            <label for="smtp_host">SMTP Server Host</label>
+                                            <input type="text" id="smtp_host" name="smtp_host" value="{{.Settings.SMTPHost}}" placeholder="smtp.office365.com or localhost" required>
+                                        </div>
+
+                                        <div class="form-group">
+                                            <label for="smtp_port">SMTP Port</label>
+                                            <input type="number" id="smtp_port" name="smtp_port" value="{{.Settings.SMTPPort}}" placeholder="587" required>
+                                        </div>
+                                    </div>
+
+                                    <div class="grid-2">
+                                        <div class="form-group">
+                                            <label for="smtp_username">SMTP Username / Email</label>
+                                            <input type="text" id="smtp_username" name="smtp_username" value="{{.Settings.SMTPUsername}}" placeholder="user@domain.com">
+                                        </div>
+
+                                        <div class="form-group">
+                                            <label for="smtp_password">SMTP Password</label>
+                                            <div class="input-group">
+                                                <input type="password" id="smtp_password" name="smtp_password" placeholder="•••••••• (Leave blank to keep current)">
+                                                <button type="button" class="btn btn-secondary" onclick="togglePasswordVisibility('smtp_password')">👁️</button>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="grid-2">
+                                        <div class="form-group">
+                                            <label for="smtp_from">From Email Address</label>
+                                            <input type="text" id="smtp_from" name="smtp_from" value="{{.Settings.SMTPFrom}}" placeholder="no-reply@company.com">
+                                        </div>
+
+                                        <div class="form-group">
+                                            <label for="smtp_from_name">From Sender Name</label>
+                                            <input type="text" id="smtp_from_name" name="smtp_from_name" value="{{.Settings.SMTPFromName}}" placeholder="SAMLGuard MFA">
+                                        </div>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="smtp_encryption">Encryption Mode</label>
+                                        <select id="smtp_encryption" name="smtp_encryption">
+                                            <option value="starttls" {{if eq .Settings.SMTPEncryption "starttls"}}selected{{end}}>STARTTLS (Port 587 - Recommended)</option>
+                                            <option value="tls" {{if eq .Settings.SMTPEncryption "tls"}}selected{{end}}>TLS / SSL (Port 465)</option>
+                                            <option value="none" {{if eq .Settings.SMTPEncryption "none"}}selected{{end}}>None / Plaintext (Port 25 or Local Relay)</option>
+                                        </select>
+                                    </div>
+
+                                    <!-- Live Send Test Email Box -->
+                                    <div class="guide-box" style="margin-top: 1rem;">
+                                        <h3>📨 Live SMTP Test</h3>
+                                        <div class="input-group">
+                                            <input type="text" id="testEmailRecipient" placeholder="Enter recipient email (e.g. your email)" style="flex: 1;">
+                                            <button type="button" class="btn btn-secondary" id="btnTestEmail" onclick="sendTestEmail()" style="border-color: var(--brand-green); color: var(--brand-green);">
+                                                <span id="testEmailSpinner" class="spinner" style="display: none;"></span>
+                                                <span>Send Test Email</span>
+                                            </button>
+                                        </div>
+                                        <div id="testEmailResult" style="margin-top: 0.75rem; display: none;"></div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1744,128 +2074,21 @@
                     </div>
                 </div>
 
-                <!-- TAB 6: SYSTEM SETTINGS (MFA, SMTP, Certs) -->
+                <!-- TAB 6: SYSTEM SETTINGS (Metadata, Certs & Provider Summary) -->
                 <div id="tab-system-settings" class="tab-content-pane">
-                    <div class="grid-2">
-                        <!-- MFA Policy Column -->
-                        <div class="card">
-                            <div class="card-header">
-                                <h2>🛡️ MFA Security Policies</h2>
-                            </div>
-
-                            <div class="form-group">
-                                <label>Default MFA Verification Method</label>
-                                <div style="display: flex; gap: 1rem; margin-top: 0.4rem;">
-                                    <label style="font-weight: normal; display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
-                                        <input type="radio" name="mfa_default_provider" value="totp" {{if eq .Settings.MFADefaultProvider "totp"}}checked{{end}}>
-                                        <span>📱 Authenticator App (TOTP)</span>
-                                    </label>
-                                    <label style="font-weight: normal; display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
-                                        <input type="radio" name="mfa_default_provider" value="email" {{if eq .Settings.MFADefaultProvider "email"}}checked{{end}}>
-                                        <span>📧 Email OTP</span>
-                                    </label>
-                                </div>
-                                <p class="help-text">Which MFA challenge tab is presented first to users upon sign-in.</p>
-                            </div>
-
-                            <div class="form-group">
-                                <label for="mfa_issuer">Authenticator App Issuer Display Name</label>
-                                <input type="text" id="mfa_issuer" name="mfa_issuer" value="{{.Settings.MFAIssuer}}" placeholder="e.g. SAMLGuard or EcoStruxure ITA" required>
-                                <p class="help-text">The title displayed above the OTP code in Google Authenticator or Microsoft Authenticator.</p>
-                            </div>
-
-                            <div class="grid-2">
-                                <div class="form-group">
-                                    <label for="otp_expiry">Email OTP Validity Duration</label>
-                                    <input type="text" id="otp_expiry" name="otp_expiry" value="{{.Settings.OTPExpiry}}" placeholder="5m" required>
-                                    <p class="help-text">Expiry lifetime for generated email OTPs (e.g. 5m, 10m).</p>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="resend_cooldown">OTP Resend Cooldown</label>
-                                    <input type="text" id="resend_cooldown" name="resend_cooldown" value="{{.Settings.ResendCooldown}}" placeholder="60s" required>
-                                    <p class="help-text">Enforced waiting period between OTP resend requests.</p>
-                                </div>
-                            </div>
-
-                            <div class="form-group" style="margin-top: 1.5rem; padding: 1rem; background: var(--bg-card-subtle); border-radius: 8px; border: 1px solid var(--border-card);">
-                                <label class="toggle-label">
-                                    <input type="checkbox" id="allow_dummy_otp" name="allow_dummy_otp" value="true" {{if .Settings.AllowDummyOTP}}checked{{end}}>
-                                    <span class="toggle-switch"></span>
-                                    <div>
-                                        <span style="font-weight: 600; color: var(--text-primary);">Allow Dummy OTP (000000)</span>
-                                        <p class="help-text" style="margin-top: 0;">Bypasses real code verification using code 000000. <strong>FOR LOCAL TESTING ONLY.</strong></p>
-                                    </div>
-                                </label>
-                            </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>🪪 Active Identity &amp; OTP Providers Summary</h2>
+                            <button type="button" class="btn btn-sm btn-secondary" onclick="const btn = document.getElementById('nav-tab-upstream'); if (btn) btn.click();">Manage IdP &amp; OTP Providers →</button>
                         </div>
-
-                        <!-- SMTP Email Server Column -->
-                        <div class="card">
-                            <div class="card-header">
-                                <h2>📧 SMTP Mail Server (Email OTP)</h2>
-                            </div>
-
-                            <div class="grid-2">
-                                <div class="form-group">
-                                    <label for="smtp_host">SMTP Server Host</label>
-                                    <input type="text" id="smtp_host" name="smtp_host" value="{{.Settings.SMTPHost}}" placeholder="smtp.office365.com or localhost" required>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="smtp_port">SMTP Port</label>
-                                    <input type="number" id="smtp_port" name="smtp_port" value="{{.Settings.SMTPPort}}" placeholder="587" required>
-                                </div>
-                            </div>
-
-                            <div class="grid-2">
-                                <div class="form-group">
-                                    <label for="smtp_username">SMTP Username / Email</label>
-                                    <input type="text" id="smtp_username" name="smtp_username" value="{{.Settings.SMTPUsername}}" placeholder="user@domain.com">
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="smtp_password">SMTP Password</label>
-                                    <div class="input-group">
-                                        <input type="password" id="smtp_password" name="smtp_password" placeholder="•••••••• (Leave blank to keep current)">
-                                        <button type="button" class="btn btn-secondary" onclick="togglePasswordVisibility('smtp_password')">👁️</button>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="grid-2">
-                                <div class="form-group">
-                                    <label for="smtp_from">From Email Address</label>
-                                    <input type="text" id="smtp_from" name="smtp_from" value="{{.Settings.SMTPFrom}}" placeholder="no-reply@company.com">
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="smtp_from_name">From Sender Name</label>
-                                    <input type="text" id="smtp_from_name" name="smtp_from_name" value="{{.Settings.SMTPFromName}}" placeholder="SAMLGuard MFA">
-                                </div>
-                            </div>
-
-                            <div class="form-group">
-                                <label for="smtp_encryption">Encryption Mode</label>
-                                <select id="smtp_encryption" name="smtp_encryption">
-                                    <option value="starttls" {{if eq .Settings.SMTPEncryption "starttls"}}selected{{end}}>STARTTLS (Port 587 - Recommended)</option>
-                                    <option value="tls" {{if eq .Settings.SMTPEncryption "tls"}}selected{{end}}>TLS / SSL (Port 465)</option>
-                                    <option value="none" {{if eq .Settings.SMTPEncryption "none"}}selected{{end}}>None / Plaintext (Port 25 or Local Relay)</option>
-                                </select>
-                            </div>
-
-                            <!-- Live Send Test Email Box -->
-                            <div class="guide-box" style="margin-top: 1rem;">
-                                <h3>📨 Live SMTP Test</h3>
-                                <div class="input-group">
-                                    <input type="text" id="testEmailRecipient" placeholder="Enter recipient email (e.g. your email)" style="flex: 1;">
-                                    <button type="button" class="btn btn-secondary" id="btnTestEmail" onclick="sendTestEmail()" style="border-color: var(--brand-green); color: var(--brand-green);">
-                                        <span id="testEmailSpinner" class="spinner" style="display: none;"></span>
-                                        <span>Send Test Email</span>
-                                    </button>
-                                </div>
-                                <div id="testEmailResult" style="margin-top: 0.75rem; display: none;"></div>
-                            </div>
+                        <p class="help-text" style="margin-bottom: 0.75rem;">
+                            Upstream SAML IdP selection, multi-OTP activation (Authenticator App &amp; Email OTP), and SMTP delivery settings are managed together in the <strong>Identity Providers</strong> tab.
+                        </p>
+                        <div style="display: flex; flex-wrap: wrap; gap: 0.6rem;">
+                            <span class="badge badge-info">Upstream IdP: <strong style="text-transform: uppercase;">{{.ActiveIdP}}</strong></span>
+                            {{if .TotpEnabled}}<span class="badge badge-success">📱 Authenticator App (TOTP): Active</span>{{end}}
+                            {{if .EmailEnabled}}<span class="badge badge-success">📧 Email OTP: Active</span>{{end}}
+                            <span class="badge badge-info">Default OTP: <strong style="text-transform: uppercase;">{{.Settings.MFADefaultProvider}}</strong></span>
                         </div>
                     </div>
 
@@ -1989,7 +2212,201 @@
         // Live filter placeholder
     }
 
-    // Maintain active tab from hash
+    const idpProfiles = {{.IdPProfilesJSON}} || {};
+    const idpDisplayNames = {
+        simulator: 'Local Simulator',
+        entra: 'Microsoft Entra ID',
+        keycloak: 'Keycloak',
+        custom: 'Custom SAML 2.0 IdP'
+    };
+
+    function snapshotActiveIdPProfile() {
+        const activeInput = document.getElementById('active_idp');
+        if (!activeInput) return;
+        const currentKey = activeInput.value || 'custom';
+        idpProfiles[currentKey] = {
+            entity_id: (document.getElementById('idp_entity_id') || {}).value || '',
+            sso_url: (document.getElementById('idp_sso_url') || {}).value || '',
+            metadata_url: (document.getElementById('idp_metadata_url') || {}).value || '',
+            cert_file: (document.getElementById('idp_cert_file') || {}).value || ''
+        };
+        const hiddenProfiles = document.getElementById('idp_profiles_json');
+        if (hiddenProfiles) {
+            hiddenProfiles.value = JSON.stringify(idpProfiles);
+        }
+    }
+
+    function syncUpstreamIdPState() {
+        const activeInput = document.getElementById('active_idp');
+        const editingKey = (activeInput && activeInput.value) || 'simulator';
+        const editingLabel = document.getElementById('editingIdPName');
+        if (editingLabel) {
+            editingLabel.textContent = idpDisplayNames[editingKey] || editingKey;
+        }
+
+        let activeCount = 0;
+        ['simulator', 'entra', 'keycloak', 'custom'].forEach(key => {
+            const cb = document.getElementById(`idp_enable_${key}`);
+            const isEnabled = cb ? cb.checked : false;
+            if (isEnabled) activeCount++;
+
+            const card = document.querySelector(`[data-idp-choice="${key}"]`);
+            if (card) {
+                card.classList.toggle('active', isEnabled);
+                card.classList.toggle('editing', key === editingKey);
+            }
+            const badge = document.querySelector(`[data-idp-badge="${key}"]`);
+            if (badge) {
+                badge.textContent = isEnabled ? 'Active' : 'Standby';
+                badge.className = `badge ${isEnabled ? 'badge-success' : 'badge-info'}`;
+            }
+            const footerLabel = document.querySelector(`[data-idp-editing-label="${key}"]`);
+            if (footerLabel) {
+                footerLabel.textContent = key === editingKey ? 'Editing profile' : 'Click to edit';
+            }
+        });
+
+        const summary = document.getElementById('idpSummaryBadge');
+        if (summary) {
+            if (activeCount > 1) {
+                summary.textContent = `${activeCount} Active (Login Chooser Enabled)`;
+                summary.className = 'badge badge-success';
+            } else {
+                summary.textContent = '1 Active (Direct Sign-In)';
+                summary.className = 'badge badge-info';
+            }
+        }
+    }
+
+    function onIdPToggleChange(changedEl) {
+        const boxes = ['simulator', 'entra', 'keycloak', 'custom']
+            .map(k => document.getElementById(`idp_enable_${k}`))
+            .filter(Boolean);
+        if (!boxes.some(b => b.checked)) {
+            changedEl.checked = true;
+            alert('At least one Upstream Identity Provider must remain active.');
+            return;
+        }
+        if (changedEl.checked) {
+            selectUpstreamIdP(changedEl.value);
+        } else {
+            syncUpstreamIdPState();
+        }
+    }
+
+    function selectUpstreamIdP(idpKey) {
+        snapshotActiveIdPProfile();
+
+        const activeInput = document.getElementById('active_idp');
+        if (activeInput) activeInput.value = idpKey;
+
+        const existing = idpProfiles[idpKey];
+        if (existing && (existing.entity_id || existing.sso_url || existing.metadata_url || existing.cert_file)) {
+            document.getElementById('idp_entity_id').value = existing.entity_id || '';
+            document.getElementById('idp_sso_url').value = existing.sso_url || '';
+            document.getElementById('idp_metadata_url').value = existing.metadata_url || '';
+            document.getElementById('idp_cert_file').value = existing.cert_file || '';
+        } else if (idpKey === 'simulator') {
+            document.getElementById('idp_entity_id').value = '{{.Settings.EntityID}}';
+            document.getElementById('idp_sso_url').value = '{{.Settings.EntityID}}/mock-idp-login';
+            document.getElementById('idp_metadata_url').value = '';
+            document.getElementById('idp_cert_file').value = './cert/saml-signing.crt';
+        } else {
+            document.getElementById('idp_entity_id').value = '';
+            document.getElementById('idp_sso_url').value = '';
+            document.getElementById('idp_metadata_url').value = '';
+            document.getElementById('idp_cert_file').value = '';
+        }
+
+        snapshotActiveIdPProfile();
+        syncUpstreamIdPState();
+    }
+
+    function onOTPToggleChange(changedEl) {
+        const totpBox = document.getElementById('otp_enable_totp');
+        const emailBox = document.getElementById('otp_enable_email');
+        if (totpBox && emailBox && !totpBox.checked && !emailBox.checked) {
+            changedEl.checked = true;
+            alert('At least one OTP verification method must remain active.');
+            return;
+        }
+        syncOTPProviderState();
+    }
+
+    function syncOTPProviderState() {
+        const totpBox = document.getElementById('otp_enable_totp');
+        const emailBox = document.getElementById('otp_enable_email');
+        if (!totpBox || !emailBox) return;
+
+        const totpEnabled = totpBox.checked;
+        const emailEnabled = emailBox.checked;
+
+        const totpCard = document.getElementById('card-otp-totp');
+        const emailCard = document.getElementById('card-otp-email');
+        if (totpCard) {
+            totpCard.classList.toggle('active', totpEnabled);
+            totpCard.classList.toggle('inactive', !totpEnabled);
+        }
+        if (emailCard) {
+            emailCard.classList.toggle('active', emailEnabled);
+            emailCard.classList.toggle('inactive', !emailEnabled);
+        }
+
+        const totpBadge = document.getElementById('badge-otp-totp');
+        const emailBadge = document.getElementById('badge-otp-email');
+        if (totpBadge) {
+            totpBadge.textContent = totpEnabled ? 'Active' : 'Disabled';
+            totpBadge.className = `badge ${totpEnabled ? 'badge-success' : 'badge-warning'}`;
+        }
+        if (emailBadge) {
+            emailBadge.textContent = emailEnabled ? 'Active' : 'Disabled';
+            emailBadge.className = `badge ${emailEnabled ? 'badge-success' : 'badge-warning'}`;
+        }
+
+        const totpBody = document.getElementById('totp-settings-body');
+        const emailBody = document.getElementById('email-otp-settings-body');
+        if (totpBody) totpBody.style.display = totpEnabled ? '' : 'none';
+        if (emailBody) emailBody.style.display = emailEnabled ? '' : 'none';
+
+        const defaultSelect = document.getElementById('default_provider_select');
+        const defaultTotp = document.getElementById('default_provider_totp');
+        const defaultEmail = document.getElementById('default_provider_email');
+        if (defaultSelect) defaultSelect.disabled = !(totpEnabled && emailEnabled);
+        if (defaultTotp) defaultTotp.disabled = !totpEnabled;
+        if (defaultEmail) defaultEmail.disabled = !emailEnabled;
+        if (defaultSelect && defaultSelect.checked && !(totpEnabled && emailEnabled)) {
+            if (totpEnabled && defaultTotp) defaultTotp.checked = true;
+            else if (emailEnabled && defaultEmail) defaultEmail.checked = true;
+        } else if (defaultTotp && defaultTotp.checked && !totpEnabled && emailEnabled && defaultEmail) {
+            defaultEmail.checked = true;
+        } else if (defaultEmail && defaultEmail.checked && !emailEnabled && totpEnabled && defaultTotp) {
+            defaultTotp.checked = true;
+        }
+
+        const mfaIssuer = document.getElementById('mfa_issuer');
+        if (mfaIssuer) mfaIssuer.required = totpEnabled;
+
+        ['otp_expiry', 'resend_cooldown', 'smtp_host', 'smtp_port'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.required = emailEnabled;
+        });
+
+        const summaryBadge = document.getElementById('otpSummaryBadge');
+        if (summaryBadge) {
+            if (totpEnabled && emailEnabled) {
+                summaryBadge.textContent = '2 Active (TOTP + Email OTP)';
+                summaryBadge.className = 'badge badge-success';
+            } else if (emailEnabled) {
+                summaryBadge.textContent = '1 Active (Email OTP Only)';
+                summaryBadge.className = 'badge badge-info';
+            } else {
+                summaryBadge.textContent = '1 Active (Authenticator Only)';
+                summaryBadge.className = 'badge badge-info';
+            }
+        }
+    }
+
+    // Maintain active tab from hash and initialize IdP/OTP UI state
     window.addEventListener('DOMContentLoaded', () => {
         if (localStorage.getItem('samlguard_sidebar_collapsed') === '1') {
             document.getElementById('appSidebar').classList.add('collapsed');
@@ -2000,6 +2417,20 @@
             const cleanId = hash.replace('#', '');
             const targetBtn = document.querySelector(`[onclick*="${cleanId}"]`);
             if (targetBtn) targetBtn.click();
+        }
+
+        snapshotActiveIdPProfile();
+        syncUpstreamIdPState();
+        syncOTPProviderState();
+
+        ['idp_entity_id', 'idp_sso_url', 'idp_metadata_url', 'idp_cert_file'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('input', snapshotActiveIdPProfile);
+        });
+
+        const settingsForm = document.getElementById('settingsForm');
+        if (settingsForm) {
+            settingsForm.addEventListener('submit', snapshotActiveIdPProfile);
         }
     });
 
@@ -2022,6 +2453,7 @@
     function copyText(elementId) { copyToClipboard(elementId); }
 
     function applyPreset(preset) {
+        selectUpstreamIdP(preset);
         const entityInput = document.getElementById('idp_entity_id');
         const ssoInput = document.getElementById('idp_sso_url');
         const metaInput = document.getElementById('idp_metadata_url');
@@ -2043,6 +2475,7 @@
             ssoInput.value = `${host}/protocol/saml`;
             metaInput.value = `${host}/protocol/saml/descriptor`;
         }
+        snapshotActiveIdPProfile();
     }
 
     function addGroupMappingRow(key, val) {
