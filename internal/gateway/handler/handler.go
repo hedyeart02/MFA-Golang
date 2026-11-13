@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"bytes"
+	"compress/flate"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -549,9 +551,71 @@ func (h *SAMLHandler) HandleSSO(c *gin.Context) {
 		return
 	}
 
-	// For standard upstream IdP: redirect with preserved RelayState (bound to sessionID)
-	redirectURL := fmt.Sprintf("%s?SAMLRequest=%s&RelayState=%s", ssoURL, outboundID, sessionID)
+	// For standard upstream IdP: redirect with properly encoded SAML AuthnRequest and preserved RelayState (bound to sessionID)
+	authnReqXML := h.buildOutboundAuthnRequest(outboundID, ssoURL)
+	encodedReq, err := deflateAndEncode(authnReqXML)
+	if err != nil {
+		h.logger.Error("failed to deflate and encode outbound SAMLRequest", zap.Error(err))
+		response.Error(c, http.StatusInternalServerError, errors.New("failed to construct upstream SAML request"))
+		return
+	}
+
+	params := url.Values{}
+	params.Set("SAMLRequest", encodedReq)
+	if sessionID != "" {
+		params.Set("RelayState", sessionID)
+	}
+
+	separator := "?"
+	if strings.Contains(ssoURL, "?") {
+		separator = "&"
+	}
+	redirectURL := fmt.Sprintf("%s%s%s", ssoURL, separator, params.Encode())
 	c.Redirect(http.StatusFound, redirectURL)
+}
+
+// deflateAndEncode compresses XML using DEFLATE (RFC 1951) and base64-encodes for SAML HTTP-Redirect binding.
+func deflateAndEncode(xmlContent string) (string, error) {
+	var buf bytes.Buffer
+	writer, err := flate.NewWriter(&buf, flate.DefaultCompression)
+	if err != nil {
+		return "", fmt.Errorf("creating flate writer: %w", err)
+	}
+	if _, err := writer.Write([]byte(xmlContent)); err != nil {
+		_ = writer.Close()
+		return "", fmt.Errorf("compressing XML: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return "", fmt.Errorf("closing flate writer: %w", err)
+	}
+	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
+}
+
+// buildOutboundAuthnRequest creates a SAML 2.0 AuthnRequest XML document for redirecting to upstream IdP.
+func (h *SAMLHandler) buildOutboundAuthnRequest(requestID, destination string) string {
+	now := time.Now().UTC().Format(time.RFC3339)
+	acsURL := h.getACSLocation()
+	issuer := strings.TrimSpace(h.cfg.SAML.EntityID)
+	if issuer == "" {
+		issuer = acsURL
+	}
+
+	return fmt.Sprintf(
+		`<samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" `+
+			`xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" `+
+			`ID="%s" Version="2.0" IssueInstant="%s" `+
+			`Destination="%s" `+
+			`AssertionConsumerServiceURL="%s" `+
+			`ProtocolBinding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST">`+
+			`<saml:Issuer>%s</saml:Issuer>`+
+			`<samlp:NameIDPolicy Format="urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified" AllowCreate="true"/>`+
+			`</samlp:AuthnRequest>`,
+		html.EscapeString(requestID),
+		now,
+		html.EscapeString(destination),
+		html.EscapeString(acsURL),
+		html.EscapeString(issuer),
+	)
 }
 
 // validateUpstreamSAMLResponse decodes and verifies the upstream SAML 2.0 Response XMLDSig and assertions

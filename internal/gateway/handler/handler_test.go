@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"bytes"
+	"compress/flate"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -124,6 +126,80 @@ func TestHandler_HandleSSO_Success(t *testing.T) {
 	}
 	if strings.Contains(body, "🛡️") {
 		t.Errorf("expected corporate login HTML to use SVG shield instead of emoji")
+	}
+}
+
+func TestHandler_HandleSSO_UpstreamEntraRedirect(t *testing.T) {
+	p := &mockPipeline{}
+	h, cfg := setupTestHandler(t, p)
+	cfg.SAML.ActiveIdP = "entra"
+	cfg.SAML.EnabledIdPs = []string{"entra"}
+	cfg.SAML.IdPProfiles = map[string]config.UpstreamIdPProfile{
+		"entra": {
+			EntityID: "https://sts.windows.net/tenant-123/",
+			SSOURL:   "https://login.microsoftonline.com/tenant-123/saml2",
+		},
+	}
+
+	r := gin.New()
+	r.GET("/saml/sso", h.HandleSSO)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/saml/sso?request_id=ita-123&RelayState=state-abc", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Fatalf("expected status 302 Found redirect, got %d", w.Code)
+	}
+
+	loc := w.Header().Get("Location")
+	if loc == "" {
+		t.Fatal("expected Location header in redirect, got empty")
+	}
+
+	parsedURL, err := url.Parse(loc)
+	if err != nil {
+		t.Fatalf("failed to parse redirect URL: %v", err)
+	}
+
+	if !strings.HasPrefix(parsedURL.String(), "https://login.microsoftonline.com/tenant-123/saml2") {
+		t.Fatalf("unexpected redirect target: %s", loc)
+	}
+
+	q := parsedURL.Query()
+	samlReqB64 := q.Get("SAMLRequest")
+	if samlReqB64 == "" {
+		t.Fatal("missing SAMLRequest query parameter")
+	}
+	relayState := q.Get("RelayState")
+	if relayState == "" {
+		t.Fatal("missing RelayState query parameter")
+	}
+
+	// Decompress and validate the SAMLRequest XML
+	rawDeflated, err := base64.StdEncoding.DecodeString(samlReqB64)
+	if err != nil {
+		t.Fatalf("failed to base64-decode SAMLRequest: %v", err)
+	}
+
+	flateReader := flate.NewReader(bytes.NewReader(rawDeflated))
+	inflatedXML, err := io.ReadAll(flateReader)
+	_ = flateReader.Close()
+	if err != nil {
+		t.Fatalf("failed to inflate SAMLRequest: %v", err)
+	}
+
+	xmlStr := string(inflatedXML)
+	for _, expected := range []string{
+		"<samlp:AuthnRequest",
+		`Destination="https://login.microsoftonline.com/tenant-123/saml2"`,
+		`AssertionConsumerServiceURL="https://samlguard.example.com:8443/saml/acs"`,
+		`<saml:Issuer>https://samlguard.example.com:8443</saml:Issuer>`,
+		`<samlp:NameIDPolicy`,
+	} {
+		if !strings.Contains(xmlStr, expected) {
+			t.Errorf("expected SAMLRequest XML to contain %q, got:\n%s", expected, xmlStr)
+		}
 	}
 }
 
