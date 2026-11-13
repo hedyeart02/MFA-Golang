@@ -128,6 +128,25 @@ Documentation: https://github.com/hedyeart02/MFA-Golang
 # Clean staging directory
 Remove-Item -Recurse -Force "$DistDir\staging"
 
+# Reset cross-compilation environment variables back to host defaults
+Remove-Item env:GOOS -ErrorAction SilentlyContinue
+Remove-Item env:GOARCH -ErrorAction SilentlyContinue
+
+# Build Webmin module package (.wbm.gz)
+$wbmPath = "$DistDir\samlguard-webmin.wbm.gz"
+Write-Host "`n==> Building Webmin module package: $wbmPath" -ForegroundColor Cyan
+go run "$ProjectRoot\scripts\webmin\build-wbm.go" -src "$ProjectRoot\scripts\webmin\modules" -out $wbmPath
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Failed building Webmin module package"
+    exit $LASTEXITCODE
+}
+if (Test-Path $wbmPath) {
+    $wbmHash = (Get-FileHash -Algorithm SHA256 -Path $wbmPath).Hash.ToLower()
+    $wbmFilename = Split-Path -Leaf $wbmPath
+    $ChecksumEntries += "$wbmHash  $wbmFilename"
+    Write-Host "    SHA256: $wbmHash"
+}
+
 # Write Checksums
 $checksumPath = "$DistDir\checksums.txt"
 $ChecksumEntries | Out-File -FilePath $checksumPath -Encoding utf8
