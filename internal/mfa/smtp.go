@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"html"
 	"net"
 	"net/smtp"
 	"strings"
@@ -63,6 +64,56 @@ func (s *SMTPSender) Send(ctx context.Context, recipient, code string) error {
 		)
 	}
 
+	appName := s.fromName
+	if appName == "" {
+		appName = "Schneider IT Advisor"
+	}
+
+	// High-priority subject: placing code in brackets makes it immediately visible in mobile notification previews (Outlook/iOS/Android)
+	subject := fmt.Sprintf("[%s] %s Sign-In Code", code, appName)
+
+	plainBody := fmt.Sprintf(
+		"Your one-time sign-in verification code for %s is:\r\n\r\n"+
+			"    %s\r\n\r\n"+
+			"Enter this 6-digit code on your computer screen to complete your sign-in.\r\n\r\n"+
+			"This code will expire in 5 minutes.\r\n"+
+			"If you did not request this sign-in attempt, please contact your IT administrator immediately.",
+		appName, code,
+	)
+
+	htmlBody := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>%s Verification Code</title>
+</head>
+<body style="margin: 0; padding: 24px 12px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; color: #1e293b;">
+<div style="max-width: 520px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+  <div style="background: #0f172a; padding: 20px 24px; text-align: left; border-bottom: 3px solid #00B050;">
+    <h2 style="margin: 0; color: #ffffff; font-size: 18px; font-weight: 600; letter-spacing: -0.3px;">%s</h2>
+    <p style="margin: 4px 0 0 0; color: #94a3b8; font-size: 13px;">Identity Verification Alert</p>
+  </div>
+  <div style="padding: 28px 24px; text-align: center;">
+    <p style="margin: 0 0 16px 0; font-size: 15px; color: #475569; line-height: 1.5;">Enter this verification code on your computer screen to complete your sign-in:</p>
+    <div style="display: inline-block; background: #f0fdf4; border: 2px dashed #00B050; border-radius: 8px; padding: 14px 28px; margin: 8px 0 20px 0;">
+      <span style="font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 34px; font-weight: 800; letter-spacing: 8px; color: #00B050;">%s</span>
+    </div>
+    <div style="background: #f8fafc; border-radius: 8px; padding: 12px 16px; margin-top: 10px; font-size: 13px; color: #64748b; line-height: 1.6; text-align: left; border: 1px solid #f1f5f9;">
+      <div>⏱️ <strong>Valid for:</strong> 5 minutes</div>
+      <div>🔒 <strong>Account:</strong> %s</div>
+    </div>
+    <p style="margin: 24px 0 0 0; font-size: 12px; color: #94a3b8; line-height: 1.5;">If you did not initiate this sign-in attempt, someone may be attempting to access your account. Please notify your IT administrator immediately.</p>
+  </div>
+</div>
+</body>
+</html>`,
+		html.EscapeString(appName),
+		html.EscapeString(appName),
+		code,
+		html.EscapeString(recipient),
+	)
+
 	// If host is empty or dummy localhost, log and return in test/dev
 	if s.host == "" || s.host == "localhost" || s.host == "127.0.0.1" {
 		if s.logger != nil {
@@ -71,13 +122,11 @@ func (s *SMTPSender) Send(ctx context.Context, recipient, code string) error {
 				zap.String("code", code),
 			)
 		}
-		fmt.Printf("\n📧 [SIMULATED EMAIL OTP] To: %s | Verification Code: %s (Expires in 5m)\n\n", recipient, code)
+		fmt.Printf("\n📧 [SIMULATED EMAIL OTP] To: %s | Subject: %s | Verification Code: %s (Expires in 5m)\n\n", recipient, subject, code)
 		return nil
 	}
 
-	subject := "Your SAMLGuard Verification Code"
-	body := fmt.Sprintf("Your one-time verification code is:\r\n\r\n%s\r\n\r\nThis code will expire in 5 minutes. If you did not request this code, please ignore this email.", code)
-	return s.sendMail(ctx, recipient, subject, body)
+	return s.sendMultipartMail(ctx, recipient, subject, plainBody, htmlBody)
 }
 
 // SendTestEmail sends an explicit test email to verify SMTP connectivity, credentials, and delivery.
@@ -113,6 +162,50 @@ func validateSMTPHeaderValue(field, val string) error {
 	return nil
 }
 
+func (s *SMTPSender) sendMultipartMail(ctx context.Context, recipient, subject, plainBody, htmlBody string) error {
+	for field, val := range map[string]string{
+		"from_name": s.fromName,
+		"from":      s.from,
+		"to":        recipient,
+		"subject":   subject,
+	} {
+		if err := validateSMTPHeaderValue(field, val); err != nil {
+			return err
+		}
+	}
+
+	boundary := fmt.Sprintf("----=_SAMLGuard_%d", time.Now().UnixNano())
+
+	msg := fmt.Sprintf("From: %s <%s>\r\n"+
+		"To: %s\r\n"+
+		"Subject: %s\r\n"+
+		"MIME-Version: 1.0\r\n"+
+		"Content-Type: multipart/alternative; boundary=\"%s\"\r\n"+
+		"Date: %s\r\n"+
+		"X-Priority: 1 (Highest)\r\n"+
+		"Priority: Urgent\r\n"+
+		"Importance: High\r\n"+
+		"\r\n"+
+		"--%s\r\n"+
+		"Content-Type: text/plain; charset=UTF-8\r\n"+
+		"Content-Transfer-Encoding: 8bit\r\n"+
+		"\r\n"+
+		"%s\r\n\r\n"+
+		"--%s\r\n"+
+		"Content-Type: text/html; charset=UTF-8\r\n"+
+		"Content-Transfer-Encoding: 8bit\r\n"+
+		"\r\n"+
+		"%s\r\n\r\n"+
+		"--%s--\r\n",
+		s.fromName, s.from, recipient, subject, boundary, time.Now().Format(time.RFC1123Z),
+		boundary, plainBody,
+		boundary, htmlBody,
+		boundary,
+	)
+
+	return s.deliverMessage(ctx, recipient, msg)
+}
+
 func (s *SMTPSender) sendMail(ctx context.Context, recipient, subject, body string) error {
 	for field, val := range map[string]string{
 		"from_name": s.fromName,
@@ -131,10 +224,17 @@ func (s *SMTPSender) sendMail(ctx context.Context, recipient, subject, body stri
 		"MIME-Version: 1.0\r\n"+
 		"Content-Type: text/plain; charset=UTF-8\r\n"+
 		"Date: %s\r\n"+
+		"X-Priority: 1 (Highest)\r\n"+
+		"Priority: Urgent\r\n"+
+		"Importance: High\r\n"+
 		"\r\n"+
 		"%s\r\n",
 		s.fromName, s.from, recipient, subject, time.Now().Format(time.RFC1123Z), body)
 
+	return s.deliverMessage(ctx, recipient, msg)
+}
+
+func (s *SMTPSender) deliverMessage(ctx context.Context, recipient, msg string) error {
 	addr := fmt.Sprintf("%s:%d", s.host, s.port)
 
 	var auth smtp.Auth
